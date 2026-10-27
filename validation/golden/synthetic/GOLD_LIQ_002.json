@@ -1,0 +1,28 @@
+{
+  "id": "GOLD_LIQ_002",
+  "description": "SSL from a swing low at 21098.00. The next bar opens below it (gap) and closes below: TAKEN 'opened beyond' + BREAK (DEF-L4 gap case).",
+  "source": "synthetic",
+  "symbol": "NQ1!",
+  "timeframe_sec": 60,
+  "timezone": "America/New_York",
+  "tick_size": 0.25,
+  "start": "2026-10-27T09:30",
+  "warmup": {"bars": 20, "ohlc": [21100.00, 21101.00, 21099.00, 21100.00]},
+  "settings": {"modules": ["liq"], "liq": {"left": 2, "right": 1, "k": 0.0}},
+  "candles": [
+    [21100.00, 21100.50, 21098.00, 21099.00],
+    [21099.00, 21101.00, 21098.50, 21100.50],
+    [21097.50, 21098.00, 21096.50, 21097.00]
+  ],
+  "expected": {
+    "events": [
+      {"bar": 21, "type": "SSL_CREATED", "dir": -1, "price": 21098.0, "sid_bar": 20},
+      {"bar": 22, "type": "SSL_TAKEN", "dir": -1, "price": 21098.0, "sid_bar": 20},
+      {"bar": 22, "type": "SSL_BREAK", "dir": -1, "price": 21098.0, "sid_bar": 20}
+    ],
+    "events_match": "exact",
+    "event_types": ["SSL_CREATED", "SSL_TAKEN", "SSL_SWEEP", "SSL_BREAK"],
+    "final_states": [{"kind": "liq", "match": {"side": "SSL", "origin_bar": 20},
+                      "expect": {"status": "TAKEN", "cls": "BREAK", "gap": true, "take_ext": 21096.5}}]
+  }
+}

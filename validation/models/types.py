@@ -1,0 +1,182 @@
+"""Candles and settings shared by every reference model.
+
+Settings mirror the Pine inputs that change calculation ([calc]). View inputs are
+collected in ViewSettings, which the logic never reads (ARCHITECTURE §2): tests
+use it to prove that visibility cannot change logical state.
+"""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field, fields, replace
+
+NQ_TICK = 0.25
+
+# Pine `LiqPreset` → (left, right, k), LIQUIDITY.md DEF-L3.
+PRESETS = {
+    "aggressive": (3, 2, 0.5),
+    "balanced": (5, 3, 1.0),
+    "strict": (10, 5, 2.0),
+}
+
+# Pine `MitRule` values (DEF-A5): which milestone counts as "mitigated" for display.
+MIT_RULES = ("firstTouch", "midpoint", "fullFill", "closeThrough")
+
+
+@dataclass(frozen=True)
+class Candle:
+    """One closed bar. `time` is the bar's open time in ms since the epoch (Pine `time`)."""
+    time: int
+    open: float
+    high: float
+    low: float
+    close: float
+
+    def problems(self) -> list[str]:
+        out = []
+        if self.high < max(self.open, self.close):
+            out.append("high < max(open, close)")
+        if self.low > min(self.open, self.close):
+            out.append("low > min(open, close)")
+        if self.high < self.low:
+            out.append("high < low")
+        return out
+
+
+def validate_candles(candles: list[Candle], tick: float | None = None) -> None:
+    """Raise ValueError naming the first malformed candle (OHLC rules, time order, tick grid)."""
+    prev_t = None
+    for i, c in enumerate(candles):
+        bad = c.problems()
+        if prev_t is not None and c.time <= prev_t:
+            bad.append("time does not increase")
+        if tick:
+            for name in ("open", "high", "low", "close"):
+                v = getattr(c, name) / tick
+                if abs(v - round(v)) > 1e-6:
+                    bad.append(f"{name} {getattr(c, name)} is off the {tick} tick grid")
+        if bad:
+            raise ValueError(f"candle {i} {c}: " + "; ".join(bad))
+        prev_t = c.time
+
+
+@dataclass(frozen=True)
+class FvgSettings:
+    """DEF-A2 / ARCHITECTURE §6 qualification and §3.3 memory ([calc])."""
+    min_ticks: int = 2          # fvgMinTicks
+    k_tra: float = 0.10         # fvgMinTra  (× TR average; 0 = off)
+    k_rng: float = 0.0          # fvgMinRng  (× average range; 0 = off)
+    length: int = 14            # fvgLen
+    memory: int = 50            # fvgMemory, records per direction
+
+
+@dataclass(frozen=True)
+class LiqSettings:
+    """LIQUIDITY.md DEF-L1…L6 ([calc]). Defaults = Balanced preset."""
+    left: int = 5
+    right: int = 3
+    k: float = 1.0
+    tol_ticks: int = 4          # eqTolTk
+    min_touch: int = 2          # eqMinTch
+    memory: int = 100           # liqMemory, records per side
+    eq_memory: int = 25         # Pine constant EQ_MEM; variable here only to exercise the drop path
+    tra_len: int = 14           # Pine constant LIQ_TRA_LEN
+
+    @classmethod
+    def preset(cls, name: str, **kw) -> "LiqSettings":
+        left, right, k = PRESETS[name]
+        return cls(left=left, right=right, k=k, **kw)
+
+
+@dataclass(frozen=True)
+class SessionSettings:
+    """DEF-F1…F6. Windows are `HHMM-HHMM` in `timezone`, every weekday."""
+    timezone: str = "America/New_York"
+    windows: tuple = (("Asia", "2000-0000"), ("London", "0200-0500"),
+                      ("NY AM", "0930-1200"), ("NY PM", "1330-1600"))
+    timeframe_sec: int = 60     # sessions run only on intraday charts up to 1H
+
+
+@dataclass(frozen=True)
+class LevelSettings:
+    """DEF-G1…G6 chart-side logic.
+
+    ASSUMPTION (ARCHITECTURE §7.2, unverified until G-V1…G-V5): the TradingView
+    Daily bar for NQ starts at `day_start_hour` in `timezone` (18:00 ET) and the week
+    on Sunday at that hour. The real PDH/PDL come from request.security, which this
+    model cannot reproduce: see IstModel(htf=...).
+    """
+    timezone: str = "America/New_York"
+    day_start_hour: int = 18
+    timeframe_sec: int = 60
+
+
+@dataclass(frozen=True)
+class ViewSettings:
+    """[view] inputs. The logic never reads these; tests vary them to prove it."""
+    fvg_show: bool = True
+    mit_rule: str = "fullFill"
+    fvg_max_visible: int = 8
+    minimal: bool = False
+    liq_max_visible: int = 5
+    eq_max_visible: int = 3
+    liq_max_taken: int = 2
+    show_sweeps: bool = True
+    show_breaks: bool = False
+
+
+MODULES = ("levels", "sessions", "fvg", "liq")
+
+
+@dataclass(frozen=True)
+class Settings:
+    tick: float = NQ_TICK
+    fvg: FvgSettings = field(default_factory=FvgSettings)
+    liq: LiqSettings = field(default_factory=LiqSettings)
+    sessions: SessionSettings = field(default_factory=SessionSettings)
+    levels: LevelSettings = field(default_factory=LevelSettings)
+    view: ViewSettings = field(default_factory=ViewSettings)
+    modules: tuple = MODULES
+
+    @property
+    def eps(self) -> float:          # Pine EPS: float tolerance for tick comparisons
+        return self.tick * 0.01
+
+    @property
+    def half_tick(self) -> float:    # Pine HALF_TICK
+        return self.tick * 0.5
+
+    def with_(self, **kw) -> "Settings":
+        return replace(self, **kw)
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d["modules"] = list(self.modules)
+        d["sessions"]["windows"] = [list(w) for w in self.sessions.windows]
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "Settings":
+        d = dict(d or {})
+        sub = {"fvg": FvgSettings, "liq": LiqSettings, "sessions": SessionSettings,
+               "levels": LevelSettings, "view": ViewSettings}
+        kw = {}
+        for name, typ in sub.items():
+            if name in d:
+                part = dict(d[name])
+                if name == "liq" and "preset" in part:
+                    left, right, k = PRESETS[part.pop("preset")]
+                    part = {"left": left, "right": right, "k": k, **part}
+                if name == "sessions" and "windows" in part:
+                    part["windows"] = tuple(tuple(w) for w in part["windows"])
+                known = {f.name for f in fields(typ)}
+                unknown = set(part) - known
+                if unknown:
+                    raise ValueError(f"unknown {name} settings: {sorted(unknown)}")
+                kw[name] = typ(**part)
+        if "tick" in d:
+            kw["tick"] = float(d["tick"])
+        if "modules" in d:
+            bad = set(d["modules"]) - set(MODULES)
+            if bad:
+                raise ValueError(f"unknown modules: {sorted(bad)}")
+            kw["modules"] = tuple(m for m in MODULES if m in d["modules"])
+        return cls(**kw)

@@ -1,0 +1,25 @@
+{
+  "about": "TEMPLATE. Copy to pine_observed.json and fill it from TradingView by hand. The agent never reads this example. Every value below is an illustration, not an observation.",
+  "format": "ist-parity/1",
+  "build": "v0.4.1-dev",
+  "symbol": "NQ1!",
+  "timeframe_sec": 60,
+  "timezone": "America/New_York",
+  "tick_size": 0.25,
+  "year": 2026,
+  "settings": {"fvg": {"min_ticks": 2, "k_tra": 0.10, "k_rng": 0.0, "length": 14, "memory": 50},
+               "liq": {"preset": "balanced", "tol_ticks": 4, "min_touch": 2}},
+  "candles_csv": "NQ1!_1m_export.csv",
+  "window": {"from": "2026-10-27T09:30", "to": "2026-10-27T11:00"},
+  "complete": false,
+  "observed_event_lines": [
+    "10-27 09:41  FVG_CREATED BULL id=2026-10-27 09:41 px=21001.50 · 21000.25–21002.75",
+    "10-27 10:02  BSL_SWEEP id=2026-10-27 09:55 px=21010.00 · close 21008.25"
+  ],
+  "observed_events": [
+    {"time": "2026-10-27T10:02", "type": "BSL_TAKEN", "dir": 1, "sid": "2026-10-27T09:55", "price": 21010.00}
+  ],
+  "observed_states": [
+    {"group": "levels", "id": "2026-10-27T09:55", "field": "cls", "value": "SWEEP"}
+  ]
+}

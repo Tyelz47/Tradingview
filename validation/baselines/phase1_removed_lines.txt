@@ -1,0 +1,11 @@
+//  ICT STRUCTURE TOOLKIT (IST) · v0.3.2 · Phase 1 (frozen candidate)
+//  Scope (frozen)  FVG engine · PDH/PDL · PWH/PWL · sessions · FVG alerts · debug
+TT_MIN  = "[view] Hides secondary visuals: CE lines, FVG labels, faded FVGs, session boxes and midpoints."
+
+dbgOn      = input.bool(false, "Debug mode", tooltip = "[view] FVG milestones on zones, a state table with an FVG inspector and source checks, an event log, and Data Window values. Uses one table, no extra drawing objects.", group = G_DBG, display = display.none)
+f_evName(int k) =>
+    string d     = e.dir > 0 ? (isFvg ? " BULL" : " HIGH") : e.dir < 0 ? (isFvg ? " BEAR" : " LOW") : ""
+    f_evName(e.kind) + d + id + " px=" + f_px(e.price) + (e.reason == "" ? "" : " · " + e.reason)
+            string k = str.tostring(e.kind) + ":" + str.tostring(e.sid)
+var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 22, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
+    f_dbgRow(21, "Last events", f_lastEvents(6))

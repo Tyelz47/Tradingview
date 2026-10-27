@@ -1,0 +1,28 @@
+{
+  "id": "GOLD_LIQ_001",
+  "description": "BSL from a swing high at 21102.00 (left 2, right 1, no reaction floor). One tick through and a close back below: TAKEN + SWEEP on the same bar (DEF-L1, DEF-L4).",
+  "source": "synthetic",
+  "symbol": "NQ1!",
+  "timeframe_sec": 60,
+  "timezone": "America/New_York",
+  "tick_size": 0.25,
+  "start": "2026-10-27T09:30",
+  "warmup": {"bars": 20, "ohlc": [21100.00, 21101.00, 21099.00, 21100.00]},
+  "settings": {"modules": ["liq"], "liq": {"left": 2, "right": 1, "k": 0.0}},
+  "candles": [
+    [21100.00, 21102.00, 21099.50, 21101.00],
+    [21101.00, 21101.50, 21099.00, 21099.50],
+    [21099.50, 21102.25, 21099.00, 21101.50]
+  ],
+  "expected": {
+    "events": [
+      {"bar": 21, "type": "BSL_CREATED", "dir": 1, "price": 21102.0, "sid_bar": 20},
+      {"bar": 22, "type": "BSL_TAKEN", "dir": 1, "price": 21102.0, "sid_bar": 20},
+      {"bar": 22, "type": "BSL_SWEEP", "dir": 1, "price": 21102.0, "sid_bar": 20}
+    ],
+    "events_match": "exact",
+    "event_types": ["BSL_CREATED", "BSL_TAKEN", "BSL_SWEEP", "BSL_BREAK"],
+    "final_states": [{"kind": "liq", "match": {"side": "BSL", "origin_bar": 20},
+                      "expect": {"status": "TAKEN", "cls": "SWEEP", "taken_bar": 22, "take_ext": 21102.25, "confirm_bar": 21}}]
+  }
+}

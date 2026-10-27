@@ -1,0 +1,32 @@
+{
+  "id": "GOLD_FVG_002",
+  "description": "Bearish FVG [21002, 21003] through its whole lifecycle: first touch, CE, full fill, then a confirmed close above the top invalidates it (DEF-A4).",
+  "source": "synthetic",
+  "symbol": "NQ1!",
+  "timeframe_sec": 60,
+  "timezone": "America/New_York",
+  "tick_size": 0.25,
+  "start": "2026-10-27T10:00",
+  "settings": {"modules": ["fvg"], "fvg": {"min_ticks": 2, "k_tra": 0.0}},
+  "candles": [
+    [21004.00, 21005.00, 21003.00, 21003.50],
+    [21003.50, 21003.50, 21000.00, 21000.50],
+    [21000.50, 21002.00, 20999.00, 20999.50],
+    [20999.50, 21002.00, 20999.00, 21001.00],
+    [21001.00, 21002.50, 21000.50, 21002.00],
+    [21002.00, 21003.00, 21001.50, 21002.50],
+    [21002.50, 21003.50, 21002.00, 21003.25]
+  ],
+  "expected": {
+    "events": [
+      {"bar": 2, "type": "FVG_CREATED", "dir": -1, "price": 21002.5},
+      {"bar": 3, "type": "FVG_FIRST_TOUCH", "dir": -1, "price": 21002.0},
+      {"bar": 4, "type": "FVG_CE_TOUCH", "dir": -1, "price": 21002.5},
+      {"bar": 5, "type": "FVG_FULL_FILL", "dir": -1, "price": 21003.0},
+      {"bar": 6, "type": "FVG_INVALIDATED", "dir": -1, "price": 21003.25}
+    ],
+    "events_match": "exact",
+    "final_states": [{"kind": "fvg", "match": {"dir": -1, "confirm_bar": 2},
+                      "expect": {"status": "CLOSED", "touch_bar": 3, "ce_bar": 4, "full_bar": 5, "inv_bar": 6}}]
+  }
+}

@@ -49,7 +49,7 @@ Not "being a pivot". A swing becomes a liquidity level only when all of these ho
 * `k` is the rejection floor: a larger value rejects swings that price only drifted away from.
 * All three move monotonically from Aggressive to Strict. The values were chosen for that monotonic ladder and for latency on 1m–5m. **They were not fitted to any chart or screenshot.**
 
-**What the reaction floor does, measured honestly.** On a synthetic random walk (tests/liq_model.py, 20,000 bars), these are the share of pivots that pass the reaction rule:
+**What the reaction floor does, measured honestly.** On a synthetic random walk (the reference model, now `validation/models/`, 20,000 bars), these are the share of pivots that pass the reaction rule:
 
 | Window | Pivots per 1,000 bars (one side) | k 0.5 | k 1.0 | k 1.5 | k 2.0 | k 2.5 |
 |---|---|---|---|---|---|---|

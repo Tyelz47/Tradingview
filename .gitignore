@@ -1,1 +1,7 @@
 __pycache__/
+
+# validation agent: generated outputs
+validation/reports/VALIDATION_REPORT.md
+validation/reports/failures/
+.hypothesis/
+validation/parity/*.csv

@@ -1,0 +1,5 @@
+# Development / validation dependencies only (the indicator itself is Pine).
+# Install: python -m pip install -r requirements-dev.txt
+pytest>=8.0
+hypothesis>=6.100
+tzdata>=2024.1; sys_platform == "win32"

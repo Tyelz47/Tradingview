@@ -1,0 +1,40 @@
+{
+  "id": "GOLD_EQ_001",
+  "description": "EQH: A = 21102.00; B prints 21102.25 (takes A by one tick, sweep) and forms an EQH with A, boundary 21102.25 (L37). Later a bar trades 21102.50: EQH_TAKEN once at the boundary, sweep (L39).",
+  "source": "synthetic",
+  "symbol": "NQ1!",
+  "timeframe_sec": 60,
+  "timezone": "America/New_York",
+  "tick_size": 0.25,
+  "start": "2026-10-27T09:30",
+  "warmup": {"bars": 20, "ohlc": [21100.00, 21101.00, 21099.00, 21100.00]},
+  "settings": {"modules": ["liq"], "liq": {"left": 2, "right": 1, "k": 0.0, "tol_ticks": 4}},
+  "candles": [
+    [21100.00, 21102.00, 21099.50, 21101.00],
+    [21101.00, 21101.50, 21099.00, 21099.50],
+    [21099.50, 21100.00, 21098.00, 21098.50],
+    [21098.50, 21099.00, 21097.50, 21098.00],
+    [21098.00, 21102.25, 21097.80, 21101.50],
+    [21101.50, 21101.75, 21099.00, 21099.50],
+    [21099.50, 21100.00, 21098.50, 21099.00],
+    [21099.00, 21099.25, 21098.60, 21099.00],
+    [21099.00, 21102.50, 21098.70, 21101.00],
+    [21101.00, 21101.25, 21099.00, 21099.50]
+  ],
+  "expected": {
+    "events": [
+      {"bar": 24, "type": "BSL_TAKEN", "sid_bar": 20},
+      {"bar": 24, "type": "BSL_SWEEP", "sid_bar": 20},
+      {"bar": 25, "type": "EQH_CREATED", "dir": 1, "price": 21102.25, "sid_bar": 25},
+      {"bar": 28, "type": "EQH_TAKEN", "dir": 1, "price": 21102.25, "sid_bar": 25}
+    ],
+    "events_match": "exact",
+    "event_types": ["EQH_CREATED", "EQH_TAKEN"],
+    "structures": [{"kind": "eq", "match": {"side": "EQH", "id_bar": 25},
+                    "expect": {"ref": 21102.25, "bound": 21102.25, "members_bars": [20, 24]}}],
+    "final_states": [
+      {"kind": "eq", "match": {"side": "EQH", "id_bar": 25}, "expect": {"taken_bar": 28, "cls": "SWEEP"}},
+      {"kind": "liq", "match": {"side": "BSL", "origin_bar": 28}, "expect": {"eq": null, "status": "ACTIVE"}}
+    ]
+  }
+}

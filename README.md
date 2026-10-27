@@ -8,8 +8,9 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 | `docs/ARCHITECTURE.md` | Architecture, Pine limitations, anti-repaint strategy, budgets, and exact definitions (Appendix A). |
 | `docs/TESTS.md` | Acceptance checklist for every module, plus the non-repaint protocol. |
 | `docs/LIQUIDITY.md` | Phase 2 liquidity engine: exact definitions (DEF-L), timing, budgets, limitations. |
-| `docs/TESTS_PHASE2.md` | Phase 2 tests (S-01…S-10, L00–L34) and the manual validation procedure. |
-| `tests/liq_model.py` | Reference model of the liquidity algorithm (`python tests/liq_model.py`). |
+| `docs/TESTS_PHASE2.md` | Phase 2 tests (S-01…S-13, L00–L42) and the manual validation procedure. |
+| `validation/` | Validation agent: Python reference model (oracle), scenarios, invariants, property/stateful fuzzing, regression, golden dataset, Pine parity. Run `python -m validation`; see `validation/README.md`. |
+| `requirements-dev.txt` | Development-only dependencies of the validation agent (pytest, Hypothesis). |
 | `releases/v0.3.2/` | Frozen Phase 1 baseline (read-only, SHA-256). Git tag `PHASE1_BASELINE_v0.3.2`. |
 | `CHANGELOG.md` | CHANGES / REASON / RISKS / TEST for every revision. |
 

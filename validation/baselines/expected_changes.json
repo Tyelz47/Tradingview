@@ -1,0 +1,5 @@
+{
+  "about": "Differences against baselines/baseline.json that are intended. Each entry matches diffs by glob on case, category (ADDED, REMOVED, TIMING, PRICE, STATE, CHANGED), type (event name) and what (event identity or state path). Add an entry, with an id and the reason, BEFORE or WITH the model change that causes it; refresh the baseline (python -m validation --update-baseline) once the change is approved, then remove the entry.",
+  "example": {"id": "EXAMPLE-1", "reason": "illustration only, not active", "case": "walk-*", "category": "PRICE", "type": "EQH_TAKEN"},
+  "expected": []
+}

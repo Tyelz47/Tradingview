@@ -1,0 +1,24 @@
+{
+  "id": "GOLD_FVG_001",
+  "description": "Basic bullish FVG: candle 1 high 21001.00 < candle 3 low 21002.00, created at the close of candle 3 (DEF-A1, DEF-A3).",
+  "source": "synthetic",
+  "symbol": "NQ1!",
+  "timeframe_sec": 60,
+  "timezone": "America/New_York",
+  "tick_size": 0.25,
+  "start": "2026-10-27T09:41",
+  "settings": {"modules": ["fvg"], "fvg": {"min_ticks": 2, "k_tra": 0.0, "k_rng": 0.0}},
+  "candles": [
+    [21000.00, 21001.00, 20999.00, 21000.50],
+    [21000.50, 21004.00, 21000.50, 21003.50],
+    [21003.50, 21005.00, 21002.00, 21004.50]
+  ],
+  "expected": {
+    "events": [{"bar": 2, "type": "FVG_CREATED", "dir": 1, "price": 21001.5, "sid_bar": 2}],
+    "events_match": "exact",
+    "event_types": ["FVG_CREATED", "FVG_FIRST_TOUCH", "FVG_CE_TOUCH", "FVG_FULL_FILL", "FVG_INVALIDATED"],
+    "structures": [{"kind": "fvg", "match": {"dir": 1, "confirm_bar": 2},
+                    "expect": {"top": 21002.0, "bottom": 21001.0, "mid": 21001.5}}],
+    "final_states": [{"kind": "fvg", "match": {"dir": 1, "confirm_bar": 2}, "expect": {"status": "OPEN", "touch_bar": null}}]
+  }
+}

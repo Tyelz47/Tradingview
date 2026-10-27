@@ -1,5 +1,12 @@
 # Changelog
 
+## Tooling · validation agent 1.0.0 (2026-10-27, branch `tooling/validation-agent`) — no indicator change
+
+* `validation/`: one command (`python -m validation --mode quick|full|deep`) runs static checks of `src/IST.pine`, the Python reference model (oracle) of Phase 1 and Phase 2, deterministic scenarios, 40 named invariants with negative tests, Hypothesis property and stateful tests, long random walks, regression against a committed baseline and the legacy models in git, a golden dataset and a Pine-parity layer, and writes `validation/reports/VALIDATION_REPORT.md`. Exit code 0 only when every automated check passes.
+* `tests/liq_model.py` is replaced by `validation/models/` (liquidity results identical; the old versions stay readable at tags `v0.4.0-dev` and `v0.4.1-dev` and are cross-checked on every run).
+* Tag `v0.4.1-dev` added on commit 96ed891. `src/IST.pine` and `PHASE1_BASELINE_v0.3.2` are unchanged.
+* Nothing here tests TradingView: compilation, runtime, rendering, limits, request.security and alerts stay MANUAL.
+
 ## v0.4.1-dev — Phase 2 hardening review: EQ boundary and selectivity diagnostics (2026-10-27, branch `phase2/liquidity`)
 
 **BASELINE.** v0.4.0-dev stays reachable as git tag `v0.4.0-dev` (commit 96f7846). `PHASE1_BASELINE_v0.3.2` is untouched.
