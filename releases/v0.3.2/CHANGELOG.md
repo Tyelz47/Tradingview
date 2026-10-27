@@ -1,0 +1,278 @@
+# Changelog
+
+## v0.3.2 — T03 investigation: explicit, auditable size threshold (2026-10-27)
+
+**ROOT CAUSE**
+
+* **Not confirmed. No defect was found in the v0.3.1 code path.**
+* The v0.3.1 filter (L4, line 352) was:
+  `gap >= fvgMinTicks * syminfo.mintick - EPS and (fvgMinTra <= 0 or gap >= fvgMinTra * refTra) and (fvgMinRng <= 0 or gap >= fvgMinRng * refRng)`
+  * With minTicks = 40 and `syminfo.mintick` = 0.25, it requires gap ≥ 9.9975.
+  * A 6.00-point gap evaluates false, so no record can be created.
+* There was only one creation site (`Fvg.new`), reached only through `bullCand`/`bearCand`, and both used the same function.
+* Any input change makes TradingView recalculate the script from bar 0 with fresh `var` state. The engine has no `varip` or cross-run state, so stale values from the earlier setting can't survive.
+* **Hypotheses that explain the observation, in order of likelihood:**
+  1. **The v0.3.1 inspector printed `top · CE · bottom` as three unlabelled numbers.** If 29477.75 was the middle value (the CE), the record's bottom is 29471.75: gap = 12.00 pts = 48 ticks, which **correctly passes** 40 ticks. The `FVG_CREATED` reason text (`bottom–top`) in the event log would show this. This is a real debug-UX defect; it is fixed in v0.3.2.
+  2. **`syminfo.mintick` ≠ 0.25 on that chart.** A 6-point gap passes only if mintick ≤ 0.15. It is now visible in the Data Window and the inspector.
+  3. **The Data Window "gap size" was read with the cursor on a bar other than that gap's candle 3.**
+  4. **A runtime behaviour different from the source semantics.** The new `size check @ birth` row prints INCONSISTENT for any record that fails its own birth thresholds, so this can now be proven or ruled out.
+
+**CHANGES**
+
+* **L4 rewritten into named series, with identical semantics:**
+  * `rawGap` (points, same for both sides), `tickReq = fvgMinTicks * syminfo.mintick`
+  * `traReq = fvgMinTra > 0 ? fvgMinTra * refTra : 0.0`, `rngReq = fvgMinRng > 0 ? fvgMinRng * refRng : 0.0`
+  * `reqGap = math.max(tickReq, traReq, rngReq)`
+  * `gapPass = not na(rawGap) and rawGap >= tickReq - EPS and rawGap >= traReq and rawGap >= rngReq`
+  * `bullCand = rawBull and gapPass`, `bearCand = rawBear and gapPass`
+  * `f_qualifies` was removed.
+* **`Fvg` gains the fields `thrTick`, `thrTra` and `thrRng`:** the thresholds in force at birth.
+* **Inspector:**
+  * row "zone prices" is now labelled (`top … · CE … · bottom …`)
+  * new row "size check @ birth": gap in points and ticks, mintick, the three thresholds, the required max, and PASS/INCONSISTENT
+  * the table grows to 22 rows
+* **Data Window (debug):**
+  * candle-3 verdict (±2 PASS, ±1 REJECT, 0 no gap)
+  * raw gap in points and in ticks, `syminfo.mintick`
+  * the required gap from ticks, from TR average and from avg range, and the required max
+  * the existing TR average, avg range and record count
+  * 11 plots, all Data Window only
+* Version v0.3.2.
+
+**WHY**
+
+* T03 reported a 24-tick FVG passing a 40-tick filter. The code path is correct on inspection and in an executed model (S-06), so this release makes every number in the decision visible, per bar and per record, so the next test proves or refutes a bug directly.
+
+**REPAINT IMPACT**
+
+* **None. Historical FVG detection is unchanged.** The new expression equals the old one on 500,000 random cases, including `na` references (S-06).
+* Ids, events, state and rendering are unchanged. Only the debug output differs.
+
+**PERFORMANCE IMPACT**
+
+* Negligible: a few float series, 3 fields per record, and 6 more Data Window plots, visible only with debug on.
+
+**TESTS**
+
+* Static and formula checks S-01…S-06, executed here: **PASS 6/6**.
+* New regression test **T03a**: a 6.00-pt (24-tick) NQ gap is rejected at Min ticks = 40. **PENDING MANUAL VALIDATION.**
+* **Manual results recorded:** T00, T01, T02, T09–T13 **PASS** (v0.3.1), still valid because v0.3.2 changes no behaviour. **T03 FAIL** (v0.3.1), to re-test on v0.3.2.
+* **Runtime score:** 8 / 50 PASS, 1 FAIL, 41 PENDING.
+
+**KNOWN LIMITATIONS**
+
+* Unchanged from v0.3.1.
+* If T03a confirms that a sub-threshold record exists (verdict +2 or INCONSISTENT), the cause lies in runtime behaviour that the source doesn't show, and it will need the exact screenshots to diagnose.
+
+## v0.3.1 — Phase 1 frozen candidate (2026-10-27)
+
+**CHANGES**
+
+* **Renamed "ATR" to "TR average"** wherever the implementation is not Wilder ATR:
+  * input labels: "Min size · × TR average" and "TR-average / avg-range length"
+  * tooltips
+  * Data Window: "dbg · TR average at candle 1 (t-2)"
+  * the inspector's "× TR avg"
+  * code identifiers: `fvgMinTra`, `traNow`, `refTra`, `sizeTra`, `TT_TRA`
+  * ARCHITECTURE and TESTS
+  * Formula unchanged: `ta.sma(ta.tr(true), 14)[2]`. No Wilder option.
+* **"Draw zones from" default changed to Candle 3 (confirmation).** Candle 1 (origin) is still selectable. Tooltip updated.
+* **Docs:**
+  * the decisions are recorded (ARCHITECTURE §12)
+  * **future requirement:** FVG identity = symbol + timeframe + direction + confirmation time, for when HTF and LTF structures coexist (ARCHITECTURE §3.1, §10.10). The ID system is not changed in Phase 1.
+* **Previous-day definition stays UNRESOLVED.** The TradingView D/W confirmed source is kept for validation. It is not labelled "CME ETH".
+
+**WHY**
+
+* The approved decisions. A non-Wilder average must not be called ATR. The default view must not imply knowledge before confirmation.
+
+**REPAINT IMPACT**
+
+* None in calculation. The TR-average values, detection, events and ids are identical to v0.3.0.
+* Display: by default, FVG boxes now start at candle 3 instead of candle 1.
+* Input defaults changed, so a chart that already has the indicator keeps its saved settings. Re-add it, or reset settings, to get the new defaults.
+
+**PERFORMANCE IMPACT**
+
+* None.
+
+**TESTS**
+
+* Static checks S-01…S-04 re-executed on v0.3.1: **PASS 4/4**.
+* Runtime tests: 0/49 passed. All 49 are **PENDING MANUAL VALIDATION**. T01, T03, T39 and T41 were updated for the renaming and the new default.
+
+**KNOWN LIMITATIONS**
+
+* Unchanged from v0.3.0.
+
+**FREEZE**
+
+* v0.3.x is frozen. No further architectural work unless compilation or the manual tests reveal a problem. Next step: TradingView compilation, then the Phase 1 manual tests.
+
+## v0.3.0 — Phase 1: deliberate retention, draw-free state, reload-stable ids (2026-10-27)
+
+**CHANGES**
+
+* **FVG retention (C1).**
+  * Invalidated records are no longer removed. They stay in memory as **closed** records.
+  * `Engine memory` (default 50 per direction, [calc]) now counts open and closed records together.
+  * When over budget, the oldest closed record is released first, then the oldest open one. The event is renamed to **`FVG_DROPPED_MEMORY`**, with the reason "closed record" or "open record · lifecycle tracking stopped". Debug counts drops by type.
+* **State is draw-free (C2).**
+  * `f_roll`, `f_sesNew` and the other L3 functions no longer receive colour, style or visibility and no longer create lines.
+  * L3 hands off `lvlNewNow`, `lvlEndNow`, `sesDirtyNow`, `sesEndNow` and `fvgDropNow`. L6 decides visibility, colour, style, labels and history.
+  * `RefLevel` lost its `col`/`style`/`tip` fields and gained `kind`.
+  * Session history is now capped **per slot** (it was 4 × N total).
+  * `rightT` moved into L6.
+* **Anchor (C3).** State stores the verified extreme bar, or `na`. The [view] "Start line at the extreme's bar" is applied in L6 only.
+* **ATR (C4).** `ta.atr(len)` (RMA) became `ta.sma(ta.tr(true), len)`, a finite window, still sampled at t-2. **This is a definition refinement and needs your approval.**
+* **Ids (C5).** FVG `id` = confirmation time; session `id` = start time. The sequential counters were removed. Ids display as `yyyy-MM-dd HH:mm` (ET).
+* **Replay readiness (C6).**
+  * Milestone **times** were added next to the bars.
+  * New methods `activeAt(z, b)`, `policyTime()` and `metNow()`.
+  * The renderer reconciliation takes the reference bar.
+* **New [view] input "Draw zones from":** Candle 1 (origin, default) or Candle 3 (confirmation).
+* **Debug:**
+  * an FVG inspector (`Inspect FVG` n-th newest) showing direction, id, tf, origin → confirm (bar and time), top/CE/bottom, size in ATR, milestone times, policy status, OPEN/CLOSED, fill, age, and whether it is drawn
+  * open+closed record counts per direction
+  * a 21-row table
+* **Normal-mode warning** when any drawing-object type exceeds 450, so the 500 limit is never hit silently.
+* **Policy transitions** are detected in L6 (`metNow`), not returned by `advance()`.
+
+**WHY**
+
+* Logical deletion must be deliberate and logged. Invalidated zones are needed later (IFVG, diagnostics, replay).
+* The renderer must be strictly downstream. State must not depend on any display input, even indirectly.
+* Reproducibility after reload. On a 1m chart the first loaded bar moves forward every time you reload later in the day. Two things depended on it:
+  * the RMA ATR values, so a gap could qualify on one load and not the next
+  * the sequential ids
+* A future historical-inspection mode must stay possible without redesign.
+
+**REPAINT IMPACT** (historical output changes compared with v0.2.0)
+
+* **FVG qualification.** The values change slightly where the filter is on, because SMA ATR differs from RMA ATR. Gaps close to the × ATR threshold can flip in either direction. Result: identical detection after any reload, beyond the first `len+1` bars.
+* **Ids** are different (time-based) and now stable across reloads.
+* **Display.** Invalidated zones no longer vanish from logic. Their drawings are the same (faded or removed, per policy). Active display is unchanged.
+* **Session history** is now N per window; before, it was 4N shared.
+* **Confirmed-event timing is unchanged** for every event type.
+
+**PERFORMANCE IMPACT**
+
+* The per-bar FVG pass now iterates closed records too (one `na` check each; ≤ 100 records by default). L6 adds one more pass to find policy transitions.
+* Level and session drawings are touched only on bars where their state changed (as before).
+* Net: a small constant-factor increase, still O(records). It will be measured with the Pine Profiler in step 1.4.
+
+**TESTS**
+
+* `docs/TESTS.md` was rebuilt. It has 4 static checks, executed here: **PASS 4/4**. It has 49 runtime tests (T00–T48), all **PENDING MANUAL VALIDATION**, including G-V1…G-V5.
+
+**KNOWN LIMITATIONS**
+
+* Lifecycle history is complete only inside the memory window. Near the start of loaded history, which records survive can depend on the first loaded bar.
+* There are warm-up bars (first `len+1`) with no ATR-filtered FVGs.
+* The D/W source is not yet verified as the CME ETH day; the labels say PDH/PDL only.
+* Fill % at a past bar can't be reconstructed (only the current extreme is kept).
+* Superseded sessions and levels are not archived logically.
+* Live mode depends on TradingView's rollback of object fields.
+* Not compiled. Constructs to watch:
+  * `int(na)` in a ternary
+  * methods called on nested UDT fields
+  * `str.format_time` with `EEE`
+  * `for … in` over arrays of UDTs, with field writes
+
+**DECISIONS REQUESTED**
+
+1. Approve the SMA-ATR refinement (C4), or keep RMA and accept that results can change when the history window moves.
+2. Default for "Draw zones from": Candle 1 (ICT convention) or Candle 3 (no visual before confirmation).
+3. After G-V: keep the TradingView Daily bar, or move to an explicit session-based day (ARCHITECTURE §7.5).
+
+## v0.2.0 — Phase 1: 7-layer architecture, calculation independent of visibility (2026-10-27)
+
+**CHANGES**
+
+* Code reorganised into the official layers: L1 market data/time → L2 detection → L4 filtering → L3 state → L5 event bus → L6 renderer → L7 alerts/diagnostics.
+* Fixed the audit findings V1–V7 (ARCHITECTURE §2.1):
+  * **FVG.** Detection no longer depends on `Show FVGs`.
+  * **Sessions.** Membership no longer depends on the per-session show toggle.
+  * **Levels.** PDH/PDL, PWH/PWL, DO and MO are always computed; the toggles only draw.
+  * **Events.** Events are logged on every bar, history included; alert toggles filter delivery only.
+* **FVG lifecycle.** First touch, CE touch, full fill and invalidation are independent milestones, each stamped once. A zone stays logically open until **invalidated** (or released by engine memory). The mitigation policy (default: full fill) is display/event only.
+* **Logical versus visual history are now separate:**
+  * new **[calc]** input "Engine memory · open FVGs per side" (default 50). Releasing a zone logs `FVG_DROPPED`.
+  * "Max active per side" became **[view]** "Max visible per side", with exact last-bar reconciliation: the newest N unmitigated zones are drawn.
+  * "Max age" became **[view]** "Hide zones older than".
+* **Event model** (`Event` type): kind, dir, structure id, origin bar, event bar, time, price and a reason code.
+  * Types: FVG_CREATED, FVG_FIRST_TOUCH, FVG_CE_TOUCH, FVG_FULL_FILL, FVG_INVALIDATED, FVG_DROPPED, SESSION_START, SESSION_END, LEVEL_SET.
+  * The audit log keeps the last 40, and debug shows the last 6.
+* The FVG record now carries `tf`, `originBar`, `confirmBar` and `confirmTime`. Age and mitigation state are derived, not stored.
+* Sessions have sequential ids, `startBar`/`endBar` and a `complete` flag.
+* **D/W source validation (DEF-G6).** The chart-aggregated high and low of every complete day and week are compared with the `request.security` values. The debug table shows `D/W source check` and the ET time of the latest boundaries.
+* **Alerts.** Now per FVG event (created bull/bear, first touch, CE, full fill, invalidated). Intrabar timing is labelled experimental. Messages are machine-readable (`TYPE DIR id= px= · reason`).
+* Inputs are tagged [calc], [view] or [alert]. The FVG settings are split into "FVG · CALCULATION" and "FVG · DISPLAY".
+* Data Window additions: a candle-3 verdict (±2 accepted, ±1 filtered, 0 none), gap size, ATR and average range at candle 1, and the count of open FVGs.
+
+**REMOVED (scope freeze, deliberate)**
+
+* "Require displacement (basic)". Displacement belongs to Phase 3.
+* "Middle candle closes in gap direction". It is not part of the standard 3-candle definition. **This was ON by default in v0.1.0.**
+* Level and session "taken" state, the "When taken" display modes, and the "level/session taken" alerts. Taking a level is the primitive of the Phase 2 sweep/run logic, so it will be defined once, there.
+
+**REASON**
+
+* Adopt the official architecture and its core rule: calculation and market state must be independent of visibility.
+* Preserve every FVG milestone for the later IFVG, CISD and quality modules.
+* Freeze scope to Phase 1.
+* Make the D/W source auditable instead of assumed.
+
+**RISKS**
+
+* **Not compiled yet.** The new constructs to watch are:
+  * the `Event` UDT with positional `.new`
+  * the ternary on array references (`up ? bullOpen : bearOpen`)
+  * `str.format_time` with the `EEE` pattern
+  * `switch` on `int` constants
+* **Cost.** The engine now tracks zones until invalidation, at most 2 × memory = 100 by default, instead of until mitigation. Each bar does a little more work, still O(pool).
+* **Drawing timing.** Active FVG drawings are created on the last bar only. When you scroll back through history, you see faded (mitigated) zones, not zones that were active at that past moment. This is the same as v0.1.0 for mitigated zones.
+
+**HISTORICAL BEHAVIOUR (changed)**
+
+* **More FVGs** with default settings, because the middle-candle filter is gone.
+* **Zones disappear only when display caps say so.** A zone is no longer deleted when another zone pushes it out of "max active", or when it reaches "max age". It is merely undrawn, and it reappears if it qualifies again for display.
+* **Level and session lines no longer change on a take.** They extend until they are superseded.
+
+**TEST**
+
+* Run `docs/TESTS.md` for v0.2.0: NR-01 to NR-06, V-01 to V-04, A-01 to A-22, G-01 to G-09, G-V1 to G-V5, F-01 to F-14, K-01 to K-05, and D-01 to D-03.
+
+## v0.1.0 — Phase 1 foundation (2026-10-26)
+
+**CHANGES**
+
+* New script `src/IST.pine` (Pine Script v6). It contains:
+  * **Module A, FVG core.** Detection with size filters (ticks, × ATR, × average range), an optional middle-candle direction filter and an optional basic displacement filter. Milestones (touch, CE, full fill, close-through), fill %, and a configurable mitigation rule. Mitigated zones fade or are removed. Per-side caps, a faded-history cap, optional max age, optional shrink, and an optional live "forming" preview.
+  * **Module F, Sessions.** Four configurable windows (Asia, London, NY AM, NY PM by default) in an IANA timezone. The developing range becomes final on the first bar after the window. Taken detection, retirement, capped history, and an optional box and midpoint.
+  * **Module G, Levels.** PDH/PDL and PWH/PWL via the non-repainting `[1]` + `lookahead_on` idiom. Lines are anchored at the extreme bar only when this is verifiable. Optional Day open and Midnight open. Taken views (fade, stop, hide) and capped history.
+  * **Module K (Phase 1 events).** An event bus with bar-close aggregated alerts and an intrabar mode de-duplicated with `varip`.
+  * **Developer overlay.** Zone ids, state, fill and age; a state table; object counts; Data Window values.
+* New docs: `docs/ARCHITECTURE.md` and `docs/TESTS.md`.
+
+**REASON**
+
+* Phase 1 of the staged plan. These modules are the foundation that Phases 2–5 consume (liquidity, CISD, IFVG, HTF).
+
+**RISKS**
+
+* **Not compiled yet.** The code was written against the v6 reference but could not be run here. The points most likely to need a small fix are:
+  * enum inputs with an empty inline title
+  * method calls on nested UDT fields (`s.hi.markFinal()`)
+  * `time()` with a session string ending in `0000`
+  * the `display = display.none` argument on every input type
+* **Live mode (Confirmed only OFF)** depends on TradingView rolling back UDT field writes on realtime ticks. Confirmed mode, the default, does not depend on this. See NR-04.
+* **Session defaults are opinionated.** Asia 20:00–00:00 and NY AM 09:30–12:00 ET; adjust them to your workflow.
+
+**HISTORICAL BEHAVIOUR**
+
+* This is the first version, so there is nothing to compare against.
+
+**TEST**
+
+* Run `docs/TESTS.md`: NR-01 to NR-06, A-01 to A-23, G-01 to G-13, F-01 to F-16, K-01 to K-04, and D-01 and D-02.

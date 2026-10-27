@@ -1,0 +1,1093 @@
+//@version=6
+// ════════════════════════════════════════════════════════════════════════════════
+//  ICT STRUCTURE TOOLKIT (IST) · v0.3.2 · Phase 1 (frozen candidate)
+// ────────────────────────────────────────────────────────────────────────────────
+//  Scope (frozen)  FVG engine · PDH/PDL · PWH/PWL · sessions · FVG alerts · debug
+//  Layers          L1 market data / time   L2 detection   L3 state management
+//                  L4 context / filtering  L5 event bus   L6 renderer
+//                  L7 alerts / diagnostics
+//  Core rules      · Calculation never depends on visibility. L3 reads no display
+//                    input; L6 reads state and never writes it (only the drawing
+//                    handles stored on records).
+//                  · Logical deletion is deliberate: only the engine-memory policy
+//                    removes an FVG record, and it logs FVG_DROPPED_MEMORY.
+//                  · Ids are times (FVG: candle-3 time, session: start time), so
+//                    they survive reloads that move the first loaded bar.
+//  Repaint         Default: state changes once per bar, at the close. HTF values
+//                  use expr[1] + lookahead_on = the previous *completed* HTF bar.
+//  Definitions     DEF-xx → docs/ARCHITECTURE.md, Appendix A.
+// ════════════════════════════════════════════════════════════════════════════════
+indicator("ICT Structure Toolkit", shorttitle = "IST", overlay = true,
+     max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ════ ENUMS ════════════════════════════════════════════════════════════════════
+
+enum MitRule
+    firstTouch   = "First touch"
+    midpoint     = "Midpoint (CE)"
+    fullFill     = "Full fill"
+    closeThrough = "Close through"
+
+enum MitView
+    remove = "Remove"
+    fade   = "Fade"
+
+enum ZoneAnchor
+    origin  = "Candle 1 (origin)"
+    confirm = "Candle 3 (confirmation)"
+
+enum AlertTiming
+    barClose = "Bar close"
+    intrabar = "Intrabar (experimental)"
+
+enum LblSize
+    tiny   = "Tiny"
+    small  = "Small"
+    normal = "Normal"
+
+enum LnStyle
+    solid  = "Solid"
+    dashed = "Dashed"
+    dotted = "Dotted"
+
+// ════ INPUTS ═══════════════════════════════════════════════════════════════════
+
+G_GEN  = "GENERAL"
+G_FVGC = "FVG · CALCULATION"
+G_FVGV = "FVG · DISPLAY"
+G_LVL  = "LEVELS · DISPLAY"
+G_SES  = "SESSIONS"
+G_ALR  = "ALERTS"
+G_DBG  = "DEVELOPER"
+
+TT_CONF = "[calc] ON: every state change is evaluated once, at bar close. Realtime output is identical to the historical chart after reload.\nOFF (live): wick milestones update intrabar. Creation and invalidation still wait for the close."
+TT_MIN  = "[view] Hides secondary visuals: CE lines, FVG labels, faded FVGs, session boxes and midpoints."
+TT_TRA  = "[calc] Gap ≥ k × TR average. TR average = simple (unweighted) mean of the true range of the len bars ending at candle 1 (t-2). Deliberately NOT Wilder ATR. Known at candle 1's close; never changes afterwards. 0 = off."
+TT_RNG  = "[calc] Gap ≥ k × average (high − low) of the len bars ending at candle 1 (t-2). Known at candle 1's close. 0 = off."
+TT_MEM  = "[calc] FVG records kept per direction, open and closed. Over the limit, the oldest CLOSED (invalidated) record goes first, then the oldest open one. Each removal logs FVG_DROPPED_MEMORY. Lifecycle history older than this window is not available."
+TT_MIT  = "[view/alert] When a zone stops being displayed as active (fades or disappears). The engine records first touch, CE, full fill and invalidation independently, whatever this is set to."
+TT_ANC  = "[view] Where a zone's box starts. Candle 3 (default) = where it became known, so nothing is drawn before confirmation. Candle 1 = where the imbalance sits (ICT convention; optional). Either way the FVG exists only from candle 3's close."
+TT_PREV = "[view] Provisional, CAN REPAINT. Draws the gap the unfinished candle would create if it closed now. Dashed, never stored, never logged, never alerted. Live mode only."
+TT_ANCH = "[view] ON: line starts at the bar that printed the extreme, when that is verifiable from loaded bars. Otherwise it starts where the level became known (period start)."
+TT_SES  = "[calc] IANA timezone for session windows and the midnight open (DST handled by TradingView). Session windows are [calc]; every other setting in this group is [view]. Hidden sessions are still tracked."
+TT_ALT  = "[alert] Bar close: one message per bar, at the close, listing that bar's events.\nIntrabar (experimental): each event fires once, the moment it is logged. Needs Confirmed only = OFF. Close-dependent events still fire at the close.\nCreate the alert with condition 'Any alert() function call'."
+
+confirmedOnly = input.bool(true, "Confirmed only", tooltip = TT_CONF, group = G_GEN, display = display.none)
+minimalMode   = input.bool(false, "Minimal mode", tooltip = TT_MIN, group = G_GEN, display = display.none)
+lblSizeIn     = input.enum(LblSize.small, "Label size", group = G_GEN, display = display.none)
+rightOffset   = input.int(8, "Right extension (bars)", minval = 1, maxval = 50, group = G_GEN, display = display.none)
+
+fvgMinTicks = input.int(2, "Min size · ticks", minval = 1, tooltip = "[calc] Gap ≥ n × syminfo.mintick.", group = G_FVGC, display = display.none)
+fvgMinTra   = input.float(0.10, "Min size · × TR average", minval = 0, step = 0.05, tooltip = TT_TRA, group = G_FVGC, display = display.none)
+fvgMinRng   = input.float(0.0, "Min size · × avg range", minval = 0, step = 0.05, tooltip = TT_RNG, group = G_FVGC, display = display.none)
+fvgLen      = input.int(14, "TR-average / avg-range length", minval = 2, tooltip = "[calc] Window length (bars) of both references.", group = G_FVGC, display = display.none)
+fvgMemory   = input.int(50, "Engine memory · records per direction", minval = 10, maxval = 200, tooltip = TT_MEM, group = G_FVGC, display = display.none)
+
+fvgShow     = input.bool(true, "Show FVGs", group = G_FVGV, display = display.none)
+fvgBullCol  = input.color(color.new(#089981, 80), "Bullish", inline = "fc", group = G_FVGV, display = display.none)
+fvgBearCol  = input.color(color.new(#F23645, 80), "Bearish", inline = "fc", group = G_FVGV, display = display.none)
+fvgMitRule  = input.enum(MitRule.fullFill, "Mitigation policy", tooltip = TT_MIT, group = G_FVGV, display = display.none)
+fvgMitView  = input.enum(MitView.fade, "Mitigated zones", group = G_FVGV, display = display.none)
+fvgAnchor   = input.enum(ZoneAnchor.confirm, "Draw zones from", tooltip = TT_ANC, group = G_FVGV, display = display.none)
+fvgMaxVis   = input.int(8, "Max visible per side", minval = 1, maxval = 30, group = G_FVGV, display = display.none)
+fvgMaxFaded = input.int(10, "Max faded zones", minval = 0, maxval = 60, group = G_FVGV, display = display.none)
+fvgMaxAge   = input.int(0, "Hide zones older than (bars, 0 = off)", minval = 0, group = G_FVGV, display = display.none)
+fvgExtend   = input.bool(true, "Extend active zones", group = G_FVGV, display = display.none)
+fvgShowCE   = input.bool(true, "Midpoint (CE) line", group = G_FVGV, display = display.none)
+fvgShrink   = input.bool(false, "Shrink zone as it fills", group = G_FVGV, display = display.none)
+fvgLabels   = input.bool(false, "Labels", group = G_FVGV, display = display.none)
+fvgPreview  = input.bool(false, "Preview forming FVG (provisional)", tooltip = TT_PREV, group = G_FVGV, display = display.none)
+
+pdShow    = input.bool(true, "PDH / PDL", inline = "pd", group = G_LVL, display = display.none)
+pdCol     = input.color(#9598A1, "", inline = "pd", group = G_LVL, display = display.none)
+pdSty     = input.enum(LnStyle.dashed, "", inline = "pd", group = G_LVL, display = display.none)
+pwShow    = input.bool(true, "PWH / PWL", inline = "pw", group = G_LVL, display = display.none)
+pwCol     = input.color(#D1D4DC, "", inline = "pw", group = G_LVL, display = display.none)
+pwSty     = input.enum(LnStyle.solid, "", inline = "pw", group = G_LVL, display = display.none)
+doShow    = input.bool(false, "Day open (TradingView day)", inline = "do", group = G_LVL, display = display.none)
+doCol     = input.color(#787B86, "", inline = "do", group = G_LVL, display = display.none)
+moShow    = input.bool(false, "Midnight open", inline = "mo", group = G_LVL, display = display.none)
+moCol     = input.color(#787B86, "", inline = "mo", group = G_LVL, display = display.none)
+lvlLabels = input.bool(true, "Labels", group = G_LVL, display = display.none)
+lvlAnchor = input.bool(true, "Start line at the extreme's bar", tooltip = TT_ANCH, group = G_LVL, display = display.none)
+lvlHist   = input.int(4, "Historical levels kept", minval = 0, maxval = 40, group = G_LVL, display = display.none)
+
+sesTz     = input.string("America/New_York", "Timezone", tooltip = TT_SES, group = G_SES, display = display.none)
+s1Show    = input.bool(true, "", inline = "s1", group = G_SES, display = display.none)
+s1Nm      = input.string("Asia", "", inline = "s1", group = G_SES, display = display.none)
+s1Ss      = input.session("2000-0000", "", inline = "s1", group = G_SES, display = display.none)
+s1Cl      = input.color(#8C7FB8, "", inline = "s1", group = G_SES, display = display.none)
+s2Show    = input.bool(true, "", inline = "s2", group = G_SES, display = display.none)
+s2Nm      = input.string("London", "", inline = "s2", group = G_SES, display = display.none)
+s2Ss      = input.session("0200-0500", "", inline = "s2", group = G_SES, display = display.none)
+s2Cl      = input.color(#6FA3C7, "", inline = "s2", group = G_SES, display = display.none)
+s3Show    = input.bool(true, "", inline = "s3", group = G_SES, display = display.none)
+s3Nm      = input.string("NY AM", "", inline = "s3", group = G_SES, display = display.none)
+s3Ss      = input.session("0930-1200", "", inline = "s3", group = G_SES, display = display.none)
+s3Cl      = input.color(#C9A86A, "", inline = "s3", group = G_SES, display = display.none)
+s4Show    = input.bool(true, "", inline = "s4", group = G_SES, display = display.none)
+s4Nm      = input.string("NY PM", "", inline = "s4", group = G_SES, display = display.none)
+s4Ss      = input.session("1330-1600", "", inline = "s4", group = G_SES, display = display.none)
+s4Cl      = input.color(#C98A6A, "", inline = "s4", group = G_SES, display = display.none)
+sesHL     = input.bool(true, "High / low lines", group = G_SES, display = display.none)
+sesDev    = input.bool(true, "Show developing range", group = G_SES, display = display.none)
+sesMid    = input.bool(false, "Midpoint", inline = "sx", group = G_SES, display = display.none)
+sesBox    = input.bool(false, "Range box", inline = "sx", group = G_SES, display = display.none)
+sesLabels = input.bool(true, "Labels", group = G_SES, display = display.none)
+sesHist   = input.int(3, "Past instances kept per session", minval = 0, maxval = 10, group = G_SES, display = display.none)
+
+alTiming  = input.enum(AlertTiming.barClose, "Timing", tooltip = TT_ALT, group = G_ALR, display = display.none)
+alBullNew = input.bool(true, "FVG created · bull", inline = "a1", group = G_ALR, display = display.none)
+alBearNew = input.bool(true, "bear", inline = "a1", group = G_ALR, display = display.none)
+alTouch   = input.bool(false, "First touch", inline = "a2", group = G_ALR, display = display.none)
+alCE      = input.bool(false, "CE touch", inline = "a2", group = G_ALR, display = display.none)
+alFull    = input.bool(false, "Full fill", inline = "a3", group = G_ALR, display = display.none)
+alInval   = input.bool(false, "Invalidated", inline = "a3", group = G_ALR, display = display.none)
+
+dbgOn      = input.bool(false, "Debug mode", tooltip = "[view] FVG milestones on zones, a state table with an FVG inspector and source checks, an event log, and Data Window values. Uses one table, no extra drawing objects.", group = G_DBG, display = display.none)
+dbgInspect = input.int(0, "Inspect FVG (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
+
+// ════ CONSTANTS ════════════════════════════════════════════════════════════════
+
+CLR_NONE   = color.new(color.black, 100)
+TF_MS      = timeframe.in_seconds() * 1000
+EPS        = syminfo.mintick * 0.01    // float tolerance for tick comparisons
+HALF_TICK  = syminfo.mintick * 0.5
+T_HIST     = 45                        // transparency: superseded (historical) level
+T_FADED    = 93                        // transparency: faded FVG fill
+EV_LOG_MAX = 40
+OBJ_WARN   = 450                       // warn before TradingView's 500-object limit
+K_PDH      = 0
+K_PDL      = 1
+K_PWH      = 2
+K_PWL      = 3
+K_DO       = 4
+K_MO       = 5
+EV_FVG_CREATED = 1
+EV_FVG_TOUCH   = 2
+EV_FVG_CE      = 3
+EV_FVG_FULL    = 4
+EV_FVG_INVAL   = 5
+EV_FVG_DROPPED = 6
+EV_SES_START   = 7
+EV_SES_END     = 8
+EV_LEVEL_SET   = 9
+
+f_lineStyle(LnStyle s) =>
+    switch s
+        LnStyle.dashed => line.style_dashed
+        LnStyle.dotted => line.style_dotted
+        => line.style_solid
+
+LBL_SIZE = switch lblSizeIn
+    LblSize.tiny   => size.tiny
+    LblSize.normal => size.normal
+    => size.small
+
+bool   showCE     = fvgShowCE and not minimalMode
+bool   showFvgTxt = (fvgLabels and not minimalMode) or dbgOn
+bool   keepFaded  = fvgMitView == MitView.fade and not minimalMode
+bool   showSesBox = sesBox and not minimalMode
+bool   showSesMid = sesMid and not minimalMode
+string PD_STYLE   = f_lineStyle(pdSty)
+string PW_STYLE   = f_lineStyle(pwSty)
+
+// ════ TYPES ════════════════════════════════════════════════════════════════════
+
+// L5 · one auditable state transition.
+type Event
+    int    kind         // EV_*
+    int    dir          // FVG: +1 bull / −1 bear · levels: +1 high / −1 low · 0 n/a
+    int    sid          // structure id: FVG/session = its time id, level = K_*
+    int    originBar    // where the structure originated
+    int    eventBar     // bar on which the transition happened
+    int    eventTime
+    float  price
+    string reason       // short rule code for audit
+
+// L3 · horizontal reference level (period levels and session high/low).
+type RefLevel
+    int    kind         // K_* for period levels, −1 for session high/low
+    string tag
+    bool   isHigh
+    bool   developing   // value can still change (session in progress)
+    float  price
+    int    anchorTime   // occurred: bar that printed it (na when not verifiable)
+    int    knownTime    // confirmed: first bar the final value was known
+    int    endTime      // na while live; set when the next instance supersedes it
+    line   ln           // L6 handles, na when not drawn
+    label  lbl
+
+// L3 · one instance of a session window.
+type SessionRange
+    int      id         // start time: stable across reloads
+    int      slot
+    string   name
+    bool     complete
+    int      startBar
+    int      startTime
+    int      endBar     // last bar inside the window; na while developing
+    int      endTime
+    RefLevel hi
+    RefLevel lo
+    box      area       // L6 handles
+    line     mid
+
+// L3 · one fair value gap. Milestones are independent: each is stamped once with
+// bar and time, whatever the display policy is (DEF-A4). Bars and times are kept
+// so any past moment inside the memory window can be reconstructed (ARCH §3.4).
+type Fvg
+    int    id           // = confirmTime: stable across reloads
+    bool   isBull
+    string tf
+    int    originBar    // candle 1
+    int    originTime
+    int    confirmBar   // candle 3: the record is created at its close
+    int    confirmTime
+    float  top
+    float  bottom
+    float  mid
+    float  sizeTra      // gap / reference TR average (kept for the Phase 5 score)
+    float  thrTick      // thresholds in force at birth (audit; DEF-A2)
+    float  thrTra
+    float  thrRng
+    float  extreme      // deepest penetration so far
+    int    touchBar
+    int    touchTime
+    int    ceBar
+    int    ceTime
+    int    fullBar
+    int    fullTime
+    int    invBar
+    int    invTime
+    box    zone         // L6 handles, na when not drawn
+    line   ce
+
+// ════ STATE ════════════════════════════════════════════════════════════════════
+
+// L3 · logical state
+var array<RefLevel>     liveLvl     = array.new<RefLevel>(6)    // indexed by K_*
+var array<SessionRange> liveSes     = array.new<SessionRange>(4)
+var array<Fvg>          bullFvgs    = array.new<Fvg>()          // open + closed records, oldest first
+var array<Fvg>          bearFvgs    = array.new<Fvg>()
+var int                 dropOpen    = 0
+var int                 dropClosed  = 0
+// L5 · events of this execution + capped audit log
+var array<Event>        barEv       = array.new<Event>()
+var array<Event>        evLog       = array.new<Event>()
+// L3 → L6 hand-off, cleared every execution
+var array<Fvg>          fvgDropNow  = array.new<Fvg>()
+var array<RefLevel>     lvlNewNow   = array.new<RefLevel>()
+var array<RefLevel>     lvlEndNow   = array.new<RefLevel>()
+var array<SessionRange> sesDirtyNow = array.new<SessionRange>()
+var array<SessionRange> sesEndNow   = array.new<SessionRange>()
+// L6 · visual history only (dropping these never touches logical state)
+var array<RefLevel>     histLvl     = array.new<RefLevel>()
+var array<SessionRange> histSes     = array.new<SessionRange>()
+var array<Fvg>          fadedFvg    = array.new<Fvg>()
+// L1 · chart-side period trackers: anchors + source validation (DEF-G6)
+var float dHi     = na
+var int   dHiT    = na
+var float dLo     = na
+var int   dLoT    = na
+var bool  dFull   = false
+var int   dStartT = na
+var float wHi     = na
+var int   wHiT    = na
+var float wLo     = na
+var int   wLoT    = na
+var bool  wFull   = false
+var int   wStartT = na
+var int   pdN     = 0
+var int   pdBad   = 0
+var int   pdBadT  = na
+var int   pwN     = 0
+var int   pwBad   = 0
+var int   pwBadT  = na
+
+// ════ L1 · MARKET DATA / TIME ENGINE (every bar, unconditionally) ═══════════════
+
+// DEF-A2: deterministic TR average (SMA of true range), NOT Wilder ATR (ta.atr, RMA). An RMA depends on every
+// bar since the first loaded one, so its value at a fixed bar drifts as the
+// history window moves; a finite window gives the same value after any reload.
+float traNow  = ta.sma(ta.tr(true), fvgLen)
+float rngNow  = ta.sma(high - low, fvgLen)
+float refTra  = traNow[2]         // value at the close of t-2 (candle 1)
+float refRng  = rngNow[2]
+int   c1Time  = time[2]
+float c1High  = high[2]
+float c1Low   = low[2]
+int   prevT   = time[1]
+
+// The single gate between "observe" and "change state" (ARCHITECTURE §5).
+bool engineTick = not confirmedOnly or barstate.isconfirmed
+
+bool   intraday   = timeframe.isintraday
+bool   sesTfOk    = intraday and timeframe.in_seconds() <= 3600   // windows are meaningless above 1H
+string D_TF       = intraday ? "1D" : timeframe.period
+string W_TF       = intraday or timeframe.isdaily ? "1W" : timeframe.period
+bool   newDay     = timeframe.change(D_TF)
+bool   newWeek    = timeframe.change(W_TF)
+bool   atMidnight = hour(time, sesTz) == 0 and dayofmonth(time, sesTz) != dayofmonth(nz(time[1], time), sesTz)
+
+// DEF-G2: previous *completed* HTF bar. The [1] sits inside the requested
+// expression; lookahead_on only aligns that already-closed value to the start of
+// the current HTF bar. Without [1] this would leak the future.
+[pdH, pdL] = request.security(syminfo.tickerid, D_TF, [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[pwH, pwL] = request.security(syminfo.tickerid, W_TF, [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+// DEF-F1: membership by bar open time, all weekdays (futures open Sunday evening).
+bool inS1 = not na(time(timeframe.period, s1Ss + ":1234567", sesTz)) and sesTfOk
+bool inS2 = not na(time(timeframe.period, s2Ss + ":1234567", sesTz)) and sesTfOk
+bool inS3 = not na(time(timeframe.period, s3Ss + ":1234567", sesTz)) and sesTfOk
+bool inS4 = not na(time(timeframe.period, s4Ss + ":1234567", sesTz)) and sesTfOk
+
+// ════ L2 · DETECTION + L4 · FILTERING (pure, no state) ══════════════════════════
+
+// DEF-A1: raw 3-candle structure, evaluated on candle 3.
+bool  rawBull = low > c1High
+bool  rawBear = high < c1Low
+float rawGap  = rawBull ? low - c1High : rawBear ? c1Low - high : na   // points; same semantics both sides
+
+// DEF-A2: qualification ([calc]). ONE required size, shared by both directions:
+//   requiredGap = max(tick threshold, TR-average threshold, avg-range threshold)
+// A disabled threshold is 0; a reference still warming up is na and rejects.
+// Every reference is final at t-2. L4 extension point: future optional filters
+// (e.g. middle-candle direction) go here as separate [calc] terms, OFF by default.
+float tickReq  = fvgMinTicks * syminfo.mintick
+float traReq   = fvgMinTra > 0 ? fvgMinTra * refTra : 0.0
+float rngReq   = fvgMinRng > 0 ? fvgMinRng * refRng : 0.0
+float reqGap   = math.max(tickReq, traReq, rngReq)                // debug display
+// Equivalent to rawGap >= reqGap; only the tick term gets a 0.01-tick float tolerance.
+bool  gapPass  = not na(rawGap) and rawGap >= tickReq - EPS and rawGap >= traReq and rawGap >= rngReq
+bool  bullCand = rawBull and gapPass
+bool  bearCand = rawBear and gapPass
+
+// ════ L5 · EVENT BUS ═══════════════════════════════════════════════════════════
+
+f_px(float p) =>
+    na(p) ? "—" : str.tostring(p, format.mintick)
+
+f_tid(int t) =>
+    na(t) ? "—" : str.format_time(t, "yyyy-MM-dd HH:mm", sesTz)
+
+// Logged on history too, so every transition is auditable. No strings are built
+// here beyond the short reason code supplied by the caller.
+f_emit(int kind, int dir, int sid, int originBar, float price, string reason) =>
+    Event e = Event.new(kind, dir, sid, originBar, bar_index, time, price, reason)
+    barEv.push(e)
+    evLog.push(e)
+    if evLog.size() > EV_LOG_MAX
+        evLog.shift()
+    e
+
+f_evName(int k) =>
+    switch k
+        EV_FVG_CREATED => "FVG_CREATED"
+        EV_FVG_TOUCH   => "FVG_FIRST_TOUCH"
+        EV_FVG_CE      => "FVG_CE_TOUCH"
+        EV_FVG_FULL    => "FVG_FULL_FILL"
+        EV_FVG_INVAL   => "FVG_INVALIDATED"
+        EV_FVG_DROPPED => "FVG_DROPPED_MEMORY"
+        EV_SES_START   => "SESSION_START"
+        EV_SES_END     => "SESSION_END"
+        EV_LEVEL_SET   => "LEVEL_SET"
+        => "UNKNOWN"
+
+f_evText(Event e) =>
+    bool   isFvg = e.kind <= EV_FVG_DROPPED
+    string d     = e.dir > 0 ? (isFvg ? " BULL" : " HIGH") : e.dir < 0 ? (isFvg ? " BEAR" : " LOW") : ""
+    string id    = e.kind == EV_LEVEL_SET ? "" : " id=" + f_tid(e.sid)
+    f_evName(e.kind) + d + id + " px=" + f_px(e.price) + (e.reason == "" ? "" : " · " + e.reason)
+
+// ════ L3 · STATE MANAGEMENT (reads no display input) ═══════════════════════════
+
+// ── reference levels ──
+method pushExtreme(RefLevel this, float px) =>
+    bool better = this.isHigh ? px > this.price : px < this.price
+    if better
+        this.price      := px
+        this.anchorTime := time
+    better
+
+method markFinal(RefLevel this) =>
+    this.developing := false
+    this.knownTime  := time
+    this
+
+method supersede(RefLevel this) =>
+    this.endTime := time
+    this
+
+// DEF-G3: the chart bar that printed the extreme, only when the chart's own
+// tracked extreme equals the HTF value; otherwise unknown (na).
+f_anchor(float chartPx, int chartT, float htfPx) =>
+    not na(chartPx) and not na(htfPx) and math.abs(chartPx - htfPx) < HALF_TICK ? chartT : int(na)
+
+// Replaces the live level of one kind; the superseded instance is handed to L6.
+f_roll(int kind, string tag, int dir, float price, int anchorT) =>
+    if not na(price)
+        RefLevel old = liveLvl.get(kind)
+        if not na(old)
+            old.supersede()
+            lvlEndNow.push(old)
+        RefLevel lv = RefLevel.new(kind = kind, tag = tag, isHigh = dir > 0, developing = false, price = price, anchorTime = anchorT, knownTime = time)
+        liveLvl.set(kind, lv)
+        lvlNewNow.push(lv)
+        f_emit(EV_LEVEL_SET, dir, kind, bar_index, price, tag)
+    true
+
+// ── sessions ──
+// DEF-F4: complete on the first bar outside the window; that is when the final
+// high/low become known.
+f_sesFinalize(SessionRange s) =>
+    s.complete := true
+    s.endBar   := bar_index - 1
+    s.endTime  := prevT
+    s.hi.markFinal()
+    s.lo.markFinal()
+    sesDirtyNow.push(s)
+    f_emit(EV_SES_END, 0, s.id, s.startBar, na, s.name + " H " + f_px(s.hi.price) + " L " + f_px(s.lo.price))
+    true
+
+// DEF-F6: superseded by the next instance of the same window.
+f_sesSupersede(SessionRange s) =>
+    if not s.complete
+        f_sesFinalize(s)
+    s.hi.supersede()
+    s.lo.supersede()
+    sesEndNow.push(s)
+    true
+
+f_sesNew(int slot, string name) =>
+    SessionRange s = SessionRange.new(id = time, slot = slot, name = name, complete = false, startBar = bar_index, startTime = time)
+    s.hi := RefLevel.new(kind = -1, tag = name + " H", isHigh = true, developing = true, price = high, anchorTime = time)
+    s.lo := RefLevel.new(kind = -1, tag = name + " L", isHigh = false, developing = true, price = low, anchorTime = time)
+    sesDirtyNow.push(s)
+    f_emit(EV_SES_START, 0, s.id, bar_index, na, name)
+    s
+
+// DEF-F3: developing range = running extremes of the bars inside the window.
+f_sesExtend(SessionRange s) =>
+    bool upH = s.hi.pushExtreme(high)
+    bool upL = s.lo.pushExtreme(low)
+    if upH or upL
+        sesDirtyNow.push(s)
+    true
+
+f_sesStep(int slot, bool inNow, bool inPrev, string name) =>
+    SessionRange s = liveSes.get(slot)
+    // DEF-F2: never start on the first loaded bar (it would be a partial window).
+    if inNow and not inPrev and bar_index > 0
+        if not na(s)
+            f_sesSupersede(s)
+        liveSes.set(slot, f_sesNew(slot, name))
+    else if not na(s) and not s.complete
+        if inNow
+            f_sesExtend(s)
+        else
+            f_sesFinalize(s)
+    true
+
+// ── fair value gaps ──
+// Display/event policy → the milestone that counts as "mitigated" (DEF-A5).
+// Pure reads: the policy never changes what the engine records.
+method policyBar(Fvg z) =>
+    switch fvgMitRule
+        MitRule.firstTouch => z.touchBar
+        MitRule.midpoint   => z.ceBar
+        MitRule.fullFill   => z.fullBar
+        => z.invBar
+
+method policyTime(Fvg z) =>
+    switch fvgMitRule
+        MitRule.firstTouch => z.touchTime
+        MitRule.midpoint   => z.ceTime
+        MitRule.fullFill   => z.fullTime
+        => z.invTime
+
+// Was the zone confirmed and not yet past its policy milestone at bar b? Taking a
+// bar parameter (instead of "now") keeps a future historical-inspection mode
+// possible: the same records answer the question for any b in the memory window.
+method activeAt(Fvg z, int b) =>
+    int pb = z.policyBar()
+    z.confirmBar <= b and (na(pb) or pb > b)
+
+method age(Fvg z) =>
+    bar_index - z.confirmBar
+
+method fillPct(Fvg z) =>
+    float h = z.top - z.bottom
+    h <= 0 ? 0.0 : math.max(0.0, math.min(1.0, (z.isBull ? z.top - z.extreme : z.extreme - z.bottom) / h))
+
+// DEF-A4: advances one open zone by one bar and stamps each milestone once.
+// Wick milestones only move one way within a bar, so they are safe intrabar;
+// invalidation needs a close and runs only on a confirmed bar. DEF-A7: several
+// milestones on one bar are all stamped on that bar, in rule order.
+method advance(Fvg z) =>
+    int d = z.isBull ? 1 : -1
+    if z.isBull
+        if na(z.touchBar) and low <= z.top
+            z.touchBar  := bar_index
+            z.touchTime := time
+            f_emit(EV_FVG_TOUCH, d, z.id, z.originBar, z.top, "low<=top")
+        if na(z.ceBar) and low <= z.mid
+            z.ceBar  := bar_index
+            z.ceTime := time
+            f_emit(EV_FVG_CE, d, z.id, z.originBar, z.mid, "low<=CE")
+        if na(z.fullBar) and low <= z.bottom
+            z.fullBar  := bar_index
+            z.fullTime := time
+            f_emit(EV_FVG_FULL, d, z.id, z.originBar, z.bottom, "low<=bottom")
+        z.extreme := math.min(z.extreme, low)
+        if barstate.isconfirmed and close < z.bottom
+            z.invBar  := bar_index
+            z.invTime := time
+            f_emit(EV_FVG_INVAL, d, z.id, z.originBar, close, "close<bottom")
+    else
+        if na(z.touchBar) and high >= z.bottom
+            z.touchBar  := bar_index
+            z.touchTime := time
+            f_emit(EV_FVG_TOUCH, d, z.id, z.originBar, z.bottom, "high>=bottom")
+        if na(z.ceBar) and high >= z.mid
+            z.ceBar  := bar_index
+            z.ceTime := time
+            f_emit(EV_FVG_CE, d, z.id, z.originBar, z.mid, "high>=CE")
+        if na(z.fullBar) and high >= z.top
+            z.fullBar  := bar_index
+            z.fullTime := time
+            f_emit(EV_FVG_FULL, d, z.id, z.originBar, z.top, "high>=top")
+        z.extreme := math.max(z.extreme, high)
+        if barstate.isconfirmed and close > z.top
+            z.invBar  := bar_index
+            z.invTime := time
+            f_emit(EV_FVG_INVAL, d, z.id, z.originBar, close, "close>top")
+    z
+
+// DEF-A6: records stay in memory after invalidation (closed). Only open records
+// are advanced; closed ones cost one na() check per bar.
+f_fvgStep(array<Fvg> recs) =>
+    for z in recs
+        if na(z.invBar) and bar_index > z.confirmBar
+            z.advance()
+    true
+
+// ════ L6 · RENDERER (functions: read state, write drawing handles only) ═════════
+
+int rightT = time + rightOffset * TF_MS   // where "extends to now" ends
+
+// ── levels ──
+f_lvlVisible(int k) =>
+    k <= K_PDL ? pdShow : k <= K_PWL ? pwShow : k == K_DO ? doShow : moShow
+
+f_lvlCol(int k) =>
+    k <= K_PDL ? pdCol : k <= K_PWL ? pwCol : k == K_DO ? doCol : moCol
+
+f_lvlStyle(int k) =>
+    k <= K_PDL ? PD_STYLE : k <= K_PWL ? PW_STYLE : k == K_DO ? line.style_dotted : line.style_dashed
+
+// Session lines always start at their extreme; period levels follow the anchor
+// preference and fall back to the time the level became known.
+method x1(RefLevel this) =>
+    (this.kind < 0 or lvlAnchor) and not na(this.anchorTime) ? this.anchorTime : this.knownTime
+
+method drawLine(RefLevel this, color col, string style, bool withLabel) =>
+    this.ln := line.new(this.x1(), this.price, rightT, this.price, xloc = xloc.bar_time, color = col, style = style, width = 1)
+    if withLabel
+        this.lbl := label.new(rightT, this.price, this.tag, xloc = xloc.bar_time, style = label.style_label_left, color = CLR_NONE, textcolor = col, size = LBL_SIZE)
+    this
+
+// Idempotent: safe on every realtime tick.
+method syncLine(RefLevel this, color col, string style) =>
+    bool  ended = not na(this.endTime)
+    color c     = this.developing and not sesDev ? CLR_NONE : ended ? color.new(col, T_HIST) : col
+    if not na(this.ln)
+        this.ln.set_xy1(this.x1(), this.price)
+        this.ln.set_xy2(ended ? this.endTime : rightT, this.price)
+        this.ln.set_color(c)
+        this.ln.set_style(this.developing ? line.style_dotted : style)
+    if not na(this.lbl)
+        if ended
+            label.delete(this.lbl)
+            this.lbl := na
+        else
+            this.lbl.set_xy(rightT, this.price)
+            this.lbl.set_textcolor(c)
+            this.lbl.set_tooltip(this.tag + "  " + f_px(this.price))
+    this
+
+method eraseLine(RefLevel this) =>
+    line.delete(this.ln)
+    label.delete(this.lbl)
+    this.ln  := na
+    this.lbl := na
+    this
+
+// ── sessions ──
+f_sesVisible(int slot) =>
+    slot == 0 ? s1Show : slot == 1 ? s2Show : slot == 2 ? s3Show : s4Show
+
+f_sesCol(int slot) =>
+    slot == 0 ? s1Cl : slot == 1 ? s2Cl : slot == 2 ? s3Cl : s4Cl
+
+f_sesDraw(SessionRange s) =>
+    color col = f_sesCol(s.slot)
+    if sesHL and na(s.hi.ln)
+        s.hi.drawLine(col, line.style_solid, sesLabels)
+        s.lo.drawLine(col, line.style_solid, sesLabels)
+    if showSesBox and na(s.area)
+        s.area := box.new(s.startTime, s.hi.price, s.startTime, s.lo.price, xloc = xloc.bar_time, bgcolor = color.new(col, 94), border_color = color.new(col, 78), text = s.name, text_size = size.tiny, text_color = color.new(col, 35), text_halign = text.align_left, text_valign = text.align_top)
+    if showSesMid and na(s.mid)
+        s.mid := line.new(s.startTime, hl2, s.startTime, hl2, xloc = xloc.bar_time, color = color.new(col, 45), style = line.style_dotted, width = 1)
+    true
+
+f_sesSync(SessionRange s) =>
+    color col   = f_sesCol(s.slot)
+    int   right = s.complete ? s.endTime : time
+    float m     = (s.hi.price + s.lo.price) / 2
+    s.hi.syncLine(col, line.style_solid)
+    s.lo.syncLine(col, line.style_solid)
+    if not na(s.area)
+        s.area.set_lefttop(s.startTime, s.hi.price)
+        s.area.set_rightbottom(right, s.lo.price)
+    if not na(s.mid)
+        s.mid.set_xy1(s.startTime, m)
+        s.mid.set_xy2(right, m)
+    true
+
+f_sesErase(SessionRange s) =>
+    s.hi.eraseLine()
+    s.lo.eraseLine()
+    box.delete(s.area)
+    line.delete(s.mid)
+    s.area := na
+    s.mid  := na
+    true
+
+// Visual history, capped per session slot.
+f_sesHistPush(SessionRange s) =>
+    histSes.push(s)
+    int cnt = 0
+    for x in histSes
+        if x.slot == s.slot
+            cnt += 1
+    if cnt > sesHist
+        for i = 0 to histSes.size() - 1
+            if histSes.get(i).slot == s.slot
+                f_sesErase(histSes.remove(i))
+                break
+    true
+
+// ── fair value gaps ──
+f_fvgText(Fvg z) =>
+    if dbgOn
+        (z.isBull ? "▲ " : "▼ ") + str.format_time(z.id, "HH:mm", sesTz) + (na(z.touchBar) ? "" : " T") + (na(z.ceBar) ? "" : " C") + (na(z.fullBar) ? "" : " F") + " · " + str.tostring(math.round(z.fillPct() * 100)) + "%"
+    else
+        "FVG"
+
+method leftT(Fvg z) =>
+    fvgAnchor == ZoneAnchor.origin ? z.originTime : z.confirmTime
+
+method undraw(Fvg z) =>
+    box.delete(z.zone)
+    line.delete(z.ce)
+    z.zone := na
+    z.ce   := na
+    z
+
+// Create-or-update the active view of a zone.
+method drawActive(Fvg z) =>
+    color  col     = z.isBull ? fvgBullCol : fvgBearCol
+    bool   touched = not na(z.touchBar)
+    float  top     = fvgShrink and touched and z.isBull ? math.max(z.bottom, math.min(z.top, z.extreme)) : z.top
+    float  bot     = fvgShrink and touched and not z.isBull ? math.min(z.top, math.max(z.bottom, z.extreme)) : z.bottom
+    int    right   = fvgExtend ? rightT : z.confirmTime + rightOffset * TF_MS
+    color  bg      = touched ? color.new(col, math.min(100, color.t(col) + 6)) : col
+    string txt     = showFvgTxt ? f_fvgText(z) : ""
+    if na(z.zone)
+        z.zone := box.new(z.leftT(), top, right, bot, xloc = xloc.bar_time, bgcolor = bg, border_color = CLR_NONE, text = txt, text_size = size.tiny, text_color = color.new(col, 25), text_halign = text.align_right, text_valign = text.align_center)
+        if showCE
+            z.ce := line.new(z.leftT(), z.mid, right, z.mid, xloc = xloc.bar_time, color = color.new(col, 45), style = line.style_dotted, width = 1)
+    else
+        z.zone.set_top(top)
+        z.zone.set_bottom(bot)
+        z.zone.set_right(right)
+        z.zone.set_bgcolor(bg)
+        z.zone.set_text(txt)
+        if not na(z.ce)
+            z.ce.set_x2(right)
+    z
+
+// Frozen view ending at the bar the policy was met (original bounds).
+method drawFaded(Fvg z) =>
+    color col = z.isBull ? fvgBullCol : fvgBearCol
+    int   endT = z.policyTime()
+    z.zone := box.new(z.leftT(), z.top, endT, z.bottom, xloc = xloc.bar_time, bgcolor = color.new(col, T_FADED), border_color = CLR_NONE, text = dbgOn ? str.format_time(z.id, "HH:mm", sesTz) + " · mitigated" : "", text_size = size.tiny, text_color = color.new(col, 40), text_halign = text.align_right, text_valign = text.align_center)
+    if showCE
+        z.ce := line.new(z.leftT(), z.mid, endT, z.mid, xloc = xloc.bar_time, color = color.new(col, 85), style = line.style_dotted, width = 1)
+    z
+
+// Visual transition when a zone meets the display policy on this bar.
+f_onPolicyMet(Fvg z) =>
+    z.undraw()
+    if fvgShow and keepFaded
+        z.drawFaded()
+        fadedFvg.push(z)
+        while fadedFvg.size() > fvgMaxFaded
+            fadedFvg.shift().undraw()
+    true
+
+method metNow(Fvg z) =>
+    int pb = z.policyBar()
+    not na(pb) and pb == bar_index
+
+f_fadeNew(array<Fvg> recs) =>
+    for z in recs
+        if z.metNow()
+            f_onPolicyMet(z)
+    true
+
+// Exact reconciliation as of bar `b`: the newest `fvgMaxVis` zones active at b are
+// drawn; every other zone active at b is undrawn. Faded views are not touched.
+f_renderActive(array<Fvg> recs, int b) =>
+    int shown = 0
+    int n     = recs.size()
+    if n > 0
+        for i = n - 1 to 0
+            Fvg z = recs.get(i)
+            if z.activeAt(b)
+                if fvgShow and shown < fvgMaxVis and (fvgMaxAge == 0 or z.age() <= fvgMaxAge)
+                    shown += 1
+                    z.drawActive()
+                else
+                    z.undraw()
+    shown
+
+// ════ ENGINE RUN · L1 → L2/L4 → L3 → L5 (fixed order) ══════════════════════════
+
+barEv.clear()
+fvgDropNow.clear()
+lvlNewNow.clear()
+lvlEndNow.clear()
+sesDirtyNow.clear()
+sesEndNow.clear()
+
+if engineTick
+    // ── Levels (DEF-G1…G6). Always computed; display inputs are read by L6 only. ──
+    // barstate.isfirst seeds levels on the first loaded bar: on 1m, the start of
+    // the current week is usually not in history.
+    bool rollD = newDay or barstate.isfirst
+    bool rollW = newWeek or barstate.isfirst
+    if rollD
+        // DEF-G6: chart-aggregated trading day vs the HTF daily bar, complete days only.
+        if intraday and dFull and newDay and not na(pdH)
+            pdN += 1
+            if math.abs(dHi - pdH) >= HALF_TICK or math.abs(dLo - pdL) >= HALF_TICK
+                pdBad  += 1
+                pdBadT := time
+        if intraday
+            f_roll(K_PDH, "PDH", 1, pdH, f_anchor(dHi, dHiT, pdH))
+            f_roll(K_PDL, "PDL", -1, pdL, f_anchor(dLo, dLoT, pdL))
+            if newDay and not barstate.isfirst
+                f_roll(K_DO, "DO", 0, open, time)
+        dFull   := not barstate.isfirst
+        dStartT := time
+        dHi     := high
+        dHiT    := time
+        dLo     := low
+        dLoT    := time
+    else
+        if high > dHi
+            dHi  := high
+            dHiT := time
+        if low < dLo
+            dLo  := low
+            dLoT := time
+    if rollW
+        if (intraday or timeframe.isdaily) and wFull and newWeek and not na(pwH)
+            pwN += 1
+            if math.abs(wHi - pwH) >= HALF_TICK or math.abs(wLo - pwL) >= HALF_TICK
+                pwBad  += 1
+                pwBadT := time
+        if intraday or timeframe.isdaily
+            f_roll(K_PWH, "PWH", 1, pwH, f_anchor(wHi, wHiT, pwH))
+            f_roll(K_PWL, "PWL", -1, pwL, f_anchor(wLo, wLoT, pwL))
+        wFull   := not barstate.isfirst
+        wStartT := time
+        wHi     := high
+        wHiT    := time
+        wLo     := low
+        wLoT    := time
+    else
+        if high > wHi
+            wHi  := high
+            wHiT := time
+        if low < wLo
+            wLo  := low
+            wLoT := time
+    if atMidnight and sesTfOk
+        f_roll(K_MO, "MO", 0, open, time)
+
+    // ── Sessions (DEF-F1…F6). Hidden sessions are tracked identically. ──
+    f_sesStep(0, inS1, inS1[1], s1Nm)
+    f_sesStep(1, inS2, inS2[1], s2Nm)
+    f_sesStep(2, inS3, inS3[1], s3Nm)
+    f_sesStep(3, inS4, inS4[1], s4Nm)
+
+    // ── FVG (DEF-A1…A7). Existing records advance first, then the new one is
+    //    registered, so a zone is never touched by the candle that created it. ──
+    f_fvgStep(bullFvgs)
+    f_fvgStep(bearFvgs)
+    if barstate.isconfirmed and (bullCand or bearCand)
+        bool  up  = bullCand
+        int   d   = up ? 1 : -1
+        float top = up ? low : c1Low
+        float bot = up ? c1High : high
+        Fvg z = Fvg.new(id = time, isBull = up, tf = timeframe.period, originBar = bar_index - 2, originTime = c1Time, confirmBar = bar_index, confirmTime = time, top = top, bottom = bot, mid = (top + bot) / 2, sizeTra = (top - bot) / refTra, thrTick = tickReq, thrTra = traReq, thrRng = rngReq, extreme = up ? top : bot)
+        array<Fvg> recs = up ? bullFvgs : bearFvgs
+        recs.push(z)
+        f_emit(EV_FVG_CREATED, d, z.id, z.originBar, z.mid, f_px(bot) + "–" + f_px(top))
+        // DEF-A6: deliberate logical deletion. Oldest closed record first; an open
+        // record only when every record of this direction is still open.
+        if recs.size() > fvgMemory
+            int victim = 0
+            for i = 0 to recs.size() - 2
+                if not na(recs.get(i).invBar)
+                    victim := i
+                    break
+            Fvg  old    = recs.remove(victim)
+            bool wasOpen = na(old.invBar)
+            if wasOpen
+                dropOpen += 1
+            else
+                dropClosed += 1
+            fvgDropNow.push(old)
+            f_emit(EV_FVG_DROPPED, d, old.id, old.originBar, old.mid, wasOpen ? "open record · lifecycle tracking stopped" : "closed record")
+
+// ════ L6 · RENDERER (run) ══════════════════════════════════════════════════════
+
+// Levels: superseded instances freeze and join the capped visual history.
+for lv in lvlEndNow
+    lv.syncLine(f_lvlCol(lv.kind), f_lvlStyle(lv.kind))
+    if not na(lv.ln)
+        histLvl.push(lv)
+        while histLvl.size() > lvlHist
+            histLvl.shift().eraseLine()
+for lv in lvlNewNow
+    if f_lvlVisible(lv.kind)
+        lv.drawLine(f_lvlCol(lv.kind), f_lvlStyle(lv.kind), lvlLabels)
+        lv.syncLine(f_lvlCol(lv.kind), f_lvlStyle(lv.kind))
+
+// Sessions: changed instances are (re)drawn; superseded ones go to history.
+for s in sesDirtyNow
+    if f_sesVisible(s.slot)
+        f_sesDraw(s)
+        f_sesSync(s)
+for s in sesEndNow
+    f_sesSync(s)
+    if not na(s.hi.ln) or not na(s.area) or not na(s.mid)
+        f_sesHistPush(s)
+
+// FVG: a record dropped by memory loses its active view; if it met the policy on
+// this very bar it still gets its faded view. Then policy transitions of this bar.
+for z in fvgDropNow
+    if z.metNow()
+        f_onPolicyMet(z)
+    else if z.activeAt(bar_index)
+        z.undraw()
+f_fadeNew(bullFvgs)
+f_fadeNew(bearFvgs)
+
+// Everything that "extends to now" is reconciled once, on the last bar.
+int shownBull = 0
+int shownBear = 0
+if barstate.islast
+    shownBull := f_renderActive(bullFvgs, bar_index)
+    shownBear := f_renderActive(bearFvgs, bar_index)
+    for lv in liveLvl
+        if not na(lv)
+            lv.syncLine(f_lvlCol(lv.kind), f_lvlStyle(lv.kind))
+    for s in liveSes
+        if not na(s)
+            f_sesSync(s)
+
+// Forming-FVG preview: provisional, one slot, rebuilt every tick, never logged.
+var box devBox = na
+if barstate.islast
+    box.delete(devBox)
+    devBox := na
+    if fvgShow and fvgPreview and not confirmedOnly and not barstate.isconfirmed and (bullCand or bearCand)
+        color pc = bullCand ? fvgBullCol : fvgBearCol
+        int   pl = fvgAnchor == ZoneAnchor.origin ? c1Time : time
+        devBox := box.new(pl, bullCand ? low : c1Low, rightT, bullCand ? c1High : high, xloc = xloc.bar_time, bgcolor = color.new(pc, 94), border_color = color.new(pc, 35), border_style = line.style_dashed, text = "forming · provisional", text_size = size.tiny, text_color = color.new(pc, 25), text_halign = text.align_right, text_valign = text.align_center)
+
+// ════ L7 · ALERTS ══════════════════════════════════════════════════════════════
+// Alert toggles filter delivery only; every event is logged regardless.
+
+f_alertOn(Event e) =>
+    switch e.kind
+        EV_FVG_CREATED => e.dir > 0 ? alBullNew : alBearNew
+        EV_FVG_TOUCH   => alTouch
+        EV_FVG_CE      => alCE
+        EV_FVG_FULL    => alFull
+        EV_FVG_INVAL   => alInval
+        => false
+
+varip int    firedBar  = -1
+varip string firedKeys = ""
+if barstate.isrealtime and barEv.size() > 0
+    string head = syminfo.ticker + " " + timeframe.period + " · "
+    if alTiming == AlertTiming.barClose
+        // The closing tick replays the bar from rolled-back state, so its event
+        // list equals the historical event list of that bar.
+        if barstate.isconfirmed
+            string msg = ""
+            for e in barEv
+                if f_alertOn(e)
+                    msg += (msg == "" ? "" : " | ") + f_evText(e)
+            if msg != ""
+                alert(head + msg, alert.freq_once_per_bar_close)
+    else
+        // Experimental: varip survives rollback, so each event key fires once per bar.
+        if firedBar != bar_index
+            firedBar  := bar_index
+            firedKeys := "|"
+        string fresh = ""
+        for e in barEv
+            string k = str.tostring(e.kind) + ":" + str.tostring(e.sid)
+            if f_alertOn(e) and not str.contains(firedKeys, "|" + k + "|")
+                firedKeys += k + "|"
+                fresh     += (fresh == "" ? "" : " | ") + f_evText(e)
+        if fresh != ""
+            alert(head + fresh, alert.freq_all)
+
+// ════ L7 · DIAGNOSTICS (one table, no drawing objects) ═════════════════════════
+
+var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 22, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
+var table warnTbl = table.new(position.top_right, 1, 2)
+
+f_dbgRow(int r, string k, string v) =>
+    table.cell(dbgTbl, 0, r, k, text_color = #787B86, text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top)
+    table.cell(dbgTbl, 1, r, v, text_color = #D1D4DC, text_size = size.tiny, text_halign = text.align_left)
+    true
+
+f_mt(int t) =>
+    na(t) ? "—" : str.format_time(t, "MM-dd HH:mm", sesTz)
+
+// Thresholds are not on the tick grid: print them unrounded.
+f_num(float x) =>
+    na(x) ? "—" : str.tostring(x, "#.####")
+
+f_ruleName() =>
+    switch fvgMitRule
+        MitRule.firstTouch => "first touch"
+        MitRule.midpoint   => "CE"
+        MitRule.fullFill   => "full fill"
+        => "close through"
+
+f_countOpen(array<Fvg> recs) =>
+    int c = 0
+    for z in recs
+        if na(z.invBar)
+            c += 1
+    c
+
+// n-th newest record across both directions (by confirmation time).
+f_nthNewest(int n) =>
+    int ib   = bullFvgs.size() - 1
+    int ir   = bearFvgs.size() - 1
+    Fvg pick = na
+    for k = 0 to n
+        Fvg b = na
+        Fvg r = na
+        if ib >= 0
+            b := bullFvgs.get(ib)
+        if ir >= 0
+            r := bearFvgs.get(ir)
+        if na(b) and na(r)
+            pick := na
+            break
+        if na(r) or (not na(b) and b.confirmTime > r.confirmTime)
+            pick := b
+            ib   -= 1
+        else
+            pick := r
+            ir   -= 1
+    pick
+
+f_sesState(SessionRange s) =>
+    string out = "—"
+    if not na(s)
+        out := (s.complete ? "DONE " : "LIVE ") + f_mt(s.startTime) + (s.complete ? "→" + str.format_time(s.endTime, "HH:mm", sesTz) : "") + " · " + f_px(s.hi.price) + " / " + f_px(s.lo.price)
+    out
+
+f_lvlPx(int k) =>
+    RefLevel lv = liveLvl.get(k)
+    na(lv) ? "—" : f_px(lv.price)
+
+f_check(int n, int bad, int badT) =>
+    n == 0 ? "no complete period on chart yet" : str.tostring(n - bad) + "/" + str.tostring(n) + " match" + (bad > 0 ? " · last ✗ " + str.format_time(badT, "yyyy-MM-dd", sesTz) : "")
+
+f_lastEvents(int n) =>
+    string out = ""
+    int sz = evLog.size()
+    if sz > 0
+        for i = sz - 1 to math.max(0, sz - n)
+            Event e = evLog.get(i)
+            out += (out == "" ? "" : "\n") + f_mt(e.eventTime) + "  " + f_evText(e)
+    out
+
+if dbgOn and barstate.islast
+    int bo = f_countOpen(bullFvgs)
+    int ro = f_countOpen(bearFvgs)
+    f_dbgRow(0, "Engine", (confirmedOnly ? "CONFIRMED" : "LIVE") + (barstate.isconfirmed ? " · bar closed" : " · bar open"))
+    f_dbgRow(1, "Symbol", syminfo.tickerid + " · exch tz " + syminfo.timezone + " · " + syminfo.session)
+    f_dbgRow(2, "FVG records ▲ · ▼ (open+closed)", str.tostring(bo) + "+" + str.tostring(bullFvgs.size() - bo) + " · " + str.tostring(ro) + "+" + str.tostring(bearFvgs.size() - ro) + "  (memory " + str.tostring(fvgMemory) + "/dir)")
+    f_dbgRow(3, "FVG drawn ▲ · ▼ · faded", str.tostring(shownBull) + " · " + str.tostring(shownBear) + " · " + str.tostring(fadedFvg.size()))
+    f_dbgRow(4, "Dropped by memory (open · closed)", str.tostring(dropOpen) + " · " + str.tostring(dropClosed))
+    f_dbgRow(5, s1Nm, f_sesState(liveSes.get(0)))
+    f_dbgRow(6, s2Nm, f_sesState(liveSes.get(1)))
+    f_dbgRow(7, s3Nm, f_sesState(liveSes.get(2)))
+    f_dbgRow(8, s4Nm, f_sesState(liveSes.get(3)))
+    f_dbgRow(9, "PDH / PDL · PWH / PWL", f_lvlPx(K_PDH) + " / " + f_lvlPx(K_PDL) + " · " + f_lvlPx(K_PWH) + " / " + f_lvlPx(K_PWL))
+    f_dbgRow(10, "Day · week start (ET)", (na(dStartT) ? "—" : str.format_time(dStartT, "EEE MM-dd HH:mm", "America/New_York")) + " · " + (na(wStartT) ? "—" : str.format_time(wStartT, "EEE MM-dd HH:mm", "America/New_York")))
+    f_dbgRow(11, "D source check", f_check(pdN, pdBad, pdBadT))
+    f_dbgRow(12, "W source check", f_check(pwN, pwBad, pwBadT))
+    f_dbgRow(13, "Objects box · line · label", str.tostring(box.all.size()) + " · " + str.tostring(line.all.size()) + " · " + str.tostring(label.all.size()))
+    Fvg q = f_nthNewest(dbgInspect)
+    if na(q)
+        f_dbgRow(14, "Inspect #" + str.tostring(dbgInspect), "no record in memory")
+        for r = 15 to 20
+            f_dbgRow(r, "", "")
+    else
+        f_dbgRow(14, "Inspect #" + str.tostring(dbgInspect), (q.isBull ? "BULL" : "BEAR") + " · id " + f_tid(q.id) + " · tf " + q.tf)
+        f_dbgRow(15, "origin → confirm", "bar " + str.tostring(q.originBar) + " (" + f_mt(q.originTime) + ") → bar " + str.tostring(q.confirmBar) + " (" + f_mt(q.confirmTime) + ")")
+        float g  = q.top - q.bottom
+        bool  ok = g >= q.thrTick - EPS and g >= q.thrTra and g >= q.thrRng
+        f_dbgRow(16, "zone prices", "top " + f_px(q.top) + " · CE " + f_px(q.mid) + " · bottom " + f_px(q.bottom))
+        f_dbgRow(17, "size check @ birth", "gap " + f_px(g) + " pts = " + str.tostring(math.round(g / syminfo.mintick)) + " ticks (mintick " + f_num(syminfo.mintick) + ") · required max(tick " + f_num(q.thrTick) + ", TR " + f_num(q.thrTra) + ", rng " + f_num(q.thrRng) + ") = " + f_num(math.max(q.thrTick, q.thrTra, q.thrRng)) + " → " + (ok ? "PASS" : "INCONSISTENT"))
+        f_dbgRow(18, "touch · CE · full · inval", f_mt(q.touchTime) + " · " + f_mt(q.ceTime) + " · " + f_mt(q.fullTime) + " · " + f_mt(q.invTime))
+        f_dbgRow(19, "policy: " + f_ruleName(), q.activeAt(bar_index) ? "ACTIVE (not met)" : "MET " + f_mt(q.policyTime()))
+        f_dbgRow(20, "record", (na(q.invBar) ? "OPEN" : "CLOSED (invalidated)") + " · fill " + str.tostring(math.round(q.fillPct() * 100)) + "% · age " + str.tostring(q.age()) + "b · drawn " + (na(q.zone) ? "no" : "yes"))
+    f_dbgRow(21, "Last events", f_lastEvents(6))
+
+// Normal-mode warnings: non-standard candles, and objects nearing the hard limit
+// (TradingView would otherwise delete the oldest drawings silently).
+if barstate.islast
+    int peak = math.max(box.all.size(), line.all.size(), label.all.size())
+    table.cell(warnTbl, 0, 0, chart.is_standard ? "" : "IST · non-standard candles: FVGs and levels use synthetic prices", text_color = #FF9800, text_size = size.small)
+    table.cell(warnTbl, 0, 1, peak > OBJ_WARN ? "IST · " + str.tostring(peak) + " drawing objects of one type (limit 500): lower display caps" : "", text_color = #FF9800, text_size = size.small)
+
+// Data Window only, per bar (put the cursor on candle 3): the exact numbers the
+// L4 filter used, so any accept/reject decision can be audited.
+plot(dbgOn ? (bullCand ? 2 : rawBull ? 1 : bearCand ? -2 : rawBear ? -1 : 0) : na, "dbg · candle 3 verdict (±2 PASS · ±1 REJECT · 0 no gap)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? rawGap : na, "dbg · raw gap (points)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? math.round(rawGap / syminfo.mintick) : na, "dbg · raw gap (ticks)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? syminfo.mintick : na, "dbg · syminfo.mintick", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? tickReq : na, "dbg · required · ticks (points)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? traReq : na, "dbg · required · TR average (points)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? rngReq : na, "dbg · required · avg range (points)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? reqGap : na, "dbg · required gap = max (points)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? refTra : na, "dbg · TR average at candle 1 (t-2)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? refRng : na, "dbg · avg range at candle 1 (t-2)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgOn ? bullFvgs.size() + bearFvgs.size() : na, "dbg · FVG records (logical)", color = #787B86, display = display.data_window, editable = false)
