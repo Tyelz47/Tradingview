@@ -77,8 +77,8 @@ python -m pip install -r requirements-dev.txt
 | Mode | Use | Hypothesis examples / test | Stateful | Long walks | Time here |
 |---|---|---|---|---|---|
 | `--mode quick` | every code change | 40 | 15 × 40 steps | 1 × 3,000 bars | ~10 s |
-| `--mode full` (default) | before TradingView validation | 250 | 60 × 60 steps | 7 × 20,000 bars | ~1.5 min |
-| `--mode deep` | before a version freeze | 2,500 | 400 × 100 steps | 14 × 50,000 bars | several minutes |
+| `--mode full` (default) | before TradingView validation | 250 | 60 × 60 steps | 7 × 20,000 bars | ~1.6 min |
+| `--mode deep` | before a version freeze | 2,500 | 400 × 100 steps | 14 × 50,000 bars | ~10 min |
 
 ```bash
 python validation/validation_agent.py --mode quick
