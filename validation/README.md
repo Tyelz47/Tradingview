@@ -15,7 +15,7 @@ python -m validation                  # = python validation/validation_agent.py 
 | The specification, as a Python **reference model** (oracle): FVG detection, thresholds and lifecycle, sessions, the chart-side level logic, swings, BSL/SSL, taken / sweep / break, EQH/EQL clusters | deterministic scenarios, 40 named invariants, property, stateful and long-walk fuzzing, golden cases |
 | The **Pine source text** | 15 static checks: calc/view separation, single creation paths, the renderer never writes state, no-leak `request.security`, defaults/presets/constants/event names equal to the oracle, Phase 1 baseline diff guard |
 | **Regressions** | canonical event stream + final state vs a committed baseline; old reference models read from git tags |
-| **Pine ↔ Python parity** | only with data you take from TradingView by hand. **Full bar-by-bar** (paid plan): `python -m validation.parity EXPORT.csv` compares the IST Data Window on every bar. **Manual event parity** (free plan, weaker): `python -m validation.parity --manual FILE` compares the settings, counts and events you copy |
+| **Pine ↔ Python parity** | only with data you take from TradingView by hand. **Full CSV bar-by-bar** (paid plan): `python -m validation.parity EXPORT.csv` compares the IST Data Window on every bar. **Bounded Pine-Log bar-by-bar** (free plan): `python -m validation.parity --capture FILE` replays a window captured to Pine Logs. **Manual event parity** (free plan, weakest): `python -m validation.parity --manual FILE` compares the settings, counts and events you copy |
 
 **Never claimed** (the report marks these MANUAL / TRADINGVIEW REQUIRED, unless observed data is supplied):
 * Pine compilation
@@ -53,7 +53,8 @@ validation/
   fuzz/                 Hypothesis strategies, property tests, stateful machine, long walks
   golden/               golden dataset (synthetic/ now, nq/ for real labelled cases) + README
   parity/               full parity (python -m validation.parity EXPORT.csv → pine_observed.json) and manual
-                        parity (manual.py, --manual manual_observed.txt; manual_observed_template.txt)
+                        parity (manual.py, --manual manual_observed.txt; manual_observed_template.txt) and
+                        bounded Pine-Log parity (capture.py, --capture pine_capture.txt)
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```
@@ -134,17 +135,17 @@ See `golden/README.md`. Real NQ cases go to `golden/nq/` with `"source": "tradin
 
 ## Pine parity (observed TradingView data)
 
-There are two levels, and the report never mixes them:
+There are three levels, and the report never mixes them:
 
-| | FULL BAR-BY-BAR PARITY | MANUAL EVENT PARITY |
-|---|---|---|
-| TradingView plan | paid (*Export chart data*) | free |
-| Input | one CSV export | `manual_observed.txt`: values and event lines copied from the debug table and Pine Logs |
-| Compared | 9 Data Window series on every bar | only what you copy: settings, debug-row counts, the listed events |
-| Candles for the oracle | in the export | a separate OHLC file you supply (`CANDLES=`) |
-| A PASS means | Pine and the oracle agree on every exported bar | no difference in what you copied; says nothing about the rest |
+| | FULL CSV BAR-BY-BAR PARITY | BOUNDED PINE-LOG BAR-BY-BAR PARITY | MANUAL EVENT PARITY |
+|---|---|---|---|
+| TradingView plan | paid (*Export chart data*) | free | free |
+| Input | one CSV export | `pine_capture.txt`: an IST *Parity capture* pasted from Pine Logs | `manual_observed.txt`: values and event lines copied by hand |
+| Candles for the oracle | in the export | in the capture (exact, rebuilt from the BAR lines) | a separate OHLC file you supply (`CANDLES=`) |
+| Compared | 9 Data Window series on every bar | 7 per-bar series on every bar after the warm-up, and the events of structures born inside the window | only what you copy: settings, debug-row counts, the listed events |
+| A PASS means | Pine and the oracle agree on every exported bar | they agree on that window; nothing about earlier history | no difference in what you copied |
 
-### Full bar-by-bar parity (Data Window export)
+### Full CSV bar-by-bar parity (Data Window export)
 
 With Debug mode ON, IST writes its per-bar decisions to the Data Window. TradingView's *Export chart data* includes every Data Window plot as a column, with the plot title as the header. One export therefore holds both the candles and what Pine decided on each bar. Nothing scrapes TradingView: you export by hand.
 
@@ -181,6 +182,60 @@ Integer codes must be equal. Prices may differ by up to 1e-4 points, because the
 **Check the swing counts first.** The Pine counts printed for the export must equal debug rows 22–23. If they do, the export starts at the indicator's first bar and every bar can be compared. If they do not, take codes can differ near the start, because memory and history before the export are missing. In that case, compare a later window with `--from`.
 
 **What the Data Window does not cover:** EQH/EQL clusters, FVG milestones, sessions and previous levels. For those, paste lines from the debug row "Last events" (or alert messages) verbatim into `observed_event_lines`. Optional field values from the inspectors go into `observed_states` (format: `parity/pine_observed.example.json`). The importer keeps both when it rewrites the file.
+
+### Bounded Pine-Log bar-by-bar parity (free plan)
+
+IST v0.4.3-dev has a debug-only input, **Parity capture → Pine Logs** (default OFF), with **Capture last N closed bars** (default 300, 50–2,000). When it is ON, IST writes to Pine Logs:
+
+```text
+CAPTURE|sym=CME_MINI:NQ1!|tf=1|tick=0.25|tz=America/New_York|confirmed=1|liq=1|preset=Balanced|left=5|right=3|k=1|…|bars=300|warmup=17
+BAR|2026-10-27T10:31:00-0400|i=10234|O=21345.25|H=21347|L=21344.5|C=21346.75|FV=0|FR=1.0357|SH=0|SL=2|RH=na|RL=6.25|RQ=4.0179
+2026-10-27 10:31  SSL_CREATED id=2026-10-27 10:28 px=21340.50 · reaction 1.56×TR ≥ 1
+…
+END|bars=317
+```
+
+* **CAPTURE** holds every calculation setting the oracle needs: the liquidity and EQ inputs, the FVG thresholds and memories, the session windows and the timezone. Nothing has to be typed.
+* **BAR**, one per closed bar, holds:
+  * the bar's open time with its UTC offset and its bar index;
+  * the exact OHLC (8 decimals);
+  * FVG verdict `FV` (±2 created, ±1 rejected, 0) and required gap `FR`;
+  * swing verdicts `SH`/`SL` (2 PASS, 1 REJECT, 0 none);
+  * reactions `RH`/`RL` on pivot bars;
+  * required reaction `RQ` (k × TR average).
+* After each BAR line come that bar's **events**, in the Pine Logs event format.
+* **Only closed bars** are logged. Logging is **bounded**: N + warm-up bars, then END, then nothing more, even in realtime. With the capture ON, events are logged for the captured bars only.
+
+Run, after pasting the whole capture into `validation/parity/pine_capture.txt`:
+
+```bash
+python -m validation.parity --capture validation/parity/pine_capture.txt
+```
+
+The pane's own timestamps in front of each line, blank lines and pane text are ignored. **Anything that would make the candles inexact is rejected** (exit 2), with the line number:
+* no CAPTURE line;
+* a missing bar (index gap) or a bar pasted twice;
+* wrong OHLC (high below open/close, off the tick grid, `na`, not a number);
+* a malformed timestamp;
+* a count that disagrees with END.
+
+**Warm-up.** The oracle sees only the captured bars, so its first bars lack history: its TR on the first bar has no previous close, and the first pivots lack their left window. IST therefore captures the warm-up automatically (`warmup` = max(FVG length + 2, max(14, left) + right) = 17 for Balanced, 19 for Strict, 16 for Aggressive), and none of it is compared:
+
+| Compared from capture bar | Series |
+|---|---|
+| FVG length + 2 | FVG verdict, required gap |
+| max(14, left) + right | swing verdicts, reactions (on PASS bars), required reaction |
+
+**Events.** Only structures born inside the comparable region are compared. These are FVGs whose candle 3 is after the FVG warm-up, levels whose swing bar is after the liquidity warm-up, and sessions that start inside the window. For each, the check covers type, direction, id, time and price, an event logged twice, an extra event and a missing event. Everything the oracle cannot know is **NOT OBSERVABLE** and never compared:
+* levels and FVGs born before the window, or in its warm-up, including their takes, sweeps and breaks inside the window;
+* EQH/EQL clusters, which can include older levels;
+* `*_DROPPED_MEMORY` (Pine's memory also holds older records), and any event of a structure after one side dropped it;
+* sessions already running at the start;
+* `LEVEL_SET`.
+
+The per-bar take codes are not in the BAR line for the same reason: one bar can also take an older level.
+
+**Self-test.** Synthetic captures are written from an oracle run over the whole history, which is what Pine knows, and cut to the last N + warm-up bars. Over 138 runs (3 presets, 20 seeds, windows of 300 to 2,000 bars) this gives 0 false differences and 228,008 matched events. Injected faults are each found.
 
 ### Manual event parity (free plan)
 
@@ -224,7 +279,7 @@ Event matching: by type and `id=` (the structure id), otherwise by type and time
 
 **What it cannot check:** every bar that is not in your copy. That includes FVG and swing decisions on bars without a listed event, Data Window values, the required gap and reaction thresholds, sessions not listed, and everything before the oldest line of a block. It also cannot check what Pine draws, or any setting not in the file (the oracle uses the IST defaults). A manual PASS is never full parity.
 
-Exit codes: 0 = no difference, 1 = differences, 2 = the file is malformed (every bad line is listed with its number). `python -m validation` runs `parity/manual_observed.txt` when it exists and shows the result next to the full parity.
+Exit codes: 0 = no difference, 1 = differences, 2 = the file is malformed (every bad line is listed with its number). `python -m validation` runs `parity/pine_capture.txt` and `parity/manual_observed.txt` when they exist and shows each result on its own line, next to the full CSV parity.
 
 ## Regression baseline
 

@@ -1,5 +1,40 @@
 # Changelog
 
+## Tooling · validation agent 1.3.0 (2026-10-27, branch `tooling/validation-agent`) — bounded Pine-Log parity
+
+* `python -m validation.parity --capture validation/parity/pine_capture.txt` rebuilds the exact candles of an IST *Parity capture* pasted from Pine Logs, replays them with the oracle, and compares two things after the warm-up:
+  * on every bar: FVG verdict and required gap, swing verdicts, reactions on PASS bars, required reaction;
+  * the events of structures born inside the window: type, direction, id, time, price, duplicates, extra and missing.
+* Everything that depends on history before the window is NOT OBSERVABLE: older levels and FVGs (and their takes), EQ clusters, memory drops, running sessions, LEVEL_SET.
+* The parser rejects inexact input with line numbers: a missing bar, a duplicate bar, wrong OHLC, a malformed timestamp, a count that disagrees with END, no CAPTURE line.
+* Three parity levels, labelled apart in the CLI and the report: FULL CSV BAR-BY-BAR PARITY, BOUNDED PINE-LOG BAR-BY-BAR PARITY, MANUAL EVENT PARITY. CSV parity and manual parity are unchanged.
+* 21 new tests (`tests/test_parity_capture.py`), including successful parity on 4 configurations. A one-off sweep of 138 runs (3 presets × 20 seeds, windows of 300–2,000 bars) gave 0 false differences.
+
+## v0.4.3-dev — Parity capture to Pine Logs (2026-10-27, branch `tooling/validation-agent`)
+
+**CHANGE.** Diagnostics only (L7). Two new [view] inputs in DEVELOPER: "Parity capture → Pine Logs" (**default OFF**) and "Capture last N closed bars" (300, 50–2,000). When the capture is ON:
+* One CAPTURE line with the calculation settings.
+* For each of the last N closed bars, plus the warm-up the comparison needs (max(FVG length + 2, max(14, left) + right); Balanced 17), one BAR line followed by that bar's events. The BAR line holds:
+  * time with UTC offset and bar index;
+  * OHLC with 8 decimals;
+  * FVG verdict and required gap;
+  * swing verdicts;
+  * reactions on pivot bars;
+  * required reaction.
+* Then END.
+* Bounded by a counter: at most N + warm-up bars, nothing afterwards, also in realtime.
+* While the capture is ON, the Debug-mode event logging is limited to the captured bars.
+
+**WHY.** On a free plan there is no candle export. The capture gives the exact OHLC of a window, so the oracle can replay Pine's own bars.
+
+**PHASE 1 IMPACT.** None. No detection, state, event, alert or drawing line changed. The BAR line prints values that the Data Window plots already compute.
+
+**REPAINT IMPACT.** None. Only `barstate.isconfirmed` bars are logged. `last_bar_index` only selects which closed bars are written.
+
+**REGRESSION TESTS.**
+* The static checks and the full validation agent pass. The oracle and the regression baseline are unchanged.
+* TradingView: L00 must be re-run on v0.4.3-dev. New L44 (capture) is PENDING.
+
 ## Tooling · validation agent 1.2.0 (2026-10-27, branch `tooling/validation-agent`) — manual event parity for the free plan
 
 * `python -m validation.parity --manual validation/parity/manual_observed.txt --preset balanced` compares what you copy from the IST debug table and Pine Logs with the oracle. No TradingView export is needed.

@@ -317,6 +317,7 @@ Shared code that changed (each documented in CHANGELOG v0.4.0-dev with WHY / PHA
 | `f_alertOn` gains 4 cases | none: the new toggles default OFF |
 | Debug table 22 → 34 rows; "Last events" moves from row 21 to row 33 (v0.4.0-dev: 32 rows, row 31) | display only; rows 0–20 unchanged |
 | v0.4.2-dev: 35 rows, row 34 "Loaded history (closed bars)"; with Debug mode ON, one Pine Logs line per event of a closed bar (the "Last events" text with the full date) | diagnostics only: reads the bar's event list, writes nothing |
+| v0.4.3-dev: "Parity capture → Pine Logs" (default OFF): the last N closed bars plus warm-up as machine-readable lines (settings, OHLC, per-bar debug values, events), bounded to N + warm-up bars | diagnostics only: reads values already computed for the Data Window, writes nothing |
 | 7 Data Window plots appended after the 11 Phase 1 plots | display only; Phase 1 plot order unchanged |
 | Tooltips (`Minimal mode`, `Debug mode`) mention liquidity | text only |
 | Event log (cap 40) is shared | debug display only: "Last events" spans less time when liquidity is busy |

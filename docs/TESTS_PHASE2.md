@@ -1,4 +1,4 @@
-# IST — Phase 2 acceptance tests (liquidity engine, v0.4.2-dev)
+# IST — Phase 2 acceptance tests (liquidity engine, v0.4.3-dev)
 
 Definitions: docs/LIQUIDITY.md (DEF-L1…L7). Phase 1 tests: docs/TESTS.md (unchanged).
 
@@ -12,9 +12,9 @@ Definitions: docs/LIQUIDITY.md (DEF-L1…L7). Phase 1 tests: docs/TESTS.md (unch
 | Kind | Total | PASS | FAIL | Pending |
 |---|---|---|---|---|
 | S · static / model (run here on v0.4.1-dev) | 13 | 13 | 0 | 0 |
-| L · TradingView runtime | 44 (L00–L43) | 0 | 0 | 44 |
+| L · TradingView runtime | 45 (L00–L44) | 0 | 0 | 45 |
 
-**Phase 2 is not complete.** L00 passed on v0.4.1-dev (user, 2026-10-27). v0.4.2-dev changes debug output only (one Pine Logs line per event, row 34 "Loaded history"), but it is new source: L00 must be re-run on it.
+**Phase 2 is not complete.** L00 passed on v0.4.1-dev (user, 2026-10-27). v0.4.2-dev and v0.4.3-dev change debug output only: Pine Logs event lines, row 34 "Loaded history", and the Parity capture (default OFF). It is still new source, so L00 must be re-run on v0.4.3-dev.
 
 **Runtime observation (user, 2026-10-27, NQ1! 1m, Balanced: left 5 · right 3 · k 1.0 · EQ tolerance 4 ticks · minimum touches 2).** This is an observation, not a test result. Debug rows 22–23 showed:
 * Swing highs: 1182 pivots → 1129 PASS · 52 REJECT (~4.4%) · 1 warm-up → 1129 BSL created.
@@ -56,7 +56,7 @@ Model column: `s_<name>` is the reference-model scenario, now `test_<name>` in `
 
 | ID | Test | Procedure → expected | Model | Status |
 |---|---|---|---|---|
-| L00 | Compiles | Save → Add to chart → **0 errors, 0 warnings**. Report every message verbatim | — | PENDING MANUAL VALIDATION on v0.4.2-dev (v0.4.1-dev: **PASS**, user, 2026-10-27: compiles and runs on NQ1! 1m) |
+| L00 | Compiles | Save → Add to chart → **0 errors, 0 warnings**. Report every message verbatim | — | PENDING MANUAL VALIDATION on v0.4.3-dev (v0.4.1-dev: **PASS**, user, 2026-10-27: compiles and runs on NQ1! 1m) |
 | L01 | Swing high known only after the right bars | Pick a swing high X. On bars X … X+2 the Data Window "LIQ swing high judged here" is 0. On **X+3** (Balanced: right = 3) it is 2 (or 1 if rejected). The inspector shows `swing → known` = X → X+3. `BSL_CREATED` time = X+3 | s_confirmation_timing | PENDING MANUAL VALIDATION |
 | L02 | Swing low: same behaviour | Mirror of L01 with "LIQ swing low judged here" and `SSL_CREATED` | s_ssl_mirror | PENDING MANUAL VALIDATION |
 | L03 | BSL at the correct price | Inspector price = the high of bar X exactly (hover the candle) | s_confirmation_timing | PENDING MANUAL VALIDATION |
@@ -100,12 +100,13 @@ Model column: `s_<name>` is the reference-model scenario, now `test_<name>` in `
 | L41 | Cluster id stable | Inspector on each member of one cluster (and before/after a 3rd member joins, if one does) → the same cluster id and reference; row 32 never shows `DIFFERS` | s_L41_cluster_id_stable | PENDING MANUAL VALIDATION |
 | L42 | No duplicate cluster | A 3rd equal high → still one line (`EQH ×3`) and one `EQH_CREATED` (as L20). After an L35 sweep, a pool formed by later swings has a **different** id | s_L42_boundary_change_no_duplicate | PENDING MANUAL VALIDATION |
 | L43 | Debug output for manual parity | Debug mode ON. (a) Row 34 "Loaded history (closed bars)" shows the first loaded bar → the last closed bar · N bars · tz; scroll to the chart's first bar to confirm the start. (b) Pine Logs (Pine Editor or IST status line → More → Pine Logs) show one line per event, `yyyy-MM-dd HH:mm  NAME … id=… px=…`, the same text as "Last events"; with Debug mode OFF there are none. (c) Report whether the log text can be selected and copied | — | PENDING MANUAL VALIDATION |
+| L44 | Parity capture (bounded) | "Parity capture → Pine Logs" ON, N = 300. Pine Logs show one CAPTURE line, then N + warm-up (Balanced: 317) BAR lines with consecutive `i=`, each followed by that bar's events, then an END line with `bars=317`. Nothing more is logged afterwards (wait 2–3 realtime bars). The capture OFF → no BAR line. Paste the capture into `validation/parity/pine_capture.txt` and run `python -m validation.parity --capture validation/parity/pine_capture.txt`: report the printed result verbatim | test_parity_capture (parser, warm-up, events) | PENDING MANUAL VALIDATION |
 
 ---
 
 ## Manual validation procedure
 
-1. **Keep the baseline next to the build.** Add `releases/v0.3.2/src/IST.pine` as a second indicator named "IST v0.3.2", which is needed for L27/L31. Paste `src/IST.pine` (v0.4.2-dev) as a new indicator.
+1. **Keep the baseline next to the build.** Add `releases/v0.3.2/src/IST.pine` as a second indicator named "IST v0.3.2", which is needed for L27/L31. Paste `src/IST.pine` (v0.4.3-dev) as a new indicator.
 2. **L00:** Save. Report every compiler message verbatim. If there are errors, stop: they come back here before anything else.
 3. **Chart:** NQ1! 1m, standard candles, maximum history. Turn Debug ON (DEVELOPER) and open the Data Window.
 4. **Swings (L01–L04, L33):** pick a clear swing high and walk the cursor from the swing bar forward: the verdict appears only on swing + 3. Read the inspector (set "Inspect liquidity level" until it shows that swing). Repeat for a low and for a rejected pivot (verdict 1).

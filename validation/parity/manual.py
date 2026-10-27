@@ -1,7 +1,7 @@
 """Manual event parity (free TradingView plan): the settings, counts and events you copy
 or type from the IST debug table and Pine Logs, compared with the oracle.
 
-This is weaker than FULL BAR-BY-BAR PARITY (`python -m validation.parity EXPORT.csv`),
+This is weaker than FULL CSV BAR-BY-BAR PARITY (`python -m validation.parity EXPORT.csv`),
 which compares every bar of a Data Window export. Here only what you supply is checked,
 and only on the bars of the candle file you supply (CANDLES=, any OHLC source). Every
 check is MATCH, DIFFERENCE or NOT OBSERVABLE. Format: manual_observed_template.txt.
@@ -454,4 +454,4 @@ def show(r: dict, build: str) -> None:
             for c in rows:
                 print(f"    {c['status']:<15}{c['text']}")
     print(f"\n  {verdict(r)}")
-    print("  FULL BAR-BY-BAR PARITY: not run here (it needs the Data Window export).")
+    print("  FULL CSV BAR-BY-BAR PARITY: not run here (it needs the Data Window export).")

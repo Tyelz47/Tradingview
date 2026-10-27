@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.4.2-dev · Phase 2 (liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.4.3-dev · Phase 2 (liquidity) development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -201,6 +201,8 @@ alEqTkn   = input.bool(false, "EQH/EQL taken", inline = "a5", group = G_ALR, dis
 dbgOn      = input.bool(false, "Debug mode", tooltip = "[view] FVG milestones on zones, a state table with FVG and liquidity inspectors and source checks, an event log, Data Window values, and one Pine Logs line per event (copyable text). Uses one table, no extra drawing objects.", group = G_DBG, display = display.none)
 dbgInspect = input.int(0, "Inspect FVG (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
 dbgLiqIns  = input.int(0, "Inspect liquidity level (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
+capOn      = input.bool(false, "Parity capture → Pine Logs", tooltip = "[view] Validation tooling, default OFF. Writes the last N closed bars to Pine Logs as machine-readable lines (OHLC and the per-bar debug values, then that bar's events), plus the warm-up bars the comparison needs, for `python -m validation.parity --capture`. Bounded: never more than N + warm-up bars. Changes no calculation.", group = G_DBG, display = display.none)
+capN       = input.int(300, "Capture last N closed bars", minval = 50, maxval = 2000, group = G_DBG, display = display.none)
 
 // ════ CONSTANTS ════════════════════════════════════════════════════════════════
 
@@ -1649,12 +1651,29 @@ f_takeCode(int dir) =>
                 c := 3
     c
 
-// Pine Logs: every event of a closed bar, one line in the "Last events" format with
-// the full date, so the history can be read as text (the pane shows up to 10,000
-// historical lines). Reads the bar's events only.
-if dbgOn and barstate.isconfirmed
+// Pine Logs. Debug mode: every event of a closed bar, one line in the "Last events"
+// format with the full date (the pane shows up to 10,000 historical lines).
+// Parity capture: only the last capN closed bars plus the warm-up the comparison
+// needs (TR averages, pivot windows): CAPTURE (settings), then per bar one BAR line and
+// that bar's events, then END. Bounded by capDone. Both read state only.
+f_cap(float x) =>
+    na(x) ? "na" : str.tostring(x, "#.########")
+
+int  capWarm  = math.max(fvgLen + 2, math.max(LIQ_TRA_LEN, LIQ_L) + LIQ_R)
+int  capTotal = capN + capWarm
+var int capDone = 0
+bool capBar   = capOn and barstate.isconfirmed and bar_index > last_bar_index - capTotal and capDone < capTotal
+if capBar
+    if capDone == 0
+        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+    capDone += 1
+    int fv = bullCand ? 2 : rawBull ? 1 : bearCand ? -2 : rawBear ? -1 : 0
+    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq))
+if barstate.isconfirmed and (capOn ? capBar : dbgOn)
     for e in barEv
         log.info(str.format_time(e.eventTime, "yyyy-MM-dd HH:mm", sesTz) + "  " + f_evText(e))
+if capBar and capDone == capTotal
+    log.info("END|bars=" + str.tostring(capDone))
 
 if dbgOn and barstate.islast
     int bo = f_countOpen(bullFvgs)

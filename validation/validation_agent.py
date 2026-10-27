@@ -319,7 +319,7 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
         w(f"* {cid} ({v['source']}): {'PASS' if v['ok'] else '**FAIL** ' + '; '.join(v['failures'][:3])}")
     w("")
 
-    from validation.parity import SERIES, manual as man_parity
+    from validation.parity import SERIES, capture as cap_parity, manual as man_parity
     par = stats.RESULTS.get("parity", {"status": "NOT RUN"})
     dw = par.get("data_window")
     if par["status"] in ("NO OBSERVED DATA", "NOT RUN"):
@@ -335,14 +335,25 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
         manual_txt = "PENDING — no validation/parity/manual_observed.txt" + (f" ({mp['reason']})" if mp.get("reason") else "")
     else:
         manual_txt = man_parity.verdict(mp).split(": ", 1)[1].replace("FAIL", "**FAIL**", 1)
-    w("## Pine / Python parity\n\nTwo levels, never mixed: FULL BAR-BY-BAR PARITY compares every bar of a Data Window "
-      "export; MANUAL EVENT PARITY compares only the settings, counts and events copied by hand from the debug table "
-      "and Pine Logs. A manual PASS is not full parity.\n")
-    w(f"* **FULL BAR-BY-BAR PARITY** (Data Window export): {parity_txt}")
+    cp = stats.RESULTS.get("capture_parity", {"status": "NOT RUN"})
+    if cp["status"] in ("NO OBSERVED DATA", "NOT RUN"):
+        capture_txt = "PENDING — no validation/parity/pine_capture.txt" + (f" ({cp['reason']})" if cp.get("reason") else "")
+    else:
+        capture_txt = (cap_parity.verdict(cp).split(": ", 1)[1].replace("FAIL", "**FAIL**", 1)
+                       + f"; window {cp['window']}, first {cp['warmup']} bars = warm-up")
+    w("## Pine / Python parity\n\nThree levels, never mixed:\n"
+      "* FULL CSV BAR-BY-BAR PARITY compares every bar of a Data Window export (paid plan).\n"
+      "* BOUNDED PINE-LOG BAR-BY-BAR PARITY compares every bar of one captured window after its warm-up, and the "
+      "events of structures born inside it; nothing before the window.\n"
+      "* MANUAL EVENT PARITY compares only the settings, counts and events copied by hand.\n\n"
+      "A bounded or manual PASS is not full-history parity.\n")
+    w(f"* **FULL CSV BAR-BY-BAR PARITY** (Data Window export): {parity_txt}")
+    w(f"* **BOUNDED PINE-LOG BAR-BY-BAR PARITY** (Parity capture): {capture_txt}")
     w(f"* **MANUAL EVENT PARITY** (copied by hand): {manual_txt}")
-    if mp["status"] == "COMPARED":
-        for c in [c for c in mp["checks"] if c["status"] == man_parity.DIFF][:25]:
-            w(f"  * DIFFERENCE {c['text']}")
+    for res, mod in ((cp, cap_parity), (mp, man_parity)):
+        if res["status"] == "COMPARED":
+            for c in [c for c in res["checks"] if c["status"] == mod.DIFF][:25]:
+                w(f"  * DIFFERENCE ({res['mode'].lower()}) {c['text']}")
     if dw:
         w(f"* export {dw['first_bar']} → {dw['last_bar']} (New York); the last exported bar is never compared\n")
         w("| Counts over the whole export | Pine (export) | oracle |\n|---|---|---|")
@@ -392,7 +403,7 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
         lid = re.search(r"\((L\d\d)\)", item)
         if lid and recorded(user.get(lid.group(1), "")) != "PENDING":
             st_ = f"{user[lid.group(1)]} (recorded by the user in docs/TESTS_PHASE2.md)"
-        w(f"| {item} | {st_ or f'full bar-by-bar: {parity_txt} · manual event parity: {manual_txt}'} |")
+        w(f"| {item} | {st_ or f'full CSV: {parity_txt} · bounded Pine-Log: {capture_txt} · manual event: {manual_txt}'} |")
     w("")
 
     fails = [(nid, m, r) for nid, m, r in all_rows if r["outcome"] in ("failed", "error")]
