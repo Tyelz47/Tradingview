@@ -1,5 +1,60 @@
 # Changelog
 
+## v0.4.1-dev — Phase 2 hardening review: EQ boundary and selectivity diagnostics (2026-10-27, branch `phase2/liquidity`)
+
+**BASELINE.** v0.4.0-dev stays reachable as git tag `v0.4.0-dev` (commit 96f7846). `PHASE1_BASELINE_v0.3.2` is untouched.
+
+**AUDIT RESULT.** The question was whether a fixed EQH reference ("extreme member, fixed at creation") can stop being the pool's outer boundary when a later member joins.
+* **v0.4.0-dev had no behavioural defect.** A member beyond the boundary can never join an active cluster (proof: LIQUIDITY.md DEF-L5.4). With the DEF-L1 pivot, such a swing must print after the cluster's latest member was confirmed, so its own bar takes the cluster first.
+* **The defect was in the specification and the record.** Identity and boundary shared one field. The proof was one sentence. The review case (a one-tick run through an EQH that forms a new swing) and the silent end of an unqualified group were not described.
+
+**CHANGES**
+* **`EqCluster`** now separates its concepts:
+  * identity: `id`, `ref` (creation reference), origin and the founding members (`members[0..1]`)
+  * current state: `bound` (current outer boundary, moves outward only), `lastBar/Time` (latest member's confirmation)
+  * Joins, takes, classification, the trigger gate, event prices and drawings all use `bound`. A join keeps `id` and `ref`, emits no event and creates no cluster.
+* **DEF-L5 rewritten** as DEF-L5.1–L5.6:
+  * identity versus boundary
+  * join and form
+  * individual versus cluster liquidity
+  * the no-expansion theorem with the worked example
+  * exact timing (no self-trigger, no retroactive take)
+  * the cluster lifecycle
+* **DEF-L1:** the plateau rule is documented in full: why the first bar, when it confirms, and no duplicate swings. The rule itself is unchanged.
+* **Debug:**
+  * rows 22–23 give, per side over the loaded history: pivot candidates · significance PASS · REJECT (%) · warm-up → levels created (new counter `rejects`)
+  * new row 32 "EQ cluster (pool)": cluster id, boundary and reference (`DIFFERS` if they ever differ), member count, latest member, known/taken
+  * row 31 now shows only the inspected swing's own status
+  * table 32 → 34 rows; "Last events" row 31 → 33
+* **Tests:**
+  * model scenarios L35–L42
+  * per-bar invariant fuzz over 4 configurations (7 runs, 140,000 bars)
+  * an equivalence run against the v0.4.0-dev model: identical event logs, 149,751 events
+  * TESTS_PHASE2.md gains S-11–S-13 and L35–L42.
+* **Not changed:**
+  * presets (3/2/0.5 · 5/3/1.0 · 10/5/2.0)
+  * TAKEN / SWEEP / BREAK definitions (single-bar classification)
+  * the plateau rule, alerts, rendering budgets, Phase 1
+
+**SHARED INFRASTRUCTURE CHANGES**
+
+| CHANGE | WHY | PHASE 1 IMPACT | REPAINT IMPACT | REGRESSION TESTS REQUIRED |
+|---|---|---|---|---|
+| Debug table 32 → 34 rows; "Last events" row 31 → 33 | Selectivity per side and the EQ cluster row | Display only; rows 0–20 unchanged | None | T46 (Phase 1 inspector) under L27 |
+
+**WHY:** the review asked for an exact, testable cluster state model before the first TradingView compile.
+
+**LIQUIDITY BEHAVIOUR:** unchanged in every reachable state. The model shows identical events to v0.4.0-dev, and `bound == ref` held on every fuzz bar.
+
+**PHASE 1 BEHAVIOUR:** unchanged. The diff against `PHASE1_BASELINE_v0.3.2` removes the same lines as v0.4.0-dev (S-06).
+
+**REPAINT:** none added. A boundary change, if it ever happens, takes effect from the next bar and never re-evaluates past bars.
+
+**TESTS:**
+* static/model 13/13 PASS (here)
+* runtime L00–L42: 43 tests, all PENDING MANUAL VALIDATION
+* Phase 2 is not complete.
+
 ## v0.4.0-dev — Phase 2: liquidity engine (2026-10-27, branch `phase2/liquidity`)
 
 **BASELINE**
@@ -36,7 +91,7 @@
 * **Debug:**
   * table rows 21–30 (engine, swings, BSL, SSL, EQ, drawn, inspector)
   * 7 Data Window plots
-* **`tests/liq_model.py`:** a reference model with 19 scenarios and a fuzz of invariants.
+* **`tests/liq_model.py`:** a reference model with 18 scenarios and a fuzz of invariants (first reported as "19": that count included the fuzz).
 
 **SHARED INFRASTRUCTURE CHANGES**
 

@@ -1,6 +1,6 @@
-# IST — Phase 2 · Liquidity engine (v0.4.0-dev)
+# IST — Phase 2 · Liquidity engine (v0.4.1-dev)
 
-> **Status:** development build on branch `phase2/liquidity`. **Not compiled or validated in TradingView yet. Phase 2 is not complete until manual validation (docs/TESTS_PHASE2.md) is done.**
+> **Status:** development build on branch `phase2/liquidity` (v0.4.1-dev = v0.4.0-dev + the EQ boundary hardening review, DEF-L5.1–L5.6, and selectivity diagnostics; liquidity outputs unchanged). **Not compiled or validated in TradingView yet. Phase 2 is not complete until manual validation (docs/TESTS_PHASE2.md) is done.**
 >
 > **Baseline:** Phase 1 = v0.3.2, frozen. Git tag `PHASE1_BASELINE_v0.3.2`; read-only copy with SHA-256 sums in `releases/v0.3.2/`.
 >
@@ -57,7 +57,7 @@ Not "being a pivot". A swing becomes a liquidity level only when all of these ho
 | left 5, right 3 | 72 | 100 % | 98 % | 86 % | 61 % | 38 % |
 | left 10, right 5 | 40 | 100 % | 100 % | 97 % | 86 % | 69 % |
 
-On noise, the window does almost all of the selection and the default floors remove only stalls (≈2 % for Balanced, ≈14 % for Strict). This is a property of the noise model, not of NQ. On real charts the debug row `Swings high · low (pivots → levels)` shows the actual ratio. If Balanced proves too busy, the transparent levers are `left` (no latency) or the Strict preset. The k values are not quietly retuned.
+On noise, the window does almost all of the selection and the default floors remove only stalls (≈2 % for Balanced, ≈14–18 % for Strict depending on the walk; v0.4.1-dev fuzz, seed 7: Balanced 2.4 % highs / 1.7 % lows, Strict 17.6 % / 16.0 %). This is a property of the noise model, not of NQ. **The presets are not changed on this evidence.** On real charts debug rows 22–23 (`Swing highs / lows (loaded history)`) show pivots, significance PASS, REJECT (with %), warm-up and levels created, per side. If Balanced proves too busy, the transparent levers are `left` (no latency) or the Strict preset. The k values are not quietly retuned.
 
 ---
 
@@ -68,7 +68,13 @@ All prices are chart prices. t = the bar being evaluated (its close in Confirmed
 **DEF-L1 · Swing and confirmation.** At the close of bar t, the candidate swing bar is X = t − right.
 * **Swing high:** `high[X] > max(high[X−left … X−1])` **and** `high[X] ≥ max(high[X+1 … t])`.
 * **Swing low:** `low[X] < min(low[X−left … X−1])` **and** `low[X] ≤ min(low[X+1 … t])`.
-* **Ties.** Strict on the left, non-strict on the right. A flat top or bottom of adjacent equal bars therefore gives exactly one swing: its first bar. Equal highs further apart than `left` bars are separate swings, which is what EQH is built from.
+* **Ties (plateau rule).** Strict on the left, non-strict on the right. For a flat top of adjacent equal highs at bars X, X+1, …, X+j:
+  * **Bar X qualifies.** Its right-side test is `≥`, so the equal bars pass it.
+  * **Every later plateau bar fails.** Its left window contains an equal high, and the left test is strict.
+  * **So the plateau gives exactly one swing**, at its first bar, confirmed at X + right (like any swing). Adjacent equal bars never create duplicate individual swings.
+  * **Why the first bar:** it is when the extreme was first printed, where the orders beyond it start to rest. It is also the earliest deterministic choice: it confirms first and never moves.
+  * **Equal highs further apart than `left` bars**, with lower bars between, are separate swings. That is what EQH is built from.
+  * Flat bottoms mirror this.
 * **Origin** = X. **Confirmation** = t = X + right. The swing does not exist for the engine before t closes. Pivots are evaluated on confirmed bars only, in both engine modes.
 * During warm-up (the first left + right bars) there are no pivots.
 
@@ -108,26 +114,93 @@ All prices are chart prices. t = the bar being evaluated (its close in Confirmed
 
 **"Structural sweep" versus a future "high-quality sweep".** Phase 2's SWEEP is purely structural: taken plus no close beyond. A Phase 3 strict sweep (taken + reclaim within a window + displacement) would be a separate classification layered on the same stored facts (`takenBar`, `takeExt`, `takeClose`). It would not redefine this one.
 
-**DEF-L5 · EQH / EQL.** EQH is described here; EQL mirrors it.
-* **Members:** levels (significant swings) of one side.
-* **Reference price** = the cluster's extreme member (EQH: the highest). This is where the whole pool's stops sit beyond. It is **fixed at creation and never moves.** A later swing above it would already have taken the cluster, so a joining member is always at or below it.
-* **Join:** a new level joins the nearest **active** cluster with `|new − price| ≤ tolerance`. Ties go to the newest.
+**DEF-L5 · EQH / EQL.** EQH is described here; EQL mirrors it (`min` for `max`, "below" for "above"). Members are levels (significant swings) of one side.
+
+**DEF-L5.1 · Identity versus boundary (v0.4.1-dev).** The cluster record keeps two separate concepts:
+
+| Concept | Fields | Changes? |
+|---|---|---|
+| **Identity / creation reference** | `id` = time of the bar where the cluster formed (its 2nd member confirmed) · `ref` = extreme of the first two members · `originBar/Time` = earliest member's swing · first members = `members[0..1]` | **never** |
+| **Current state** | `bound` = **current outer boundary** = highest accepted member (EQH) / lowest (EQL) · `members` (append-only; count = size) · `lastBar/Time` = latest member's confirmation · `qualBar/Time` · `takenBar/Time`, `cls` | `bound` only outward: `bound := max(bound, member)` |
+
+Everything that acts on the pool uses **`bound`**: join distance, the take test, the classification, the trigger gate, event prices and the drawn line. `id` and `ref` are identity and debug metadata. A boundary change keeps `id`, `ref` and the existing members, emits no event and creates no cluster.
+
+**DEF-L5.2 · Join and form.**
+* **Join:** a new level joins the nearest **active** cluster with `|new − bound| ≤ tolerance`. Ties go to the newest.
 * **Form:** otherwise it forms a cluster with the nearest earlier level that:
   * is in no cluster,
   * is within tolerance,
-  * has an **intact pool**: either untaken (then the new level is at or below it), or taken but with nothing traded above the *new* level since (then the new level becomes the reference).
-
-  This second case is how a second high 1–4 ticks *above* the first still forms an EQH. The first level is factually TAKEN/SWEPT by one tick, which is true, and the pool above the new high is intact.
-* A level belongs to at most one cluster, so one pool gives **one** cluster, never overlapping duplicates.
-* Members always lie in `[price − tolerance, price]`. A taken level whose furthest excursion exceeds `price + tolerance` can never be part of an intact pool, so it closes.
+  * has an **intact pool**: either untaken (then the new level is at or below it), or taken but with nothing traded above the *new* level since (then the new level is the edge).
+* `ref = bound = max(seed, new)` at formation.
+* A level belongs to at most one cluster, so one pool gives **one** cluster, never overlapping duplicates. A taken cluster keeps its members, so they cannot seed another pool: a later pool needs new swings and gets a new `id`.
+* Members always lie in `[bound − tolerance, bound]`. A taken level whose furthest excursion exceeds `price + tolerance` can never be part of an intact pool, so it closes.
 * **EQH_CREATED:** when the member count first reaches `Minimum touches`. Its timing is the confirmation of that member.
-* **EQH_TAKEN:** the first bar with `high > price`, i.e. all members' stops. It has the same SWEEP/BREAK rule, stored on the cluster, and fires once. A cluster that never reached the minimum is closed silently.
+* **EQH_TAKEN:** the first bar after the cluster is known with `high > bound`, i.e. all members' stops. It has the same SWEEP/BREAK rule, stored on the cluster, and fires once. A cluster that never reached the minimum and is traded through ends silently: it never was an EQH.
 * **Tolerance:** ticks only (`Tolerance (ticks)`, default 4 = 1.0 NQ point). A TR-relative mode is a documented extension.
+
+**DEF-L5.3 · Individual liquidity versus cluster liquidity.** These are two separate facts, stored on separate records.
+* **Individual** (each member's own `Liq`): taken when price trades beyond **its own** price (DEF-L4).
+* **Cluster** (the `EqCluster`): taken when price trades beyond the **cluster's current boundary**, after the cluster is known.
+* An individual member being TAKEN does **not** clear the cluster.
+
+Example (tolerance 4 ticks): A = 100.00 confirmed. B prints 100.25, which takes A by one tick. B confirms, and nothing has traded above 100.25 since, so B forms an EQH with A. The resulting state is deterministic:
+
+| Record | State |
+|---|---|
+| swing A (BSL 100.00) | **TAKEN** at B's bar, SWEEP or BREAK by that close. A true fact; never rewritten |
+| swing B (BSL 100.25) | ACTIVE |
+| EQH {A, B} | **ACTIVE**, `ref = bound = 100.25 = max(A, B)` |
+
+Only a later trade above 100.25 takes the EQH. A member's individual events are never rewritten when it joins a cluster or when the cluster changes.
+
+**DEF-L5.4 · Can the boundary move after creation? No, not through prices.** This follows from the DEF-L1 pivot with a fixed window. Proof (EQH):
+
+Let M be the cluster's latest member (swing bar X_M, confirmed at X_M + R). Let C be a later swing high with C > `bound` ≥ M.
+1. C confirms after M, so X_C > X_M (every pivot uses the same R).
+2. If X_C ≤ X_M + R, bar X_C lies in M's right window, and DEF-L1 requires `high[X_M] ≥ high[X_C]`. That gives C ≤ M ≤ `bound`, a contradiction. So X_C > X_M + R: C's high prints **after** the cluster containing M was known.
+3. On bar X_C the engine's take test runs: `high[X_C] = C > bound`. So the cluster is **taken on C's own bar**, at the boundary known then: EQH_TAKEN, classified at that bar's close.
+4. When C confirms, at X_C + R, the cluster is already taken, and only active clusters accept members. C becomes its own BSL, in no cluster.
+
+So in every reachable state `bound == ref`, and the outward update in DEF-L5.1 is a no-op today. It is kept so that the state model is explicit and stays correct if a later phase changes when a cluster counts as taken (for example a confirmation window). The model asserts `bound == ref` on every bar of every fuzz run (S-11).
+
+**Worked example (the review case).** Tolerance 4 ticks.
+1. A = 100.00. B = 100.50 trades through A, so A is TAKEN. B confirms, giving EQH {A, B} with `ref = bound = 100.50`.
+2. C = 100.75 prints after B was confirmed. **EQH TAKEN on C's bar** (+1 tick; SWEEP or BREAK by that close).
+3. C confirms R bars later as a new BSL at 100.75, in no cluster.
+4. A later D within 4 ticks of C, with the pool intact, forms a **new** cluster {C, D} with a new id.
+
+Why not "expand the cluster" instead? The only way to know that C is a member is to wait R bars after the trade through 100.50. Expanding would need one of two things, and both break the contract:
+* not counting a within-tolerance excursion as a take. That changes the agreed TAKEN definition and delays the sweep event by R bars (or repaints it);
+* rewriting an EQH_TAKEN that already fired. That breaks the once-only and no-rewrite rules.
+
+The trade through 100.50 is the classic one-tick sweep of equal highs, which is exactly what the tool must report. With `Minimum touches` ≥ 3, the same trade ends the 2-member group silently, so C cannot make it a 3-touch EQH.
+
+**DEF-L5.5 · Timing (no self-trigger, no retroactive take).**
+
+| Step | Bar | Effect |
+|---|---|---|
+| 1 · the member's price prints | X | nothing for the cluster: the swing does not exist yet. That price may take *other* levels individually (L5.3) |
+| 2 · the member confirms | X + R, close | `BSL_CREATED` |
+| 3 · it joins, or forms a cluster | same close, **after** that bar's take tests | `members`, `lastBar`; `EQH_CREATED` if the minimum is reached now |
+| 4 · the boundary updates (theoretical, L5.4) | same close | no event, same `id` |
+| 5 · first bar that can take that boundary | X + R + 1 | `EQH_TAKEN` if `high > bound` |
+
+Order within each bar: level takes → cluster takes → new pivots register and cluster. So a bar never takes a cluster it creates or updates. Past bars are never re-evaluated, so no EQH_TAKEN can come from price that printed before the cluster or its boundary was known. The member's own swing bar cannot take its boundary anyway: it is equal to it, and a take needs *strictly* beyond.
+
+**DEF-L5.6 · Cluster lifecycle.**
+
+```
+formed (2 members, id + ref fixed) ──members ≥ min──▶ EQH ACTIVE (EQH_CREATED)
+   │   join: members + 1, lastBar, bound = max(bound, member); id / ref / earlier members unchanged
+   ├── high > bound before the minimum ──▶ ended silently (never an EQH)
+   └── EQH ACTIVE ── high > bound (bar after it is known) ──▶ TAKEN: EQH_TAKEN once, SWEEP | BREAK at that close
+memory: 25 clusters per side → oldest taken first, then oldest active (its members released) → EQH_DROPPED_MEMORY
+```
 
 **Why the extreme member as reference.** The candidates were the first swing, the average, the highest/lowest, or a tick-normalised centre.
 * **Average and centre** move every time a member joins, so the line drifts and the "taken" price changes after the fact.
 * **The first swing** is stable, but for an EQH whose second high is higher, it sits *inside* the pool: "taken" would fire before the pool's stops are run.
-* **The extreme** is the price that must be exceeded to clear every member. By the argument above it is also the only one that is provably fixed. So it is both the most stable choice and the most truthful one.
+* **The extreme** is the price that must be exceeded to clear every member. By DEF-L5.4 it is also provably fixed. So it is both the most stable choice and the most truthful one.
 
 **DEF-L6 · Lifecycle and memory.**
 
@@ -185,7 +258,7 @@ memory policy: per side, live + closed ≤ Engine memory (default 100):
 
 "Taken by wick?" corresponds to `cls == SWEEP`; "close beyond?" to `cls == BREAK`. Visual reference: none in the record; the renderer owns its pool (DEF-L7).
 
-**`EqCluster`:** `id` (creation time), `isHigh`, `price` (the reference), `members` (participating level ids), `originBar/Time` (the first member's swing), `qualBar/Time` (EQ confirmation), `takenBar/Time`, `cls`. The touch count is `members.size()`.
+**`EqCluster`:** identity: `id` (creation time), `isHigh`, `ref` (creation reference), `originBar/Time` (the first member's swing). State: `bound` (current outer boundary), `members` (participating level ids, append-only, in join order: the first two are the founding members), `lastBar/Time` (latest member's confirmation), `qualBar/Time` (EQ confirmation), `takenBar/Time`, `cls`. The touch count is `members.size()`. See DEF-L5.1.
 
 ---
 
@@ -197,11 +270,12 @@ memory policy: per side, live + closed ≤ Engine memory (default 100):
 | `BSL_TAKEN` / `SSL_TAKEN` | the first bar beyond | swing time | level | `+n ticks [· opened beyond]` |
 | `BSL_SWEEP` / `SSL_SWEEP` | the taking bar's close, not beyond | swing time | level | `close …` |
 | `BSL_BREAK` / `SSL_BREAK` | the taking bar's close, strictly beyond | swing time | level | `close …` |
-| `EQH_CREATED` / `EQL_CREATED` | members reach the minimum | cluster id | reference | `n swings within t ticks` |
-| `EQH_TAKEN` / `EQL_TAKEN` | the first bar beyond the reference | cluster id | reference | `n swings · sweep/break` |
+| `EQH_CREATED` / `EQL_CREATED` | members reach the minimum | cluster id | boundary | `n swings within t ticks` |
+| `EQH_TAKEN` / `EQL_TAKEN` | the first bar beyond the current boundary, after the cluster is known | cluster id | boundary | `n swings · sweep/break` |
 | `BSL/SSL_DROPPED_MEMORY`, `EQH/EQL_DROPPED_MEMORY` | the memory policy | id | price | `closed record` / `live record · tracking stopped` |
 
 * **Exactly once.** Each event is tied to a field changing from `na` (or 0) to a value, which cannot happen twice. The model checks this on 20,000+ bars (S-07).
+* **No event for a cluster join or boundary change.** Membership and boundary are state, visible in the inspector; the cluster's `id` is unchanged.
 * **No `SWING_*_CONFIRMED` event.** A significant swing's confirmation *is* `BSL/SSL_CREATED`. Rejected pivots are counted in the debug table and shown in the Data Window, but not logged, because they are not liquidity and would flood the log.
 * **Alerts:** liquidity taken, sweep, break, EQH/EQL taken, each covering both sides. **All default OFF**, so an existing "Any alert() function call" alert delivers exactly what it delivered in v0.3.2. Bar-close timing is the default. In Intrabar (experimental) mode, TAKEN may fire at the tick, while SWEEP/BREAK/EQ class still fire at the close.
 
@@ -216,7 +290,8 @@ memory policy: per side, live + closed ≤ Engine memory (default 100):
 | Taken | X | the taking bar k > X + right | close of k (Live mode: the tick) | close of k: the line stops at k | close of k (intrabar mode: the tick, experimental) | No |
 | Sweep / Break | X | close of k | close of k (both modes) | close of k (tag `sweep`/`break`) | close of k | No |
 | EQH/EQL | the first member's swing bar | the confirmation of the member reaching the minimum (q) | close of q | close of q, if among the nearest N | none: creation is not alertable | **No by default** (from q). Origin anchor: from the first member's swing bar |
-| EQH/EQL taken | — | bar k beyond the reference | close of k (Live: the tick) | the EQ line disappears at k | close of k | No |
+| EQ join / boundary update | the member's swing bar | its confirmation | close of that bar | the line moves to the new boundary (theoretical, DEF-L5.4) | none | — |
+| EQH/EQL taken | — | bar k beyond the current boundary, k > the bar it became known | close of k (Live: the tick) | the EQ line disappears at k | close of k | No |
 | Dropped by memory | — | the creation bar of a newer level | that bar | its view disappears | never | — |
 
 **Repaint contract.** With identical data and inputs, a confirmed liquidity event never appears earlier, never disappears, and never changes its bar after reload. Everything is computed from closed bars with fixed windows. The declared exceptions:
@@ -240,7 +315,7 @@ Shared code that changed (each documented in CHANGELOG v0.4.0-dev with WHY / PHA
 | `f_evName(k)` → `f_evName(k, dir)`; `f_evText` skips the BULL/HIGH suffix for liquidity kinds | none: kinds 1–9 return byte-identical text |
 | Intrabar alert de-dup key `kind:sid` → `kind:dir:sid` | none: FVG keys were already unique; liquidity needs it (a BSL and an SSL can share a swing time) |
 | `f_alertOn` gains 4 cases | none: the new toggles default OFF |
-| Debug table 22 → 32 rows; "Last events" moves from row 21 to row 31 | display only; rows 0–20 unchanged |
+| Debug table 22 → 34 rows; "Last events" moves from row 21 to row 33 (v0.4.0-dev: 32 rows, row 31) | display only; rows 0–20 unchanged |
 | 7 Data Window plots appended after the 11 Phase 1 plots | display only; Phase 1 plot order unchanged |
 | Tooltips (`Minimal mode`, `Debug mode`) mention liquidity | text only |
 | Event log (cap 40) is shared | debug display only: "Last events" spans less time when liquidity is busy |
@@ -293,19 +368,21 @@ Shared code that changed (each documented in CHANGELOG v0.4.0-dev with WHY / PHA
 
 ## 10 · Debug additions (Debug mode ON)
 
-**Table rows 21–30:**
+**Table rows 21–32:**
 
 | Row | Shows |
 |---|---|
 | 21 · Liquidity engine | ON/OFF, the preset with its resolved numbers, EQ tolerance and minimum |
-| 22 · Swings high · low (pivots → levels) | how many pivots were significant |
-| 23 · BSL | active, taken (sweep/break), memory use, drops |
-| 24 · SSL | same as BSL |
-| 25 · EQH · EQL | active, taken, below the minimum, dropped |
-| 26 · Liquidity drawn | per kind, plus how many were merged into reference lines |
-| 27–30 · Liquidity inspector (n-th newest by confirmation) | type, id, price; swing → known (bars, times, window); significance at birth (reaction pts, × TR, TR, required, PASS/INCONSISTENT); status (ACTIVE + touches, or TAKEN time, reached price + ticks, gap, close, SWEEP/BREAK, touches before) plus EQ membership |
+| 22 · Swing highs (loaded history) | pivot candidates · significance PASS · REJECT (share of judged pivots) · warm-up (not judgeable: TR average still `na`) → BSL levels created (= PASS: every PASS creates a level). Counted from the first loaded bar |
+| 23 · Swing lows (loaded history) | same for swing lows → SSL |
+| 24 · BSL | active, taken (sweep/break), memory use, drops |
+| 25 · SSL | same as BSL |
+| 26 · EQH · EQL | active, taken, below the minimum, dropped |
+| 27 · Liquidity drawn | per kind, plus how many were merged into reference lines |
+| 28–31 · Liquidity inspector (n-th newest by confirmation) | type, id, price; swing → known (bars, times, window); significance at birth (reaction pts, × TR, TR, required, PASS/INCONSISTENT); status **of this swing** (ACTIVE + touches, or TAKEN time, reached price + ticks, gap, close, SWEEP/BREAK, touches before) |
+| 32 · EQ cluster (pool) | the inspected swing's cluster, separately from the swing: id, **boundary** and **reference** (`= reference`, or both prices plus `DIFFERS`), member count, latest member confirmation, known time or `below min`, ACTIVE or TAKEN time → SWEEP/BREAK |
 
-Row 31 · Last events includes liquidity events.
+Row 33 · Last events includes liquidity events. Rows 31 and 32 together make DEF-L5.3 visible: a swing can read TAKEN while its pool reads ACTIVE.
 
 **Data Window plots** (cursor on the confirmation bar):
 * swing-high verdict (2 → BSL · 1 rejected · 0) and swing-low verdict
@@ -325,11 +402,12 @@ No chart labels are added for debug.
 4. **Drawings show the present** (last-bar rebuild): no historical "what was active then" view. Records support it later (bars and times stored).
 5. **The duplicate-line check uses the exact price.** A level one tick from PDH is drawn next to the PDH line.
 6. **Memory window:** in a long one-directional trend, the oldest *active* levels on the far side (furthest from price) can be dropped. This is logged, and their tracking stops.
-7. **Non-extreme cluster members** can be taken while the pool stays active: their stops ran, but the pool's edge did not. The cluster reports only the edge.
+7. **Non-extreme cluster members** can be taken while the pool stays active (DEF-L5.3): their stops ran, but the pool's boundary did not. The cluster reports only its boundary; the members' own records keep their takes.
 8. **Live mode:** intrabar TAKEN relies on TradingView's rollback of object fields (the same dependency as Phase 1 NR-04). Confirmed mode is immune.
 9. **Labels** at the right edge can overlap Phase 1 labels at nearby prices.
 10. **Phase 1 reference levels are not unified** with swing liquidity (by design, until a later context layer).
 11. **Not compiled here.** TradingView is the authority; T00-style compilation is test L00.
+12. **A one-tick run through an EQH ends it** (DEF-L5.4), even when the run forms a new swing within tolerance. The new swing starts a new pool (new id); it does not extend the swept one. With `Minimum touches` ≥ 3, a 2-member group traded through ends silently.
 
 ---
 
@@ -352,7 +430,7 @@ No chart labels are added for debug.
 | P2.2 | BSL/SSL state engine (DEF-L6) | implemented · model-checked · pending |
 | P2.3 | Taken / sweep / break (DEF-L4) | implemented · model-checked · pending |
 | P2.4 | Renderer (DEF-L7) | implemented · static-checked · pending |
-| P2.5 | EQH/EQL (DEF-L5) | implemented · model-checked · pending |
+| P2.5 | EQH/EQL (DEF-L5) | implemented · boundary review done (v0.4.1-dev, DEF-L5.1–L5.6, L35–L42) · model-checked · pending |
 | P2.6 | Alerts | implemented (default OFF) · pending |
 | P2.7 | Debug + documentation | implemented · pending |
 | P2.8 | Phase 1 regression review | static review done (§7); runtime L27 pending |

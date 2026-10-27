@@ -1,6 +1,6 @@
 # IST — ICT Structure Toolkit · Architecture and Phase 1 specification
 
-> **Status:** Phase 1 = **v0.3.2, frozen safety baseline** (git tag `PHASE1_BASELINE_v0.3.2`, copy in `releases/v0.3.2/`). Phase 2 (liquidity) is in development as **v0.4.0-dev** on branch `phase2/liquidity`; its specification is **docs/LIQUIDITY.md** and its tests are **docs/TESTS_PHASE2.md**. This document remains the Phase 1 specification and the architecture both phases follow. **Not production-ready.**
+> **Status:** Phase 1 = **v0.3.2, frozen safety baseline** (git tag `PHASE1_BASELINE_v0.3.2`, copy in `releases/v0.3.2/`). Phase 2 (liquidity) is in development as **v0.4.1-dev** on branch `phase2/liquidity` (v0.4.0-dev tagged); its specification is **docs/LIQUIDITY.md** and its tests are **docs/TESTS_PHASE2.md**. This document remains the Phase 1 specification and the architecture both phases follow. **Not production-ready.**
 >
 > **Roles:**
 > * Claude Code — primary implementation engineer

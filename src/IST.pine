@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.4.0-dev · Phase 2 (liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.4.1-dev · Phase 2 (liquidity) development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -352,19 +352,25 @@ type Fvg
     line   ce
 
 // L3 · equal highs / equal lows: one pool of significant same-side swings within
-// tolerance (DEF-L5). `price` is the pool's far edge (EQH: highest member). It is
-// fixed at creation and never moves: a later swing beyond it would already have
-// taken the cluster.
+// tolerance (DEF-L5). Identity and boundary are separate fields: `id` and `ref` never
+// change; `bound` is the pool's current outer edge (EQH: highest accepted member)
+// and is what joins, takes, events and drawings use. A join can only widen `bound`
+// (max for EQH, min for EQL). With the DEF-L1 pivot it never does in practice: a
+// swing beyond `bound` must print after the last member confirmed, so it takes the
+// cluster first (proof: LIQUIDITY.md DEF-L5.4).
 type EqCluster
-    int        id           // creation time (close of the swing that formed it)
+    int        id           // creation time (close of the bar where the 2nd member confirmed)
     bool       isHigh
-    float      price
+    float      ref          // creation reference = extreme of the first two members; never changes
+    float      bound        // current outer boundary; starts at ref, monotone outward
     array<int> members      // member level ids (swing times), in join order
     int        originBar    // earliest member's swing bar
     int        originTime
+    int        lastBar      // latest member's confirmation
+    int        lastTime
     int        qualBar      // member count reached the minimum: EQH/EQL_CREATED; na before
     int        qualTime
-    int        takenBar     // first bar trading beyond `price`; na = active
+    int        takenBar     // first bar trading beyond `bound`; na = active
     int        takenTime
     int        cls = 0      // CLS_* decided at the taking bar's close
 
@@ -404,7 +410,8 @@ type LiqSide
     array<EqCluster> eqs          // active and taken clusters, oldest first
     float            trig         // nearest price at which a live record changes; na = none live
     int              pivots = 0   // confirmed pivots, significant or not
-    int              levels = 0   // pivots that passed the significance filter
+    int              rejects = 0  // pivots judged and failing the reaction floor (warm-up pivots are neither)
+    int              levels = 0   // pivots that passed the significance filter (each one creates a level)
     int              dropLive = 0
     int              dropHist = 0
     int              dropEq = 0
@@ -770,7 +777,7 @@ method pen(LiqSide s, float p) =>
 
 // Nearest price at which anything on this side changes state: an active level when
 // the bar reaches its price (take or exact touch), a taken one when the bar goes past
-// its furthest excursion, an active cluster when the bar reaches its price (DEF-L6 gate).
+// its furthest excursion, an active cluster when the bar reaches its boundary (DEF-L6 gate).
 method trigger(LiqSide s) =>
     float t = na
     for l in s.live
@@ -778,7 +785,7 @@ method trigger(LiqSide s) =>
         t := na(t) ? v : s.isBsl ? math.min(t, v) : math.max(t, v)
     for c in s.eqs
         if na(c.takenBar)
-            t := na(t) ? c.price : s.isBsl ? math.min(t, c.price) : math.max(t, c.price)
+            t := na(t) ? c.bound : s.isBsl ? math.min(t, c.bound) : math.max(t, c.bound)
     t
 
 // DEF-L4: the factual take, then its interpretation. Take = the bar trades beyond the
@@ -800,14 +807,15 @@ method take(LiqSide s, Liq l) =>
         f_emit(l.cls == CLS_BREAK ? EV_LIQ_BREAK : EV_LIQ_SWEEP, d, l.id, l.originBar, l.price, "close " + f_px(close))
     l
 
-// An EQ cluster is taken when the bar trades beyond its far edge (all members' stops).
+// An EQ cluster is taken when the bar trades beyond its current boundary (all members'
+// stops). Individual member takes are separate facts on the members (DEF-L5.3).
 method takeEq(LiqSide s, EqCluster c) =>
     c.takenBar  := bar_index
     c.takenTime := time
     if barstate.isconfirmed
-        c.cls := (s.isBsl ? close > c.price : close < c.price) ? CLS_BREAK : CLS_SWEEP
+        c.cls := (s.isBsl ? close > c.bound : close < c.bound) ? CLS_BREAK : CLS_SWEEP
     if not na(c.qualBar)
-        f_emit(EV_EQ_TAKEN, s.isBsl ? 1 : -1, c.id, c.originBar, c.price, str.tostring(c.members.size()) + " swings" + (c.cls == CLS_BREAK ? " · break" : c.cls == CLS_SWEEP ? " · sweep" : ""))
+        f_emit(EV_EQ_TAKEN, s.isBsl ? 1 : -1, c.id, c.originBar, c.bound, str.tostring(c.members.size()) + " swings" + (c.cls == CLS_BREAK ? " · break" : c.cls == CLS_SWEEP ? " · sweep" : ""))
     c
 
 // DEF-L6: advances one side by one bar. Nothing is scanned unless the bar reaches the
@@ -834,7 +842,7 @@ method step(LiqSide s) =>
                         l.eqOpen := false
                         s.hist.push(s.live.remove(i))
         for c in s.eqs
-            if na(c.takenBar) and s.pen(c.price) > 0
+            if na(c.takenBar) and s.pen(c.bound) > 0
                 s.takeEq(c)
         s.trig := s.trigger()
     s
@@ -853,22 +861,23 @@ method dropCluster(LiqSide s) =>
             if not na(m.eq) and m.eq.id == old.id
                 m.eq := na
     s.dropEq := s.dropEq + 1
-    f_emit(EV_EQ_DROPPED, s.isBsl ? 1 : -1, old.id, old.originBar, old.price, na(old.takenBar) ? "active cluster · tracking stopped" : "taken cluster")
+    f_emit(EV_EQ_DROPPED, s.isBsl ? 1 : -1, old.id, old.originBar, old.bound, na(old.takenBar) ? "active cluster · tracking stopped" : "taken cluster")
     true
 
 // DEF-L5: EQ clustering for a new level `l` (not yet in s.live).
-//  1. Join the nearest ACTIVE cluster whose price is within tolerance.
+//  1. Join the nearest ACTIVE cluster whose boundary is within tolerance.
 //  2. Otherwise form a cluster with the nearest earlier level that is in no cluster,
 //     within tolerance, and whose pool is intact: untaken (then l is at or inside
 //     it), or taken but nothing has traded beyond l since (then l is the new edge).
-// Ties go to the newest. A level belongs to at most one cluster. The cluster price
-// (the extreme member) is fixed at creation, so nothing drifts.
+// Ties go to the newest. A level belongs to at most one cluster. A join keeps the
+// cluster's id and ref and can only move `bound` outward. Nothing is re-evaluated
+// on past bars: a new boundary can be taken from the next bar on (DEF-L5.5).
 method cluster(LiqSide s, Liq l) =>
     int       d    = s.isBsl ? 1 : -1
     EqCluster hit  = na
     float     best = na
     for c in s.eqs
-        float dist = math.abs(l.price - c.price)
+        float dist = math.abs(l.price - c.bound)
         if na(c.takenBar) and dist <= EQ_TOL + EPS and (na(best) or dist <= best)
             best := dist
             hit  := c
@@ -881,18 +890,22 @@ method cluster(LiqSide s, Liq l) =>
                 best := dist
                 seed := m
         if not na(seed)
-            hit := EqCluster.new(id = time, isHigh = s.isBsl, price = s.isBsl ? math.max(seed.price, l.price) : math.min(seed.price, l.price), members = array.from(seed.id), originBar = seed.originBar, originTime = seed.originTime)
+            float edge = s.isBsl ? math.max(seed.price, l.price) : math.min(seed.price, l.price)
+            hit := EqCluster.new(id = time, isHigh = s.isBsl, ref = edge, bound = edge, members = array.from(seed.id), originBar = seed.originBar, originTime = seed.originTime)
             seed.eq := hit
             s.eqs.push(hit)
             if s.eqs.size() > EQ_MEM
                 s.dropCluster()
     if not na(hit)
         hit.members.push(l.id)
+        hit.bound    := s.isBsl ? math.max(hit.bound, l.price) : math.min(hit.bound, l.price)
+        hit.lastBar  := bar_index
+        hit.lastTime := time
         l.eq := hit
         if na(hit.qualBar) and hit.members.size() >= eqMinTch
             hit.qualBar  := bar_index
             hit.qualTime := time
-            f_emit(EV_EQ_CREATED, d, hit.id, hit.originBar, hit.price, str.tostring(hit.members.size()) + " swings within " + str.tostring(eqTolTk) + " ticks")
+            f_emit(EV_EQ_CREATED, d, hit.id, hit.originBar, hit.bound, str.tostring(hit.members.size()) + " swings within " + str.tostring(eqTolTk) + " ticks")
     hit
 
 // DEF-L1…L3, L5: a confirmed, significant swing becomes a level, is clustered, then
@@ -1221,7 +1234,7 @@ f_drawEq(LiqSide s, int slot) =>
             for i = n - 1 to 0
                 EqCluster cand = s.eqs.get(i)
                 if not used.get(i) and na(cand.takenBar) and not na(cand.qualBar)
-                    float dd = math.abs(close - cand.price)
+                    float dd = math.abs(close - cand.bound)
                     if na(best) or dd < best
                         best := dd
                         pick := i
@@ -1229,14 +1242,14 @@ f_drawEq(LiqSide s, int slot) =>
                 break
             used.set(pick, true)
             EqCluster c = s.eqs.get(pick)
-            if f_onRefLine(c.price)
+            if f_onRefLine(c.bound)
                 merged += 1
                 continue
             shown += 1
             string tag = (s.isBsl ? "EQH ×" : "EQL ×") + str.tostring(c.members.size())
-            f_liqLine(liqAnchor == LiqAnchor.origin ? c.originTime : c.qualTime, rightT, c.price, col, line.style_solid, 2)
+            f_liqLine(liqAnchor == LiqAnchor.origin ? c.originTime : c.qualTime, rightT, c.bound, col, line.style_solid, 2)
             if showLiqTxt
-                f_liqLabel(rightT, c.price, tag, col, tag + " " + f_px(c.price) + "\nfirst swing " + f_tid(c.originTime) + " · EQ known " + f_tid(c.qualTime))
+                f_liqLabel(rightT, c.bound, tag, col, tag + " " + f_px(c.bound) + "\nfirst swing " + f_tid(c.originTime) + " · EQ known " + f_tid(c.qualTime))
     liqCnt.set(slot, shown)
     liqCnt.set(6, liqCnt.get(6) + merged)
     shown
@@ -1353,10 +1366,14 @@ if engineTick
                 bslS.pivots := bslS.pivots + 1
                 if sigHi
                     bslS.register(swHiPx, swBar, swTime, reactHi, reactReq, swTra)
+                else if not na(reactReq)
+                    bslS.rejects := bslS.rejects + 1
             if pivLo
                 sslS.pivots := sslS.pivots + 1
                 if sigLo
                     sslS.register(swLoPx, swBar, swTime, reactLo, reactReq, swTra)
+                else if not na(reactReq)
+                    sslS.rejects := sslS.rejects + 1
 
 // ════ L6 · RENDERER (run) ══════════════════════════════════════════════════════
 
@@ -1481,7 +1498,7 @@ if barstate.isrealtime and barEv.size() > 0
 
 // ════ L7 · DIAGNOSTICS (one table, no drawing objects) ═════════════════════════
 
-var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 32, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
+var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 34, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
 var table warnTbl = table.new(position.top_right, 1, 2)
 
 f_dbgRow(int r, string k, string v) =>
@@ -1594,6 +1611,16 @@ f_eqState(LiqSide s) =>
             tkn += 1
     str.tostring(act) + " active · " + str.tostring(tkn) + " taken · " + str.tostring(frm) + " below min"
 
+// Selectivity on the loaded history: pivots → significance PASS / REJECT → levels.
+f_selectivity(LiqSide s) =>
+    int judged = s.levels + s.rejects
+    str.tostring(s.pivots) + " pivots · PASS " + str.tostring(s.levels) + " · REJECT " + str.tostring(s.rejects) + (judged > 0 ? " (" + str.tostring(100.0 * s.rejects / judged, "#.#") + "%)" : "") + " · warm-up " + str.tostring(s.pivots - judged) + " → " + str.tostring(s.levels) + (s.isBsl ? " BSL" : " SSL") + " created"
+
+// Cluster of one level: identity, reference vs current boundary, membership.
+f_eqTxt(EqCluster c) =>
+    string edge = c.ref == c.bound ? "boundary " + f_px(c.bound) + " (= reference)" : "boundary " + f_px(c.bound) + " · reference " + f_px(c.ref) + " · DIFFERS"
+    (c.isHigh ? "EQH" : "EQL") + " id " + f_tid(c.id) + " · " + edge + " · ×" + str.tostring(c.members.size()) + " · last member " + f_mt(c.lastTime) + (na(c.qualBar) ? " · below min" : " · known " + f_mt(c.qualTime)) + (na(c.takenBar) ? " · ACTIVE" : " · TAKEN " + f_mt(c.takenTime) + " → " + f_clsName(c.cls))
+
 // n-th newest liquidity level across both sides (by confirmation time).
 f_liqNth(int n) =>
     array<Liq> all = bslS.live.copy()
@@ -1655,26 +1682,25 @@ if dbgOn and barstate.islast
         f_dbgRow(20, "record", (na(q.invBar) ? "OPEN" : "CLOSED (invalidated)") + " · fill " + str.tostring(math.round(q.fillPct() * 100)) + "% · age " + str.tostring(q.age()) + "b · drawn " + (na(q.zone) ? "no" : "yes"))
     // ── liquidity (Phase 2) ──
     f_dbgRow(21, "Liquidity engine", liqOn ? "ON · " + f_presetName() + " → left " + str.tostring(LIQ_L) + " · right " + str.tostring(LIQ_R) + " · reaction ≥ " + str.tostring(LIQ_K, "#.##") + " × TR(" + str.tostring(LIQ_TRA_LEN) + ") · EQ tol " + str.tostring(eqTolTk) + " ticks · min " + str.tostring(eqMinTch) : "OFF")
-    f_dbgRow(22, "Swings high · low (pivots → levels)", str.tostring(bslS.pivots) + " → " + str.tostring(bslS.levels) + " BSL · " + str.tostring(sslS.pivots) + " → " + str.tostring(sslS.levels) + " SSL")
-    f_dbgRow(23, "BSL", f_liqSideState(bslS))
-    f_dbgRow(24, "SSL", f_liqSideState(sslS))
-    f_dbgRow(25, "EQH · EQL", f_eqState(bslS) + "  ·  " + f_eqState(sslS) + " · dropped " + str.tostring(bslS.dropEq + sslS.dropEq))
-    f_dbgRow(26, "Liquidity drawn", "BSL " + str.tostring(liqCnt.get(0)) + " · SSL " + str.tostring(liqCnt.get(1)) + " · EQH " + str.tostring(liqCnt.get(2)) + " · EQL " + str.tostring(liqCnt.get(3)) + " · taken " + str.tostring(liqCnt.get(4)) + "+" + str.tostring(liqCnt.get(5)) + " · on a reference line " + str.tostring(liqCnt.get(6)))
+    f_dbgRow(22, "Swing highs (loaded history)", f_selectivity(bslS))
+    f_dbgRow(23, "Swing lows (loaded history)", f_selectivity(sslS))
+    f_dbgRow(24, "BSL", f_liqSideState(bslS))
+    f_dbgRow(25, "SSL", f_liqSideState(sslS))
+    f_dbgRow(26, "EQH · EQL", f_eqState(bslS) + "  ·  " + f_eqState(sslS) + " · dropped " + str.tostring(bslS.dropEq + sslS.dropEq))
+    f_dbgRow(27, "Liquidity drawn", "BSL " + str.tostring(liqCnt.get(0)) + " · SSL " + str.tostring(liqCnt.get(1)) + " · EQH " + str.tostring(liqCnt.get(2)) + " · EQL " + str.tostring(liqCnt.get(3)) + " · taken " + str.tostring(liqCnt.get(4)) + "+" + str.tostring(liqCnt.get(5)) + " · on a reference line " + str.tostring(liqCnt.get(6)))
     Liq w = f_liqNth(dbgLiqIns)
     if na(w)
-        f_dbgRow(27, "Liq inspect #" + str.tostring(dbgLiqIns), "no level in memory")
-        for r = 28 to 30
+        f_dbgRow(28, "Liq inspect #" + str.tostring(dbgLiqIns), "no level in memory")
+        for r = 29 to 32
             f_dbgRow(r, "", "")
     else
-        f_dbgRow(27, "Liq inspect #" + str.tostring(dbgLiqIns), (w.isBsl ? "BSL" : "SSL") + " · id " + f_tid(w.id) + " · price " + f_px(w.price))
-        f_dbgRow(28, "swing → known", "bar " + str.tostring(w.originBar) + " (" + f_mt(w.originTime) + ") → bar " + str.tostring(w.confirmBar) + " (" + f_mt(w.confirmTime) + ") · window left " + str.tostring(w.pivL) + " · right " + str.tostring(w.pivR))
-        f_dbgRow(29, "significance @ birth", "reaction " + f_num(w.react) + " pts = " + f_num(w.react / w.tra) + " × TR (" + f_num(w.tra) + ") · required " + f_num(w.reactReq) + " → " + (w.react >= w.reactReq ? "PASS" : "INCONSISTENT"))
-        string eqTxt = "none"
-        if not na(w.eq)
-            eqTxt := (w.isBsl ? "EQH " : "EQL ") + f_px(w.eq.price) + " ×" + str.tostring(w.eq.members.size()) + (na(w.eq.qualBar) ? " (below min)" : "") + (na(w.eq.takenBar) ? "" : " · taken")
-        string st    = na(w.takenBar) ? "ACTIVE · exact touches " + str.tostring(w.touches) : "TAKEN " + f_mt(w.takenTime) + " · reached " + f_px(w.takeExt) + " (+" + str.tostring(math.round(math.abs(w.takeExt - w.price) / syminfo.mintick)) + " ticks)" + (w.takeGap ? " · opened beyond" : "") + " · close " + f_px(w.takeClose) + " → " + f_clsName(w.cls) + " · touches before " + str.tostring(w.touches)
-        f_dbgRow(30, "status", st + " · EQ: " + eqTxt + (w.eqOpen ? "" : " · closed"))
-    f_dbgRow(31, "Last events", f_lastEvents(6))
+        f_dbgRow(28, "Liq inspect #" + str.tostring(dbgLiqIns), (w.isBsl ? "BSL" : "SSL") + " · id " + f_tid(w.id) + " · price " + f_px(w.price))
+        f_dbgRow(29, "swing → known", "bar " + str.tostring(w.originBar) + " (" + f_mt(w.originTime) + ") → bar " + str.tostring(w.confirmBar) + " (" + f_mt(w.confirmTime) + ") · window left " + str.tostring(w.pivL) + " · right " + str.tostring(w.pivR))
+        f_dbgRow(30, "significance @ birth", "reaction " + f_num(w.react) + " pts = " + f_num(w.react / w.tra) + " × TR (" + f_num(w.tra) + ") · required " + f_num(w.reactReq) + " → " + (w.react >= w.reactReq ? "PASS" : "INCONSISTENT"))
+        string st = na(w.takenBar) ? "ACTIVE · exact touches " + str.tostring(w.touches) : "TAKEN " + f_mt(w.takenTime) + " · reached " + f_px(w.takeExt) + " (+" + str.tostring(math.round(math.abs(w.takeExt - w.price) / syminfo.mintick)) + " ticks)" + (w.takeGap ? " · opened beyond" : "") + " · close " + f_px(w.takeClose) + " → " + f_clsName(w.cls) + " · touches before " + str.tostring(w.touches)
+        f_dbgRow(31, "status (this swing)", st + (w.eqOpen ? "" : " · closed"))
+        f_dbgRow(32, "EQ cluster (pool)", na(w.eq) ? "none" : f_eqTxt(w.eq))
+    f_dbgRow(33, "Last events", f_lastEvents(6))
 
 // Normal-mode warnings: non-standard candles, and objects nearing the hard limit
 // (TradingView would otherwise delete the oldest drawings silently).
