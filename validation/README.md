@@ -54,7 +54,7 @@ validation/
   golden/               golden dataset (synthetic/ now, nq/ for real labelled cases) + README
   parity/               full parity (python -m validation.parity EXPORT.csv → pine_observed.json) and manual
                         parity (manual.py, --manual manual_observed.txt; manual_observed_template.txt) and
-                        bounded Pine-Log parity (capture.py, --capture pine_capture.txt)
+                        bounded Pine-Log parity (capture.py, --capture pine_capture.csv or .txt)
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```
@@ -140,7 +140,7 @@ There are three levels, and the report never mixes them:
 | | FULL CSV BAR-BY-BAR PARITY | BOUNDED PINE-LOG BAR-BY-BAR PARITY | MANUAL EVENT PARITY |
 |---|---|---|---|
 | TradingView plan | paid (*Export chart data*) | free | free |
-| Input | one CSV export | `pine_capture.txt`: an IST *Parity capture* pasted from Pine Logs | `manual_observed.txt`: values and event lines copied by hand |
+| Input | one CSV export | `pine_capture.csv` (the Pine Logs file TradingView saves) or `.txt` (pasted): an IST *Parity capture* | `manual_observed.txt`: values and event lines copied by hand |
 | Candles for the oracle | in the export | in the capture (exact, rebuilt from the BAR lines) | a separate OHLC file you supply (`CANDLES=`) |
 | Compared | 9 Data Window series on every bar | 7 per-bar series on every bar after the warm-up, and the events of structures born inside the window | only what you copy: settings, debug-row counts, the listed events |
 | A PASS means | Pine and the oracle agree on every exported bar | they agree on that window; nothing about earlier history | no difference in what you copied |
@@ -206,18 +206,26 @@ END|bars=317
 * After each BAR line come that bar's **events**, in the Pine Logs event format.
 * **Only closed bars** are logged. Logging is **bounded**: N + warm-up bars, then END, then nothing more, even in realtime. With the capture ON, events are logged for the captured bars only.
 
-Run, after pasting the whole capture into `validation/parity/pine_capture.txt`:
+Save the Pine Logs as a file in `validation/parity/` (TradingView saves a `Date,Message` CSV; keep it as it is), or paste the text into a `.txt` file there, then run:
 
 ```bash
-python -m validation.parity --capture validation/parity/pine_capture.txt
+python -m validation.parity --capture validation/parity/pine_capture.csv
 ```
 
-The pane's own timestamps in front of each line, blank lines and pane text are ignored. **Anything that would make the candles inexact is rejected** (exit 2), with the line number:
+**Input.** Two kinds of input are read, and the kind is detected from the file itself:
+* **TradingView's saved file** (header `Date,Message`, detected from its header). It is read with Python's `csv` module, which undoes the quoting and the doubled quotes. Only the Message field is parsed; the Date column is kept for diagnostics. CRLF, a UTF-8 BOM, and commas or quotes inside a message are handled. On a chart with back-adjustment, `sym=` holds a JSON object; that is expected.
+* **Pasted text.** The pane's own timestamps in front of each line, blank lines and pane text are ignored. `Date,"Message"` rows pasted without their header are decoded the same way as the CSV.
+
+**Capture runs.** A log can hold several runs, for example after a reload. A run is one CAPTURE … END. Runs are **never merged**: the latest complete and valid run is used, and every run is listed in the output with its lines, window and status.
+
+**Rejected, with line numbers (exit 2)**, because the candles would not be exact:
 * no CAPTURE line;
-* a missing bar (index gap) or a bar pasted twice;
+* no END line: the last bar was still open when the logs were saved, or the file is cut;
+* a BAR count that differs from END, or from `bars + warmup` on the CAPTURE line;
+* a missing bar (index gap) or a bar listed twice;
 * wrong OHLC (high below open/close, off the tick grid, `na`, not a number);
 * a malformed timestamp;
-* a count that disagrees with END.
+* a CSV without a Message column, or malformed CSV.
 
 **Warm-up.** The oracle sees only the captured bars, so its first bars lack history: its TR on the first bar has no previous close, and the first pivots lack their left window. IST therefore captures the warm-up automatically (`warmup` = max(FVG length + 2, max(14, left) + right) = 17 for Balanced, 19 for Strict, 16 for Aggressive), and none of it is compared:
 
@@ -279,7 +287,7 @@ Event matching: by type and `id=` (the structure id), otherwise by type and time
 
 **What it cannot check:** every bar that is not in your copy. That includes FVG and swing decisions on bars without a listed event, Data Window values, the required gap and reaction thresholds, sessions not listed, and everything before the oldest line of a block. It also cannot check what Pine draws, or any setting not in the file (the oracle uses the IST defaults). A manual PASS is never full parity.
 
-Exit codes: 0 = no difference, 1 = differences, 2 = the file is malformed (every bad line is listed with its number). `python -m validation` runs `parity/pine_capture.txt` and `parity/manual_observed.txt` when they exist and shows each result on its own line, next to the full CSV parity.
+Exit codes: 0 = no difference, 1 = differences, 2 = the file is malformed (every bad line is listed with its number). `python -m validation` runs the most recently saved `parity/pine_capture*.csv` / `.txt` and `parity/manual_observed.txt` when they exist and shows each result on its own line, next to the full CSV parity.
 
 ## Regression baseline
 

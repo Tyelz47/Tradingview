@@ -22,6 +22,11 @@ Definitions: docs/LIQUIDITY.md (DEF-L1…L7). Phase 1 tests: docs/TESTS.md (unch
 
 No DIFFERS indication appeared, and the renderer showed a limited number of levels. On real NQ data, as on noise, the Balanced reaction floor passes ~95–96% of confirmed pivots. The filter stays unchanged until Pine ↔ Python parity is verified on real data: full bar-by-bar parity from a Data Window export (paid plan), or manual event parity from the debug table and Pine Logs (free plan; weaker): `python -m validation.parity`, validation/README.md.
 
+**Bounded Pine-Log parity (user capture, 2026-10-27, NQ1! 1m, Balanced, IST v0.4.3-dev).** This is a parity observation, not an L-test result.
+* The input was TradingView's saved Pine Logs CSV: 317 bars, 10:49–16:05 New York, warm-up 17.
+* Result: **PASS**. 300 bars × 7 series, and 340 events of structures born inside the window, with 0 differences.
+* That window held **0 REJECT pivots**, so the REJECT branch of the reaction filter is not yet exercised. A 1,000-bar capture is next.
+
 ---
 
 ## S · Static and model checks (executed here)
@@ -100,7 +105,7 @@ Model column: `s_<name>` is the reference-model scenario, now `test_<name>` in `
 | L41 | Cluster id stable | Inspector on each member of one cluster (and before/after a 3rd member joins, if one does) → the same cluster id and reference; row 32 never shows `DIFFERS` | s_L41_cluster_id_stable | PENDING MANUAL VALIDATION |
 | L42 | No duplicate cluster | A 3rd equal high → still one line (`EQH ×3`) and one `EQH_CREATED` (as L20). After an L35 sweep, a pool formed by later swings has a **different** id | s_L42_boundary_change_no_duplicate | PENDING MANUAL VALIDATION |
 | L43 | Debug output for manual parity | Debug mode ON. (a) Row 34 "Loaded history (closed bars)" shows the first loaded bar → the last closed bar · N bars · tz; scroll to the chart's first bar to confirm the start. (b) Pine Logs (Pine Editor or IST status line → More → Pine Logs) show one line per event, `yyyy-MM-dd HH:mm  NAME … id=… px=…`, the same text as "Last events"; with Debug mode OFF there are none. (c) Report whether the log text can be selected and copied | — | PENDING MANUAL VALIDATION |
-| L44 | Parity capture (bounded) | "Parity capture → Pine Logs" ON, N = 300. Pine Logs show one CAPTURE line, then N + warm-up (Balanced: 317) BAR lines with consecutive `i=`, each followed by that bar's events, then an END line with `bars=317`. Nothing more is logged afterwards (wait 2–3 realtime bars). The capture OFF → no BAR line. Paste the capture into `validation/parity/pine_capture.txt` and run `python -m validation.parity --capture validation/parity/pine_capture.txt`: report the printed result verbatim | test_parity_capture (parser, warm-up, events) | PENDING MANUAL VALIDATION |
+| L44 | Parity capture (bounded) | "Parity capture → Pine Logs" ON, N = 300. Pine Logs show one CAPTURE line, then N + warm-up (Balanced: 317) BAR lines with consecutive `i=`, each followed by that bar's events, then an END line with `bars=317`. Nothing more is logged afterwards (wait 2–3 realtime bars). The capture OFF → no BAR line. Save the Pine Logs into `validation/parity/` as they are (TradingView's `Date,Message` CSV) and run `python -m validation.parity --capture validation/parity/<file>.csv`: report the printed result verbatim | test_parity_capture (parser, warm-up, events) | PENDING MANUAL VALIDATION |
 
 ---
 

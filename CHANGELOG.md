@@ -1,5 +1,23 @@
 # Changelog
 
+## Tooling · validation agent 1.3.1 (2026-10-27, branch `tooling/validation-agent`) — capture importer reads TradingView's Pine Logs CSV — no indicator change
+
+**ROOT CAUSE.** TradingView saves Pine Logs as a real CSV (`Date,Message`) with every message quoted and inner quotes doubled. The capture importer read physical lines, so the closing quote stayed in the last value (`warmup=17"`, `int()` failed). The doubled quotes of the JSON tickerid in `sym=` were not undone either.
+
+**FIX** (`validation/parity/capture.py`):
+* Input detection: a `Date,Message` header means the file is read with the `csv` module (strict). The Message column is found case-insensitively, and only that field is parsed. The Date column is kept for diagnostics.
+* Plain pasted text still works. A `date,"message"` row pasted without its header is decoded too. CRLF and a UTF-8 BOM are handled.
+* Capture runs: the log is split into CAPTURE … END runs that are never merged. A file saved newest first is turned around. The latest complete and valid run is used, and every run is listed.
+* Stricter: END is required, and the BAR count must equal END and `bars + warmup`.
+* `python -m validation` picks the most recently saved `parity/pine_capture*.csv` / `.txt`.
+* `src/IST.pine` and the capture format are unchanged.
+
+**TESTS.**
+* 12 new tests: TradingView CSV, quoted JSON in CAPTURE, `warmup=17` read as 17, CRLF, BOM, commas, doubled quotes, header-less rows, capture runs never merged, a file saved newest first, a missing Message column, malformed CSV.
+* A committed regression fixture with the real file shape: `tests/fixtures/pine_logs_capture_synthetic.csv`.
+
+**RESULT ON THE USER'S FILE** (`pine_capture.txt.csv`, as saved, 317 bars): BOUNDED PINE-LOG BAR-BY-BAR PARITY **PASS**. 300 bars × 7 series and 340 events compared, 0 differences.
+
 ## Tooling · validation agent 1.3.0 (2026-10-27, branch `tooling/validation-agent`) — bounded Pine-Log parity
 
 * `python -m validation.parity --capture validation/parity/pine_capture.txt` rebuilds the exact candles of an IST *Parity capture* pasted from Pine Logs, replays them with the oracle, and compares two things after the warm-up:

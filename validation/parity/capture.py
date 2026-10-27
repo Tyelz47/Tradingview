@@ -11,6 +11,8 @@ reported NOT OBSERVABLE and never compared.
 """
 from __future__ import annotations
 
+import csv
+import io
 import re
 from collections import Counter
 from datetime import datetime
@@ -22,7 +24,7 @@ from validation.models.types import PRESETS, Candle, Settings
 from validation.parity import oracle_series
 from validation.parity.manual import DIFF, MATCH, NOBS, _ANY_NAME, _event, _fmt, _same_px, _tf_seconds, pine_text
 
-CAPTURE = VALIDATION_DIR / "parity" / "pine_capture.txt"
+PARITY_DIR = VALIDATION_DIR / "parity"
 TOL = 1e-6                     # Pine prints these values with 8 decimals
 SECTIONS = ("settings", "bars", "events")
 # BAR key → oracle series (parity.SERIES). The take codes are left out on purpose: on one
@@ -35,6 +37,7 @@ LABELS = {"fvg_verdict": "FVG verdict", "fvg_required": "FVG required gap", "bsl
 HEAD = ("tick", "tz", "confirmed", "liq", "preset", "left", "right", "k", "eqtol", "eqmin", "liqmem",
         "fvgticks", "fvgtra", "fvgrng", "fvglen", "fvgmem", "ses", "bars", "warmup")
 _TOKEN = re.compile(r"\b(CAPTURE|BAR|END)\|(.*)$")
+_CSV_ROW = re.compile(r'^\s*\d{4}-\d\d-\d\d[^,"|]*,"')   # a `date,"message"` row without its header
 
 
 # ── parsing ────────────────────────────────────────────────────────────────────
@@ -78,27 +81,98 @@ def _bar(parts: list[str], tick: float | None) -> dict:
     return {"i": int(kv["i"]), "time": t, "candle": c, "vals": {s: _num(k, kv[k]) for k, s in FIELDS.items()}}
 
 
-def parse(text: str) -> dict:
-    """The pasted Pine Logs text → {"head", "bars", "events", "end", "ignored"}. Lines are
-    found by their token (CAPTURE|, BAR|, END|, an event name), so the pane's timestamps in
-    front are ignored. Anything that would make the candles inexact is rejected
-    (ValueError, every problem numbered by line)."""
-    lines = text.lstrip("﻿").splitlines()
-    head, bars, raw_events, end, errors, ignored = None, [], [], None, [], 0
-    for n, line in enumerate(lines, 1):
-        m = _TOKEN.search(line)
-        if m and m[1] == "CAPTURE":
+def _messages(text: str) -> tuple[list[tuple[int, str, str | None]], str]:
+    """Every log message as (line, message, date), and the input kind.
+
+    A TradingView Pine Logs file (`Date,Message`, recognised by its header) is read with
+    the csv module, which undoes the quoting and the doubled quotes; only the Message field
+    is parsed, the Date column is kept for diagnostics. Any other text is read line by line
+    (the pane's own timestamp in front of a message is ignored); a `date,"message"` row
+    pasted without its header is decoded the same way."""
+    text = text.lstrip(chr(0xFEFF))
+    first = next((ln for ln in text.splitlines() if ln.strip()), "")
+    try:
+        cols = [c.strip().lower() for c in next(csv.reader([first]), [])]
+    except csv.Error:
+        cols = []
+    if len(cols) >= 2 and {"date", "message"} & set(cols):
+        if "message" not in cols:
+            raise ValueError(f"capture rejected: the CSV has no Message column (header: {first.strip()})")
+        mi, di = cols.index("message"), cols.index("date") if "date" in cols else None
+        rows = csv.reader(io.StringIO(text, newline=""), strict=True)
+        out, header = [], True
+        try:
+            for row in rows:
+                if not any(c.strip() for c in row):
+                    continue
+                if header:
+                    header = False
+                    continue
+                if len(row) <= mi:
+                    raise ValueError(f"capture rejected: line {rows.line_num}: {len(row)} column(s), no Message field")
+                out.append((rows.line_num, row[mi], row[di] if di is not None and di < len(row) else None))
+        except csv.Error as e:
+            raise ValueError(f"capture rejected: malformed CSV at line {rows.line_num}: {e}") from None
+        return out, "TradingView Pine Logs CSV (Date,Message)"
+    out = []
+    for n, ln in enumerate(text.splitlines(), 1):
+        if _CSV_ROW.match(ln):
             try:
-                if head is not None:
-                    raise ValueError("a second CAPTURE line (paste one capture only)")
-                head = _pairs([p for p in m[2].split("|") if p.strip()])
-                miss = [k for k in HEAD if k not in head]
-                if miss:
-                    raise ValueError(f"missing {', '.join(miss)} (is it the same IST build?)")
-            except ValueError as e:
-                errors.append(f"line {n}: CAPTURE: {e}")
-    tick = float(head["tick"]) if head and "tick" in head else None
-    for n, line in enumerate(lines, 1):
+                row = next(csv.reader([ln], strict=True))
+            except csv.Error as e:
+                raise ValueError(f"capture rejected: line {n}: malformed CSV row: {e}") from None
+            out.append((n, row[-1], row[0]))
+        else:
+            out.append((n, ln, None))
+    return out, "pasted text"
+
+
+def _runs(msgs: list) -> tuple[list[dict], int]:
+    """The capture runs in log order, each CAPTURE … END, never merged with another. A file
+    saved newest first (BAR times mostly decreasing) is turned around first."""
+    ts = []
+    for _, msg, _ in msgs:
+        m = re.search(r"\bBAR\|([^|]+)\|", msg)
+        if m:
+            try:
+                ts.append(datetime.strptime(m[1].strip(), "%Y-%m-%dT%H:%M:%S%z"))
+            except ValueError:
+                pass
+    if 2 * sum(b < a for a, b in zip(ts, ts[1:])) > len(ts):
+        msgs = msgs[::-1]
+    runs, cur, outside = [], None, 0
+    for n, msg, _ in msgs:
+        m = _TOKEN.search(msg)
+        if m and m[1] == "CAPTURE":
+            if cur is not None:
+                runs.append(cur)                              # no END before the next CAPTURE
+            cur = {"lines": [], "end": False}
+        if cur is None:
+            outside += bool(msg.strip())
+            continue
+        cur["lines"].append((n, msg))
+        if m and m[1] == "END":
+            cur["end"] = True
+            runs.append(cur)
+            cur = None
+    if cur is not None:
+        runs.append(cur)
+    return runs, outside
+
+
+def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
+    """One CAPTURE … END run → (capture, []) or (None, every problem numbered by line)."""
+    n0, first = lines[0]
+    try:
+        head = _pairs([p for p in _TOKEN.search(first)[2].split("|") if p.strip()])
+        miss = [k for k in HEAD if k not in head]
+        if miss:
+            raise ValueError(f"missing {', '.join(miss)} (is it the same IST build?)")
+        tick, expected = float(head["tick"]), int(head["bars"]) + int(head["warmup"])
+    except ValueError as e:
+        return None, [f"line {n0}: CAPTURE: {e}"]
+    bars, raw_events, end, ignored, errors = [], [], None, 0, []
+    for n, line in lines[1:]:
         m = _TOKEN.search(line)
         try:
             if m and m[1] == "BAR":
@@ -111,13 +185,10 @@ def parse(text: str) -> dict:
                 ignored += 1
         except (ValueError, KeyError) as e:
             errors.append(f"line {n}: {m[1] if m else 'event'}: {e}")
-    if head is None:
-        errors.insert(0, "no CAPTURE line: copy the capture from its first line (CAPTURE|…)")
-    tz = (head or {}).get("tz", "America/New_York")
     events = []
     for n, line in raw_events:
         try:
-            events.append({**_event(line, tz, None), "line": n})
+            events.append({**_event(line, head["tz"], None), "line": n})
         except ValueError as e:
             errors.append(f"line {n}: {e}")
     bars.sort(key=lambda b: b["i"])
@@ -132,14 +203,52 @@ def parse(text: str) -> dict:
                           + f" missing (between lines {a['line']} and {b['line']}): copy the whole capture")
         elif b["i"] == a["i"] + 1 and b["time"] <= a["time"]:
             errors.append(f"line {b['line']}: bar i={b['i']} is not later than bar i={a['i']}")
-    if end is not None and end != len(count):
+    if end is None:
+        errors.append("no END line: the last bar was still open when the logs were copied or saved, or the "
+                      "file is cut; take them again once END has appeared")
+    elif end != len(count):
         errors.append(f"END says {end} bars but {len(count)} BAR lines were pasted")
-    if head is not None and len(bars) < 2:
-        errors.append("fewer than 2 BAR lines")
+    if len(count) != expected:
+        errors.append(f"{len(count)} BAR lines, but the CAPTURE line expects {expected} "
+                      f"(bars {head['bars']} + warm-up {head['warmup']})")
     if errors:
-        raise ValueError("capture rejected:\n  " + "\n  ".join(errors[:30])
-                         + (f"\n  … {len(errors) - 30} more" if len(errors) > 30 else ""))
-    return {"head": head, "bars": bars, "events": events, "end": end, "ignored": ignored}
+        return None, errors
+    return {"head": head, "bars": bars, "events": events, "end": end, "ignored": ignored}, []
+
+
+def parse(text: str) -> dict:
+    """Pine Logs → one capture: {"head", "bars", "events", "end", "ignored", "notes",
+    "source"}. Plain pasted text and TradingView's saved `Date,Message` CSV are both read
+    (detected from the header). Messages are found by their token (CAPTURE|, BAR|, END|,
+    an event name). Several capture runs are never merged: the latest complete and valid
+    run is used and every run is listed in the notes. Anything that would make the
+    candles inexact rejects the run (ValueError, every problem numbered by line)."""
+    msgs, source = _messages(text)
+    runs, outside = _runs(msgs)
+    if not runs:
+        raise ValueError("capture rejected:\n  no CAPTURE line: take the capture from its first line (CAPTURE|…)")
+    for k, r in enumerate(runs, 1):
+        r.update(k=k, first=r["lines"][0][0], last=r["lines"][-1][0])
+        r["cap"], r["errs"] = _parse_run(r["lines"])
+    good = [r for r in runs if r["cap"]]
+    if not good:
+        errs = runs[0]["errs"] if len(runs) == 1 else \
+            [f"run {r['k']} (lines {r['first']}–{r['last']}): {e}" for r in runs for e in r["errs"][:5]]
+        lead = "capture rejected:" if len(runs) == 1 else \
+            f"capture rejected: none of the {len(runs)} capture runs in the file is complete and valid:"
+        raise ValueError(lead + "\n  " + "\n  ".join(errs[:30])
+                         + (f"\n  … {len(errs) - 30} more" if len(errs) > 30 else ""))
+    use, notes = good[-1], []
+    if len(runs) > 1:
+        notes.append(f"{len(runs)} capture runs in the file (never merged); used run {use['k']}, the latest complete one:")
+        for r in runs:
+            c = r["cap"]
+            what = (f"{_fmt(c['bars'][0]['time'], c['head']['tz'])} → {_fmt(c['bars'][-1]['time'], c['head']['tz'])}, "
+                    f"{len(c['bars'])} bars, preset {c['head']['preset']}") if c else f"not usable: {r['errs'][0]}"
+            notes.append(f"  {'USED' if r is use else 'skipped'} run {r['k']} (lines {r['first']}–{r['last']}): {what}")
+    if outside:
+        notes.append(f"{outside} log lines outside any capture run were ignored")
+    return {**use["cap"], "notes": notes, "source": source}
 
 
 # ── comparison ─────────────────────────────────────────────────────────────────
@@ -161,7 +270,7 @@ def settings_of(h: dict) -> tuple[Settings, bool]:
 
 
 def compare(cap: dict, preset: str | None = None) -> dict:
-    h, bars, checks, notes = cap["head"], cap["bars"], [], []
+    h, bars, checks, notes = cap["head"], cap["bars"], [], list(cap.get("notes", []))
     add = lambda sec, st, txt: checks.append({"section": sec, "status": st, "text": txt})
     tz = h["tz"]
     fmt = lambda ms: _fmt(ms, tz)
@@ -274,22 +383,32 @@ def compare(cap: dict, preset: str | None = None) -> dict:
         add("events", MATCH, f"{typ}: {n}")
     for why, n in nobs.most_common():
         add("events", NOBS, f"{n} Pine events not compared: {why}")
-    if cap["end"] is None:
-        notes.append("no END line: the capture may be cut (the last bar was still open, or the copy is partial)")
+    sym = re.search(r'"symbol"\s*:\s*"([^"]+)"', h.get("sym", ""))       # extended tickerid: a JSON object
     cnt = Counter(c["status"] for c in checks)
     return {"status": "COMPARED", "mode": "BOUNDED PINE-LOG BAR-BY-BAR PARITY", "checks": checks, "counts": cnt,
             "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars),
             "compared_bars": max(0, len(bars) - max(w_fvg, w_liq)), "warmup": max(w_fvg, w_liq),
-            "matched_events": sum(matched.values()), "window": f"{fmt(t0)} → {fmt(t_end)}", "symbol": h.get("sym", "—"),
+            "matched_events": sum(matched.values()), "window": f"{fmt(t0)} → {fmt(t_end)}",
+            "symbol": sym[1] if sym else h.get("sym", "—"), "source": cap.get("source", "—"),
             "about": (f"preset {name} → left {s.liq.left} · right {s.liq.right} · k {s.liq.k:g} · EQ {s.liq.tol_ticks} "
                       f"ticks · min {s.liq.min_touch} · tick {s.tick:g} · {tz}")}
 
 
-def run(path=CAPTURE, preset: str | None = None) -> dict:
-    path = Path(path)
-    if not path.exists():
-        return {"status": "NO OBSERVED DATA", "differences": 0, "reason": f"{path.name} not present"}
-    return compare(parse(path.read_text(encoding="utf-8")), preset)
+def latest_capture() -> Path | None:
+    """The most recently saved validation/parity/pine_capture*.csv / .txt (TradingView may
+    append .csv to the name you type)."""
+    files = [p for p in PARITY_DIR.glob("pine_capture*") if p.suffix.lower() in (".csv", ".txt")]
+    return max(files, key=lambda p: (p.stat().st_mtime, p.name)) if files else None
+
+
+def run(path=None, preset: str | None = None) -> dict:
+    path = Path(path) if path else latest_capture()
+    if path is None or not path.exists():
+        return {"status": "NO OBSERVED DATA", "differences": 0,
+                "reason": f"{path.name if path else 'no validation/parity/pine_capture*.csv or .txt'} not present"}
+    r = compare(parse(path.read_text(encoding="utf-8")), preset)
+    r["file"] = path.name
+    return r
 
 
 def verdict(r: dict) -> str:
@@ -303,6 +422,7 @@ def show(r: dict, build: str) -> None:
     print("BOUNDED PINE-LOG BAR-BY-BAR PARITY — the bars and events IST logged, replayed by the oracle.")
     print("Only the captured window is covered; this is NOT full CSV bar-by-bar parity.\n")
     print(f"  {r['symbol']} · IST {build} · {r['about']}")
+    print(f"  input: {r.get('file', '—')} · {r['source']}")
     print(f"  window {r['window']} · {r['bars']} bars · first {r['warmup']} = warm-up (never compared)")
     for n in r["notes"]:
         print(f"  NOTE: {n}")

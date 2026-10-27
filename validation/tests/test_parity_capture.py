@@ -7,6 +7,7 @@ exclusion of everything born before the window."""
 import re
 from datetime import datetime
 from functools import lru_cache
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -14,15 +15,21 @@ import pytest
 from validation import PINE_SOURCE, stats
 from validation.candles import random_walk
 from validation.models.ist import IstModel
-from validation.models.types import Settings
+from validation.models.types import PRESETS, Settings
 from validation.parity import capture, manual, oracle_series
 from validation.parity.__main__ import main
 
 pytestmark = [pytest.mark.common, pytest.mark.section("parity")]
 TZ = "America/New_York"
-HEAD = ("CAPTURE|sym=CME_MINI:NQ1!|tf=1|tick=0.25|tz=America/New_York|confirmed=1|liq=1|preset={preset}|left={l}|right={r}"
+# As IST writes it on a chart with back-adjustment settings: syminfo.tickerid is a JSON
+# object (quotes and commas inside the message), as in the user's TradingView file.
+SYM = '={"backadjustment":"default","settlement-as-close":true,"symbol":"CME_MINI:NQ1!"}'
+HEAD = ("CAPTURE|sym=" + SYM.replace("{", "{{").replace("}", "}}")
+        + "|tf=1|tick=0.25|tz=America/New_York|confirmed=1|liq=1|preset={preset}|left={l}|right={r}"
         "|k={k}|eqtol=4|eqmin=2|liqmem=100|fvgticks=2|fvgtra=0.1|fvgrng=0|fvglen=14|fvgmem=50"
         "|ses=Asia@2000-0000,London@0200-0500,NY AM@0930-1200,NY PM@1330-1600|bars={n}|warmup={w}")
+FIXTURE = Path(__file__).parent / "fixtures" / "pine_logs_capture_synthetic.csv"
+MINUTE = 60_000
 
 
 def _n(x):
@@ -30,32 +37,52 @@ def _n(x):
 
 
 @lru_cache(maxsize=None)
-def _history(seed=7, bars=1500, preset="balanced"):
-    cs = random_walk(bars, seed, gap_prob=0.02)
+def _history(seed=7, bars=1500, preset="balanced", price=20000.0, start=None):
+    cs = random_walk(bars, seed, gap_prob=0.02, start_price=price, **({"start": start} if start else {}))
     s = Settings.from_dict({"liq": {"preset": preset}})
     m = IstModel(s)
     return cs, s, oracle_series(cs, s, m), m.events
 
 
-def _capture(seed=7, bars=1500, n=300, preset="balanced", end=True):
-    """The Pine Logs lines IST writes for the last n closed bars (+ warm-up), oldest first."""
-    cs, s, series, events = _history(seed, bars, preset)
-    w = max(s.fvg.length + 2, max(s.liq.tra_len, s.liq.left) + s.liq.right)
-    a = len(cs) - (n + w)
+def _capture(seed=7, bars=1500, n=300, preset="balanced", end=True, first_i=None, price=20000.0, at=None):
+    """The Pine Logs messages IST writes for the last n closed bars (+ warm-up), oldest
+    first, as (bar open time, message). `first_i` / `at` relabel the window's first bar
+    index and move its open time, as on a real chart."""
+    w = max(16, max(14, PRESETS[preset][0]) + PRESETS[preset][1])
+    a = bars - (n + w)
+    cs, s, series, events = _history(seed, bars, preset, price, at - a * MINUTE if at else None)
+    off = (first_i - a) if first_i is not None else 0
     by_bar = {}
     for e in events:
         by_bar.setdefault(e.bar, []).append(e)
-    lines = [HEAD.format(preset=preset.title(), l=s.liq.left, r=s.liq.right, k=_n(s.liq.k), n=n, w=w)]
+    out = [(cs[a].time, HEAD.format(preset=preset.title(), l=s.liq.left, r=s.liq.right, k=_n(s.liq.k), n=n, w=w))]
     for t in range(a, len(cs)):
         c = cs[t]
         ts = datetime.fromtimestamp(c.time / 1000, ZoneInfo(TZ)).strftime("%Y-%m-%dT%H:%M:%S%z")
         v = {k: _n(series[f][t]) for k, f in capture.FIELDS.items()}
-        lines.append(f"BAR|{ts}|i={t}|O={_n(c.open)}|H={_n(c.high)}|L={_n(c.low)}|C={_n(c.close)}|"
-                     + "|".join(f"{k}={x}" for k, x in v.items()))
-        lines += [manual.pine_text(e, TZ) for e in by_bar.get(t, [])]
+        out.append((c.time, f"BAR|{ts}|i={t + off}|O={_n(c.open)}|H={_n(c.high)}|L={_n(c.low)}|C={_n(c.close)}|"
+                    + "|".join(f"{k}={x}" for k, x in v.items())))
+        out += [(c.time, manual.pine_text(e, TZ)) for e in by_bar.get(t, [])]
     if end:
-        lines.append(f"END|bars={n + w}")
-    return lines
+        out.append((cs[-1].time, f"END|bars={n + w}"))
+    return out if at or first_i is not None else [m for _, m in out]
+
+
+def _tv_csv(rows, crlf=False, bom=False):
+    """A TradingView 'Pine Logs' file: Date (the bar time in UTC), then the quoted Message,
+    its quotes doubled."""
+    nl = "\r\n" if crlf else "\n"
+    body = nl.join(f'{datetime.fromtimestamp(t / 1000, ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000-00:00")},'
+                   f'"{m.replace(chr(34), chr(34) * 2)}"' for t, m in rows)
+    return ("﻿" if bom else "") + "Date,Message" + nl + body + nl
+
+
+def write_fixture():
+    """Regenerate tests/fixtures/pine_logs_capture_synthetic.csv (synthetic candles, real
+    TradingView file shape: first bar i=16190 at 2026-10-27 10:50 New York)."""
+    at = int(datetime(2026, 10, 27, 10, 50, tzinfo=ZoneInfo(TZ)).timestamp() * 1000)
+    FIXTURE.parent.mkdir(exist_ok=True)
+    FIXTURE.write_bytes(_tv_csv(_capture(seed=21, first_i=16190, price=29664.5, at=at)).encode("utf-8"))
 
 
 def _run(lines, preset=None):
@@ -81,7 +108,8 @@ def test_valid_bar_lines_parse():
     # as copied from the Pine Logs pane: its own timestamp in front, CRLF, UI text around
     pane = ["Pine Logs", ""] + [f"[2026-10-26T18:59:00.000-04:00]: {ln}" for ln in lines] + ["Load more"]
     again = capture.parse("\r\n".join(pane))
-    assert [b["candle"] for b in again["bars"]] == [b["candle"] for b in cap["bars"]] and again["ignored"] == 2
+    assert [b["candle"] for b in again["bars"]] == [b["candle"] for b in cap["bars"]]
+    assert again["notes"] == ["2 log lines outside any capture run were ignored"]
     assert len(again["events"]) == len(cap["events"]) > 0
 
 
@@ -163,10 +191,92 @@ def test_header_and_end_are_checked():
         capture.parse("\n".join(lines[1:]))
     with pytest.raises(ValueError, match="END says 317 bars but 316"):
         capture.parse("\n".join(lines[:1] + lines[2:]))
-    r = _run(_capture(end=False))                                     # last bar still open, or copy cut: a note
-    assert r["differences"] == 0 and any("no END line" in n for n in r["notes"])
+    with pytest.raises(ValueError, match="no END line: the last bar was still open"):
+        capture.parse("\n".join(_capture(end=False)))                 # last bar still open, or the copy is cut
+    short = [re.sub(r"bars=300", "bars=299", lines[0])] + lines[1:]
+    with pytest.raises(ValueError, match=r"317 BAR lines, but the CAPTURE line expects 316 \(bars 299 \+ warm-up 17\)"):
+        capture.parse("\n".join(short))
     with pytest.raises(ValueError, match="preset Balanced but --preset strict"):
         _run(lines, preset="strict")
+
+
+# ── TradingView's saved Pine Logs file (Date,Message CSV) ──
+
+def _same(a, b):
+    """Two parsed captures hold the same header, candles, per-bar values and events."""
+    key = lambda c: (c["head"], [(x["i"], x["candle"], x["vals"]) for x in c["bars"]],
+                     [{k: e[k] for k in ("time", "type", "dir", "sid", "price")} for e in c["events"]])
+    return key(a) == key(b)
+
+
+def test_tradingview_csv_capture_works():
+    rows = _capture(first_i=16190, at=int(datetime(2026, 10, 27, 10, 50, tzinfo=ZoneInfo(TZ)).timestamp() * 1000))
+    plain = capture.parse("\n".join(m for _, m in rows))
+    cap = capture.parse(_tv_csv(rows))
+    assert _same(cap, plain) and cap["source"].startswith("TradingView Pine Logs CSV") and plain["source"] == "pasted text"
+    assert cap["head"]["sym"] == SYM                                  # doubled quotes undone, commas kept
+    assert cap["head"]["warmup"] == "17" and cap["head"]["bars"] == "300" and cap["end"] == 317
+    assert cap["head"]["ses"] == "Asia@2000-0000,London@0200-0500,NY AM@0930-1200,NY PM@1330-1600"
+    assert cap["bars"][0]["i"] == 16190 and cap["bars"][-1]["i"] == 16190 + 316
+    r = capture.compare(cap)
+    assert r["differences"] == 0 and r["warmup"] == 17 and r["symbol"] == "CME_MINI:NQ1!", _diffs(r)
+
+
+@pytest.mark.parametrize("crlf, bom", [(True, False), (False, True), (True, True)])
+def test_tradingview_csv_crlf_and_bom(crlf, bom):
+    rows = _capture(first_i=16190, at=1793112600000)
+    assert _same(capture.parse(_tv_csv(rows, crlf=crlf, bom=bom)), capture.parse(_tv_csv(rows)))
+
+
+def test_csv_rows_pasted_without_their_header():
+    rows = _capture(first_i=16190, at=1793112600000)
+    body = _tv_csv(rows).split("\n", 1)[1]
+    assert _same(capture.parse(body), capture.parse(_tv_csv(rows)))
+
+
+def test_regression_fixture_real_tradingview_shape():
+    """The committed fixture has the shape of the file TradingView saves (synthetic
+    candles; regenerate with write_fixture())."""
+    raw = FIXTURE.read_text(encoding="utf-8")
+    assert raw.startswith("Date,Message\n2026-10-27T14:50:00.000-00:00,\"CAPTURE|sym==" + '{""backadjustment"":""default""')
+    assert '\n2026-10-27T14:50:00.000-00:00,"BAR|2026-10-27T10:50:00-0400|i=16190|O=' in raw
+    cap = capture.parse(raw)
+    assert cap["head"]["warmup"] == "17" and len(cap["bars"]) == 317 and cap["end"] == 317
+    r = capture.compare(cap)
+    assert r["differences"] == 0 and r["matched_events"] > 0 and r["compared_bars"] == 300, _diffs(r)
+
+
+def test_capture_runs_are_never_merged():
+    one = _capture()
+    r = _run(one + one)                                               # the same run twice: one is used, both listed
+    assert r["differences"] == 0 and r["notes"][0].startswith("2 capture runs in the file (never merged); used run 2")
+    cap = capture.parse("\n".join(one + _capture(end=False)))         # a later run never finished
+    assert "USED run 1" in " ".join(cap["notes"]) and "skipped run 2" in " ".join(cap["notes"])
+    assert "no END line" in " ".join(cap["notes"])
+    cap = capture.parse("\n".join(_capture(end=False) + one))         # an earlier run cut by the next CAPTURE
+    assert "USED run 2" in " ".join(cap["notes"])
+    other = _capture(seed=8)                                          # two runs' lines in one CAPTURE … END
+    with pytest.raises(ValueError, match="appears 2 times|END says"):
+        capture.parse("\n".join(one[:200] + other[1:]))
+    with pytest.raises(ValueError, match="none of the 2 capture runs in the file is complete and valid"):
+        capture.parse("\n".join(_capture(end=False) + one[:200] + other[1:]))
+    newest_first = _capture(first_i=16190, at=1793112600000)[::-1]    # a file saved newest first
+    assert _same(capture.parse(_tv_csv(newest_first)), capture.parse(_tv_csv(newest_first[::-1])))
+
+
+def test_csv_without_message_column_is_rejected():
+    with pytest.raises(ValueError, match=r"the CSV has no Message column \(header: Date,Text\)"):
+        capture.parse('Date,Text\n2026-10-27T14:50:00.000-00:00,"BAR|x"\n')
+
+
+@pytest.mark.parametrize("body, msg", [
+    ('2026-10-27T14:50:00.000-00:00,"CAPTURE|sym=x|bars=300\n', r"malformed CSV at line \d+"),
+    ('2026-10-27T14:50:00.000-00:00,"CAPTURE|x"garbage\n', r"malformed CSV at line 2"),
+    ('2026-10-27T14:50:00.000-00:00\n', r"line 2: 1 column\(s\), no Message field"),
+])
+def test_malformed_csv_is_rejected_clearly(body, msg):
+    with pytest.raises(ValueError, match=msg):
+        capture.parse("Date,Message\n" + body)
 
 
 def _event_lines(lines, kinds=r"(BSL|SSL|FVG)_CREATED", start=60):
@@ -221,6 +331,10 @@ def test_command_line_exit_codes(tmp_path, capsys):
     assert main(["--capture", str(f)]) == 1
     f.write_text("BAR|nonsense", encoding="utf-8")
     assert main(["--capture", str(f)]) == 2 and "no CAPTURE line" in capsys.readouterr().err
+    g = tmp_path / "pine_capture.csv"                                 # the file TradingView saves, as it is
+    g.write_bytes(FIXTURE.read_bytes())
+    assert main(["--capture", str(g)]) == 0
+    assert "TradingView Pine Logs CSV (Date,Message)" in capsys.readouterr().out
 
 
 def test_capture_observed_tradingview_data():

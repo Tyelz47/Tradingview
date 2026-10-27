@@ -1,6 +1,6 @@
 """python -m validation.parity EXPORT.csv [--preset balanced] [--from T] [--to T]
 python -m validation.parity --manual validation/parity/manual_observed.txt [--preset balanced]
-python -m validation.parity --capture validation/parity/pine_capture.txt
+python -m validation.parity --capture validation/parity/pine_capture.csv
 
 Full CSV bar-by-bar parity: builds validation/parity/pine_observed.json from a TradingView
 'Export chart data' CSV (IST Debug mode ON) and prints the Pine ↔ oracle comparison.
@@ -84,7 +84,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m validation.parity", description=__doc__.split("\n\n")[1])
     ap.add_argument("csv", type=Path, nargs="?", help="TradingView 'Export chart data' CSV (IST Debug mode ON)")
     ap.add_argument("--manual", type=Path, help="manual observation file (free plan), e.g. validation/parity/manual_observed.txt")
-    ap.add_argument("--capture", type=Path, help="IST Parity capture pasted from Pine Logs, e.g. validation/parity/pine_capture.txt")
+    ap.add_argument("--capture", type=Path, help="IST Parity capture: the Pine Logs file TradingView saves (Date,Message CSV) or pasted text")
     ap.add_argument("--preset", choices=[*sorted(PRESETS), "custom"], help="liquidity preset used on the chart (default balanced)")
     ap.add_argument("--from", dest="lo", help="compare from this New York time, e.g. 2026-10-27T09:30")
     ap.add_argument("--to", dest="hi", help="compare up to this New York time")

@@ -337,10 +337,11 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
         manual_txt = man_parity.verdict(mp).split(": ", 1)[1].replace("FAIL", "**FAIL**", 1)
     cp = stats.RESULTS.get("capture_parity", {"status": "NOT RUN"})
     if cp["status"] in ("NO OBSERVED DATA", "NOT RUN"):
-        capture_txt = "PENDING — no validation/parity/pine_capture.txt" + (f" ({cp['reason']})" if cp.get("reason") else "")
+        capture_txt = "PENDING — no validation/parity/pine_capture*.csv or .txt"
     else:
         capture_txt = (cap_parity.verdict(cp).split(": ", 1)[1].replace("FAIL", "**FAIL**", 1)
-                       + f"; window {cp['window']}, first {cp['warmup']} bars = warm-up")
+                       + f"; {cp['file']} ({cp['source']}), window {cp['window']} New York, first {cp['warmup']} "
+                         f"bars = warm-up" + "".join(f"; {n.strip()}" for n in cp["notes"]))
     w("## Pine / Python parity\n\nThree levels, never mixed:\n"
       "* FULL CSV BAR-BY-BAR PARITY compares every bar of a Data Window export (paid plan).\n"
       "* BOUNDED PINE-LOG BAR-BY-BAR PARITY compares every bar of one captured window after its warm-up, and the "
