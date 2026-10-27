@@ -1,5 +1,32 @@
 # Changelog
 
+## Tooling · validation agent 1.2.0 (2026-10-27, branch `tooling/validation-agent`) — manual event parity for the free plan
+
+* `python -m validation.parity --manual validation/parity/manual_observed.txt --preset balanced` compares what you copy from the IST debug table and Pine Logs with the oracle. No TradingView export is needed.
+  * Input: `KEY=VALUE` lines and `EVENTS … END_EVENTS` blocks (`parity/manual_observed_template.txt`). The parser tolerates copy/paste spacing, case, `KEY: value`, thousands separators and a decimal comma. It rejects a malformed file with every bad line numbered.
+  * Checks: preset table and Confirmed only; candle alignment with the loaded history; internal row consistency; rows 22–26 against the oracle; each event's type, time, direction, id and price; duplicates; extra events; missing events inside each block. Every check prints MATCH, DIFFERENCE or NOT OBSERVABLE.
+  * The candles come from any OHLC CSV (`CANDLES=`). The CSV loader also accepts a `datetime` / `date` / `timestamp` column.
+* The CLI and the report label the two levels separately: FULL BAR-BY-BAR PARITY (Data Window export) and MANUAL EVENT PARITY (weaker; never reported as full parity).
+* `parity/manual_observed.txt` holds the user's 2026-10-27 runtime numbers (settings, rows 22–23). Its events, loaded history and candles are still to be added.
+* 26 new tests (`tests/test_parity_manual.py`): a valid file matches; copy variants parse; 14 malformed inputs are rejected; a missing, extra, duplicate, wrong-time, wrong-price event and a wrong swing count are each detected.
+
+## v0.4.2-dev — debug output for manual parity (2026-10-27, branch `tooling/validation-agent`)
+
+**CHANGE.** Diagnostics only (L7), with Debug mode ON:
+* Every event of a closed bar is written to **Pine Logs**: one line, the "Last events" text with the full date (`yyyy-MM-dd HH:mm  NAME … id=… px=… · reason`). The pane keeps up to 10,000 historical lines and can be searched.
+* **Debug row 34 "Loaded history (closed bars)"** shows the first loaded bar, the last closed bar, the number of bars and the timezone. The table grows from 34 to 35 rows.
+* The Debug-mode tooltip mentions the logs.
+
+**WHY.** On a free plan there is no *Export chart data*, and the debug table is drawn on the chart. Pine Logs give the event history as text. Row 34 tells a replay where Pine's history starts and ends, so the oracle can run on the same bars.
+
+**PHASE 1 IMPACT.** None. No detection, state, event, alert or drawing line changed. The logs read the bar's event list. `dbgFirstT` is a display-only `var`.
+
+**REPAINT IMPACT.** None. The logs are gated by `barstate.isconfirmed`, so an open bar is never logged.
+
+**REGRESSION TESTS.**
+* The static checks and the full validation agent pass. The oracle is unchanged, so the regression baseline is unchanged.
+* TradingView: L00 must be re-run on v0.4.2-dev (it passed on v0.4.1-dev). New L43 covers the row and the logs (PENDING).
+
 ## Tooling · validation agent 1.1.0 (2026-10-27, branch `tooling/validation-agent`) — no indicator change
 
 * Pine ↔ Python parity from one TradingView *Export chart data* CSV (IST Debug mode ON). The new command is `python -m validation.parity EXPORT.csv --preset balanced`.

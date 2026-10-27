@@ -316,6 +316,7 @@ Shared code that changed (each documented in CHANGELOG v0.4.0-dev with WHY / PHA
 | Intrabar alert de-dup key `kind:sid` → `kind:dir:sid` | none: FVG keys were already unique; liquidity needs it (a BSL and an SSL can share a swing time) |
 | `f_alertOn` gains 4 cases | none: the new toggles default OFF |
 | Debug table 22 → 34 rows; "Last events" moves from row 21 to row 33 (v0.4.0-dev: 32 rows, row 31) | display only; rows 0–20 unchanged |
+| v0.4.2-dev: 35 rows, row 34 "Loaded history (closed bars)"; with Debug mode ON, one Pine Logs line per event of a closed bar (the "Last events" text with the full date) | diagnostics only: reads the bar's event list, writes nothing |
 | 7 Data Window plots appended after the 11 Phase 1 plots | display only; Phase 1 plot order unchanged |
 | Tooltips (`Minimal mode`, `Debug mode`) mention liquidity | text only |
 | Event log (cap 40) is shared | debug display only: "Last events" spans less time when liquidity is busy |

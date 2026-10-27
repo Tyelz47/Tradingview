@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.4.1-dev · Phase 2 (liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.4.2-dev · Phase 2 (liquidity) development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -198,7 +198,7 @@ alLiqSwp  = input.bool(false, "Sweep", inline = "a4", group = G_ALR, display = d
 alLiqBrk  = input.bool(false, "Break", inline = "a5", group = G_ALR, display = display.none)
 alEqTkn   = input.bool(false, "EQH/EQL taken", inline = "a5", group = G_ALR, display = display.none)
 
-dbgOn      = input.bool(false, "Debug mode", tooltip = "[view] FVG milestones on zones, a state table with FVG and liquidity inspectors and source checks, an event log, and Data Window values. Uses one table, no extra drawing objects.", group = G_DBG, display = display.none)
+dbgOn      = input.bool(false, "Debug mode", tooltip = "[view] FVG milestones on zones, a state table with FVG and liquidity inspectors and source checks, an event log, Data Window values, and one Pine Logs line per event (copyable text). Uses one table, no extra drawing objects.", group = G_DBG, display = display.none)
 dbgInspect = input.int(0, "Inspect FVG (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
 dbgLiqIns  = input.int(0, "Inspect liquidity level (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
 
@@ -1498,8 +1498,9 @@ if barstate.isrealtime and barEv.size() > 0
 
 // ════ L7 · DIAGNOSTICS (one table, no drawing objects) ═════════════════════════
 
-var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 34, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
+var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 35, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
 var table warnTbl = table.new(position.top_right, 1, 2)
+var int   dbgFirstT = time    // first loaded bar: where a replay of the history must start
 
 f_dbgRow(int r, string k, string v) =>
     table.cell(dbgTbl, 0, r, k, text_color = #787B86, text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top)
@@ -1648,6 +1649,13 @@ f_takeCode(int dir) =>
                 c := 3
     c
 
+// Pine Logs: every event of a closed bar, one line in the "Last events" format with
+// the full date, so the history can be read as text (the pane shows up to 10,000
+// historical lines). Reads the bar's events only.
+if dbgOn and barstate.isconfirmed
+    for e in barEv
+        log.info(str.format_time(e.eventTime, "yyyy-MM-dd HH:mm", sesTz) + "  " + f_evText(e))
+
 if dbgOn and barstate.islast
     int bo = f_countOpen(bullFvgs)
     int ro = f_countOpen(bearFvgs)
@@ -1701,6 +1709,8 @@ if dbgOn and barstate.islast
         f_dbgRow(31, "status (this swing)", st + (w.eqOpen ? "" : " · closed"))
         f_dbgRow(32, "EQ cluster (pool)", na(w.eq) ? "none" : f_eqTxt(w.eq))
     f_dbgRow(33, "Last events", f_lastEvents(6))
+    // Closed bars only: in Confirmed mode an open last bar is not processed yet.
+    f_dbgRow(34, "Loaded history (closed bars)", f_tid(dbgFirstT) + " → " + f_tid(barstate.isconfirmed ? time : time[1]) + " · " + str.tostring(bar_index + (barstate.isconfirmed ? 1 : 0)) + " bars · tz " + sesTz)
 
 // Normal-mode warnings: non-standard candles, and objects nearing the hard limit
 // (TradingView would otherwise delete the oldest drawings silently).

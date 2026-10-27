@@ -15,7 +15,7 @@ python -m validation                  # = python validation/validation_agent.py 
 | The specification, as a Python **reference model** (oracle): FVG detection, thresholds and lifecycle, sessions, the chart-side level logic, swings, BSL/SSL, taken / sweep / break, EQH/EQL clusters | deterministic scenarios, 40 named invariants, property, stateful and long-walk fuzzing, golden cases |
 | The **Pine source text** | 15 static checks: calc/view separation, single creation paths, the renderer never writes state, no-leak `request.security`, defaults/presets/constants/event names equal to the oracle, Phase 1 baseline diff guard |
 | **Regressions** | canonical event stream + final state vs a committed baseline; old reference models read from git tags |
-| **Pine ↔ Python parity** | only with data you export from TradingView by hand: `python -m validation.parity EXPORT.csv` compares the IST Data Window bar by bar |
+| **Pine ↔ Python parity** | only with data you take from TradingView by hand. **Full bar-by-bar** (paid plan): `python -m validation.parity EXPORT.csv` compares the IST Data Window on every bar. **Manual event parity** (free plan, weaker): `python -m validation.parity --manual FILE` compares the settings, counts and events you copy |
 
 **Never claimed** (the report marks these MANUAL / TRADINGVIEW REQUIRED, unless observed data is supplied):
 * Pine compilation
@@ -52,7 +52,8 @@ validation/
   tests/                deterministic tests (one file per area) + negative invariant tests
   fuzz/                 Hypothesis strategies, property tests, stateful machine, long walks
   golden/               golden dataset (synthetic/ now, nq/ for real labelled cases) + README
-  parity/               importer (python -m validation.parity EXPORT.csv) → pine_observed.json; example template
+  parity/               full parity (python -m validation.parity EXPORT.csv → pine_observed.json) and manual
+                        parity (manual.py, --manual manual_observed.txt; manual_observed_template.txt)
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```
@@ -114,7 +115,7 @@ The FINAL STATUS says READY FOR TRADINGVIEW VALIDATION only after a **full or de
 * The golden dataset.
 * Parity.
 * Performance, with peak record counts.
-* The map from each TradingView **L-test** to the automated tests that cover its logic. Its TradingView column always stays PENDING.
+* The map from each TradingView **L-test** to the automated tests that cover its logic. Its TradingView column shows only what the user recorded in `docs/TESTS_PHASE2.md`.
 * The MANUAL list.
 * Failures, each with the invariant id and a reproducible case.
 
@@ -132,6 +133,18 @@ Add a `test_…` function to the matching file in `tests/`. Mark it with the ids
 See `golden/README.md`. Real NQ cases go to `golden/nq/` with `"source": "tradingview"`. Label them from the chart and the IST debug rows, never from the Python output.
 
 ## Pine parity (observed TradingView data)
+
+There are two levels, and the report never mixes them:
+
+| | FULL BAR-BY-BAR PARITY | MANUAL EVENT PARITY |
+|---|---|---|
+| TradingView plan | paid (*Export chart data*) | free |
+| Input | one CSV export | `manual_observed.txt`: values and event lines copied from the debug table and Pine Logs |
+| Compared | 9 Data Window series on every bar | only what you copy: settings, debug-row counts, the listed events |
+| Candles for the oracle | in the export | a separate OHLC file you supply (`CANDLES=`) |
+| A PASS means | Pine and the oracle agree on every exported bar | no difference in what you copied; says nothing about the rest |
+
+### Full bar-by-bar parity (Data Window export)
 
 With Debug mode ON, IST writes its per-bar decisions to the Data Window. TradingView's *Export chart data* includes every Data Window plot as a column, with the plot title as the header. One export therefore holds both the candles and what Pine decided on each bar. Nothing scrapes TradingView: you export by hand.
 
@@ -168,6 +181,50 @@ Integer codes must be equal. Prices may differ by up to 1e-4 points, because the
 **Check the swing counts first.** The Pine counts printed for the export must equal debug rows 22–23. If they do, the export starts at the indicator's first bar and every bar can be compared. If they do not, take codes can differ near the start, because memory and history before the export are missing. In that case, compare a later window with `--from`.
 
 **What the Data Window does not cover:** EQH/EQL clusters, FVG milestones, sessions and previous levels. For those, paste lines from the debug row "Last events" (or alert messages) verbatim into `observed_event_lines`. Optional field values from the inspectors go into `observed_states` (format: `parity/pine_observed.example.json`). The importer keeps both when it rewrites the file.
+
+### Manual event parity (free plan)
+
+No export is needed. You copy (or type) what IST shows and run one command:
+
+```bash
+python -m validation.parity --manual validation/parity/manual_observed.txt --preset balanced
+```
+
+1. **IST settings:** Debug mode ON, Confirmed only ON, other inputs at their defaults except the ones in the file.
+2. **Copy `parity/manual_observed_template.txt` to `parity/manual_observed.txt`** and fill what you observe. Empty values are skipped. The template quotes each debug-table row:
+
+   | Key(s) | From |
+   |---|---|
+   | `SYMBOL`, `TIMEFRAME`, `TIMEZONE`, `TICK_SIZE` | the chart; Sessions → Timezone |
+   | `PRESET`, `LEFT`, `RIGHT`, `REACTION`, `EQ_TOLERANCE_TICKS`, `EQ_MIN_TOUCHES` | row 21 "Liquidity engine" |
+   | `CONFIRMED_ONLY` | General → Confirmed only |
+   | `HISTORY_START`, `HISTORY_END`, `HISTORY_BARS` | row 34 "Loaded history (closed bars)" (v0.4.2-dev) |
+   | `SWING_HIGH_*`, `SWING_LOW_*` (pivots, PASS, REJECT, warm-up, created) | rows 22–23 |
+   | `BSL_*`, `SSL_*` (active, taken, sweep, break) | rows 24–25 |
+   | `EQH_*`, `EQL_*` (active, taken, below min) | row 26 |
+   | `CANDLES` | an OHLC CSV of the same chart (see below) |
+   | lines between `EVENTS` and `END_EVENTS` | row 33 "Last events" (6 lines) or the Pine Logs pane (one line per event) |
+
+3. **Events.** The debug table is drawn on the chart, so its text may not be selectable; type the lines if needed. With Debug mode ON, v0.4.2-dev also writes every event to **Pine Logs** (Pine Editor → More → Pine Logs, or IST's status line → More → Pine Logs). The pane keeps up to 10,000 historical lines and has Search and Start-date filters. Whether its text can be copied is test L43 (not verified here).
+   * A block is read as an **unbroken piece of the event log**. Do not skip lines inside a block. Put another stretch in a new block.
+   * The oldest bar of a block may be cut, so missing events are looked for after it, up to the newest bar.
+   * If you used the pane's Search to keep some families only (e.g. regex `BSL_|SSL_`), set `EVENT_FILTER=BSL SSL`.
+4. **Candles (optional).** The oracle needs the chart's bars. The free plan cannot export them, so `CANDLES=` takes any OHLC CSV (columns `time` or `datetime`, `open`, `high`, `low`, `close`; unix seconds or ISO times). Any other feed can differ from TradingView's (missing bars, the contract roll). The file checks this for you: `HISTORY_START`, `HISTORY_END` and `HISTORY_BARS` must match, and each event price is a check of the data. Without candles, only the internal and settings checks run.
+
+**What it checks.** Each check prints MATCH, DIFFERENCE or NOT OBSERVABLE:
+
+| Section | Checks |
+|---|---|
+| settings | `LEFT`/`RIGHT`/`REACTION` equal the oracle's preset table; Confirmed only is ON (the oracle models nothing else) |
+| candles | bar spacing = `TIMEFRAME`; the candles start at `HISTORY_START`, end at `HISTORY_END` and hold `HISTORY_BARS` bars |
+| summary | internal: pivots = PASS + REJECT + warm-up, created = PASS. Against the oracle: every count of rows 22–26, only when the candles are exactly the loaded history |
+| events | event type, time, direction, structure id, price; a line listed twice in a block; a one-time event logged twice; an event the oracle does not have (extra); an oracle event inside a block's span that the block lacks (missing) |
+
+Event matching: by type and `id=` (the structure id), otherwise by type and time. Prices are compared as Pine prints them. `format.mintick` rounds to the tick, so a CE on a half tick prints as a neighbouring tick; both neighbours are accepted, because Pine's tie rule is not documented. `LEVEL_SET` is NOT OBSERVABLE: `request.security` values and the previous-day definition are not modelled.
+
+**What it cannot check:** every bar that is not in your copy. That includes FVG and swing decisions on bars without a listed event, Data Window values, the required gap and reaction thresholds, sessions not listed, and everything before the oldest line of a block. It also cannot check what Pine draws, or any setting not in the file (the oracle uses the IST defaults). A manual PASS is never full parity.
+
+Exit codes: 0 = no difference, 1 = differences, 2 = the file is malformed (every bad line is listed with its number). `python -m validation` runs `parity/manual_observed.txt` when it exists and shows the result next to the full parity.
 
 ## Regression baseline
 

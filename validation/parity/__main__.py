@@ -1,9 +1,12 @@
 """python -m validation.parity EXPORT.csv [--preset balanced] [--from T] [--to T]
+python -m validation.parity --manual validation/parity/manual_observed.txt [--preset balanced]
 
-Builds validation/parity/pine_observed.json from a TradingView 'Export chart data' CSV
-(IST Debug mode ON) and prints the Pine ↔ oracle comparison. Event lines and states
-already in pine_observed.json are kept. Exit 0 = no difference, 1 = differences,
-2 = unusable export.
+Full bar-by-bar parity: builds validation/parity/pine_observed.json from a TradingView
+'Export chart data' CSV (IST Debug mode ON) and prints the Pine ↔ oracle comparison.
+Event lines and states already in pine_observed.json are kept.
+Manual event parity (free plan): compares the settings, counts and events copied from
+the IST debug table and Pine Logs (format: parity/manual_observed_template.txt).
+Exit 0 = no difference, 1 = differences, 2 = unusable input.
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ import sys
 from pathlib import Path
 
 from validation import parity
+from validation.parity import manual
 from validation.candles import load_tradingview_export
 from validation.models.types import PRESETS
 from validation.validation_agent import pine_build
@@ -68,18 +72,37 @@ def show(r: dict, preset: str) -> None:
     for k in ("not_in_oracle", "mismatched", "not_observed_in_pine", "state_differences"):
         for d in r[k][:10]:
             print(f"    {k}: {d}")
-    print(f"\n  PARITY: {'PASS' if r['differences'] == 0 else 'FAIL'} — {r['differences']} differences "
+    kind = "FULL BAR-BY-BAR PARITY" if dw else "EVENT PARITY (no Data Window columns)"
+    print(f"\n  {kind}: {'PASS' if r['differences'] == 0 else 'FAIL'} — {r['differences']} differences "
           f"(observed TradingView data, build {r['build']})")
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m validation.parity", description=__doc__.split("\n\n")[1])
-    ap.add_argument("csv", type=Path, help="TradingView 'Export chart data' CSV (IST Debug mode ON)")
-    ap.add_argument("--preset", choices=sorted(PRESETS), default="balanced", help="liquidity preset used on the chart")
+    ap.add_argument("csv", type=Path, nargs="?", help="TradingView 'Export chart data' CSV (IST Debug mode ON)")
+    ap.add_argument("--manual", type=Path, help="manual observation file (free plan), e.g. validation/parity/manual_observed.txt")
+    ap.add_argument("--preset", choices=[*sorted(PRESETS), "custom"], help="liquidity preset used on the chart (default balanced)")
     ap.add_argument("--from", dest="lo", help="compare from this New York time, e.g. 2026-10-27T09:30")
     ap.add_argument("--to", dest="hi", help="compare up to this New York time")
     a = ap.parse_args(argv)
+    if (a.csv is None) == (a.manual is None):
+        ap.error("give either an export CSV or --manual FILE")
+    if a.manual and (a.lo or a.hi):
+        ap.error("--from / --to apply to the CSV export only")
+    if a.csv and a.preset == "custom":
+        ap.error("--preset custom is for --manual (its file carries LEFT, RIGHT and REACTION)")
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")      # Windows consoles default to cp1252
+    if a.manual:
+        try:
+            if not a.manual.exists():
+                raise OSError(f"{a.manual} not found (copy validation/parity/manual_observed_template.txt)")
+            r = manual.run(a.manual, a.preset)
+        except (OSError, ValueError) as e:
+            print(f"unusable manual input: {e}", file=sys.stderr)
+            return 2
+        manual.show(r, pine_build())
+        return 0 if r["differences"] == 0 else 1
+    a.preset = a.preset or "balanced"
     try:
         obs = build(a.csv, a.preset, a.lo, a.hi)
         r = parity.compare(obs)

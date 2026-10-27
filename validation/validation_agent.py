@@ -319,7 +319,7 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
         w(f"* {cid} ({v['source']}): {'PASS' if v['ok'] else '**FAIL** ' + '; '.join(v['failures'][:3])}")
     w("")
 
-    from validation.parity import SERIES
+    from validation.parity import SERIES, manual as man_parity
     par = stats.RESULTS.get("parity", {"status": "NOT RUN"})
     dw = par.get("data_window")
     if par["status"] in ("NO OBSERVED DATA", "NOT RUN"):
@@ -330,7 +330,19 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
                 ([f"{par['matched']} / {par['observed']} observed events match"] if par["observed"] else [])
         parity_txt = (f"{'PASS' if par['differences'] == 0 else '**FAIL**'} — {', '.join(parts)}; "
                       f"{par['differences']} differences (observed TradingView data, build {par['build']})")
-    w(f"## Pine / Python parity\n\n* {parity_txt}")
+    mp = stats.RESULTS.get("manual_parity", {"status": "NOT RUN"})
+    if mp["status"] in ("NO OBSERVED DATA", "NOT RUN"):
+        manual_txt = "PENDING — no validation/parity/manual_observed.txt" + (f" ({mp['reason']})" if mp.get("reason") else "")
+    else:
+        manual_txt = man_parity.verdict(mp).split(": ", 1)[1].replace("FAIL", "**FAIL**", 1)
+    w("## Pine / Python parity\n\nTwo levels, never mixed: FULL BAR-BY-BAR PARITY compares every bar of a Data Window "
+      "export; MANUAL EVENT PARITY compares only the settings, counts and events copied by hand from the debug table "
+      "and Pine Logs. A manual PASS is not full parity.\n")
+    w(f"* **FULL BAR-BY-BAR PARITY** (Data Window export): {parity_txt}")
+    w(f"* **MANUAL EVENT PARITY** (copied by hand): {manual_txt}")
+    if mp["status"] == "COMPARED":
+        for c in [c for c in mp["checks"] if c["status"] == man_parity.DIFF][:25]:
+            w(f"  * DIFFERENCE {c['text']}")
     if dw:
         w(f"* export {dw['first_bar']} → {dw['last_bar']} (New York); the last exported bar is never compared\n")
         w("| Counts over the whole export | Pine (export) | oracle |\n|---|---|---|")
@@ -380,7 +392,7 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
         lid = re.search(r"\((L\d\d)\)", item)
         if lid and recorded(user.get(lid.group(1), "")) != "PENDING":
             st_ = f"{user[lid.group(1)]} (recorded by the user in docs/TESTS_PHASE2.md)"
-        w(f"| {item} | {st_ or parity_txt} |")
+        w(f"| {item} | {st_ or f'full bar-by-bar: {parity_txt} · manual event parity: {manual_txt}'} |")
     w("")
 
     fails = [(nid, m, r) for nid, m, r in all_rows if r["outcome"] in ("failed", "error")]

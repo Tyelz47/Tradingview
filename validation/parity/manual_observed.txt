@@ -1,0 +1,86 @@
+# Filled 2026-10-27 from the user's TradingView runtime report (IST v0.4.1-dev, NQ1! 1m, Balanced).
+# Still to add: CONFIRMED_ONLY, the loaded history (row 34, v0.4.2-dev), rows 24-26, events, candles.
+#   python -m validation.parity --manual validation/parity/manual_observed.txt --preset balanced
+#
+# One KEY=VALUE per line. Leave a value empty if you did not observe it. '#' starts a comment.
+# Case, spaces, tabs, "KEY: value", "1,182" and trailing words ("52 (4.4%)") are accepted.
+# Everything comes from the IST debug table (Debug mode ON, bottom right; its labels are quoted
+# below) and the IST settings. "row N" = the N-th table line counting from 0 at "Engine".
+
+# ── chart ─────────────────────────────────────────────────────────────────────
+SYMBOL=NQ1!
+TIMEFRAME=1m
+TIMEZONE=America/New_York      # IST settings → Sessions → Timezone (also printed in "Loaded history")
+TICK_SIZE=0.25
+
+# ── settings: "Liquidity engine" row (21), e.g.
+#    ON · Balanced → left 5 · right 3 · reaction ≥ 1 × TR(14) · EQ tol 4 ticks · min 2
+PRESET=balanced                # aggressive · balanced · strict · custom
+LEFT=5
+RIGHT=3
+REACTION=1.0
+EQ_TOLERANCE_TICKS=4
+EQ_MIN_TOUCHES=2
+CONFIRMED_ONLY=                # yes / no: IST settings → General → Confirmed only
+
+# ── "Loaded history (closed bars)" row (34), e.g.
+#    2026-10-14 18:00 → 2026-10-27 12:06 · 10612 bars · tz America/New_York
+HISTORY_START=
+HISTORY_END=
+HISTORY_BARS=
+
+# ── "Swing highs (loaded history)" row (22), e.g.
+#    1182 pivots · PASS 1129 · REJECT 52 (4.4%) · warm-up 1 → 1129 BSL created
+SWING_HIGH_PIVOTS=1182
+SWING_HIGH_PASS=1129
+SWING_HIGH_REJECT=52
+SWING_HIGH_WARMUP=1
+SWING_HIGH_CREATED=1129
+
+# ── "Swing lows (loaded history)" row (23)
+SWING_LOW_PIVOTS=1215
+SWING_LOW_PASS=1169
+SWING_LOW_REJECT=46
+SWING_LOW_WARMUP=0
+SWING_LOW_CREATED=1169
+
+# ── "BSL" row (24) and "SSL" row (25), e.g.
+#    active 8 · taken 92 (sweep 21 · break 71) · memory 100/100 · dropped 0 live + 4 closed
+BSL_ACTIVE=
+BSL_TAKEN=
+BSL_SWEEP=
+BSL_BREAK=
+SSL_ACTIVE=
+SSL_TAKEN=
+SSL_SWEEP=
+SSL_BREAK=
+
+# ── "EQH · EQL" row (26): EQH on the left of the wide gap, EQL on the right, e.g.
+#    2 active · 16 taken · 0 below min  ·  1 active · 16 taken · 0 below min · dropped 0
+EQH_ACTIVE=
+EQH_TAKEN=
+EQH_BELOW_MIN=
+EQL_ACTIVE=
+EQL_TAKEN=
+EQL_BELOW_MIN=
+
+# ── candles for the oracle (optional) ────────────────────────────────────────
+# An OHLC CSV of the same chart: columns time (or datetime), open, high, low, close; unix
+# seconds or ISO times. Path relative to this file. Without it, only the internal and settings
+# checks run and everything compared with the oracle is NOT OBSERVABLE. Counts are compared only
+# when the file holds exactly the loaded history above (start, end and number of bars).
+CANDLES=
+
+# ── events ───────────────────────────────────────────────────────────────────
+# Paste event lines between EVENTS and END_EVENTS, from:
+#   * the "Last events" row (33): 6 lines, newest first, e.g.
+#     10-27 12:06  BSL_SWEEP id=2026-10-27 11:52 px=21345.25 · close 21344.00
+#   * the Pine Logs pane ("More" menu of the Pine Editor, or of IST's status line → Pine Logs):
+#     one line per event, oldest first; the pane's own timestamp in front is ignored, e.g.
+#     2026-10-27 12:06  BSL_SWEEP id=2026-10-27 11:52 px=21345.25 · close 21344.00
+# Keep every line of a stretch: a block is read as an unbroken piece of the event log, so a
+# skipped line is reported as missing. Put another stretch in its own EVENTS block.
+# If you used the pane's Search to show some families only (e.g. regex BSL_|SSL_), list them:
+EVENT_FILTER=                  # e.g. BSL SSL EQH EQL; empty = every event is shown
+EVENTS
+END_EVENTS

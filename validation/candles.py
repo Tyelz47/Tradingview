@@ -68,13 +68,15 @@ def shift(candles: list[Candle], points: float) -> list[Candle]:
 def load_tradingview_export(path, tz: str = "America/New_York") -> tuple[list[Candle], list[dict]]:
     """A TradingView 'Export chart data' CSV: columns time, open, high, low, close, then one
     column per indicator plot (title = header). Returns the candles and every row as
-    {lower-cased header: raw text}. `time` may be unix seconds or an ISO date-time (naive
-    values are read in `tz`)."""
+    {lower-cased header: raw text}. `time` (or datetime / date / timestamp, as other OHLC
+    sources name it) may be unix seconds or an ISO date-time (naive values are read in `tz`)."""
     candles, rows = [], []
     with open(path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             row = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k}
-            t = row["time"]
+            t = next((row[k] for k in ("time", "datetime", "date", "timestamp") if k in row), None)
+            if t is None:
+                raise ValueError(f"{path}: no time column (time, datetime, date or timestamp) in {list(row)}")
             if t.replace(".", "", 1).isdigit():
                 ms = int(float(t) * 1000)
             else:
