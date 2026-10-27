@@ -70,7 +70,7 @@ def test_mitigation_policy_reads_milestones_only():
     assert not z.active_at(1, "firstTouch"), "not active before confirmation"
 
 
-@pytest.mark.spec("DEF-A5", "ARCH §2")
+@pytest.mark.spec("DEF-A5", "ARCH §2", "L05", "L06")
 @pytest.mark.parametrize("view", [ViewSettings(mit_rule=r) for r in MIT_RULES] +
                          [ViewSettings(fvg_show=False, minimal=True, fvg_max_visible=1)])
 def test_view_settings_never_change_logical_state(view):
@@ -113,3 +113,15 @@ def test_closed_record_stays_in_memory_and_is_not_advanced():
 def test_fill_extreme_tracks_deepest_penetration():
     m = fvg_run(BULL + STEPS[:3])
     assert m.fvg.bull[0].extreme == 101
+
+
+@pytest.mark.spec("L31", "LIQUIDITY §7")
+def test_phase1_results_identical_with_liquidity_on_or_off():
+    """The liquidity module reads no Phase 1 state and writes none: Phase 1 events and state are identical."""
+    from validation.candles import random_walk
+    from validation.models.ist import run_model
+    cs = random_walk(3000, 21, gap_prob=0.02)
+    on = run_model(cs, Settings())
+    off = run_model(cs, Settings(modules=("levels", "sessions", "fvg")))
+    phase1 = lambda m: [e for e in m.canonical_events() if e.family in ("FVG", "SESSION", "LEVEL")]
+    assert phase1(on) == phase1(off) and on.state()["fvg"] == off.state()["fvg"]

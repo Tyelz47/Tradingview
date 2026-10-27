@@ -38,6 +38,7 @@ def test_fvg_translation_invariance(candles, fs, ticks):
     stats.bump("property.examples")
 
 
+@pytest.mark.spec("L05", "L06")
 @given(candle_lists(), fvg_settings, view_settings)
 def test_fvg_view_settings_do_not_change_logic(candles, fs, view):
     a = run(candles, Settings(modules=FVG_ONLY, fvg=fs))

@@ -61,6 +61,7 @@ def test_liquidity_no_lookahead(candles, ls, data):
     stats.bump("property.examples")
 
 
+@pytest.mark.spec("L05", "L06")
 @given(candle_lists(), liq_settings, view_settings)
 def test_liquidity_view_settings_do_not_change_logic(candles, ls, view):
     a = run(candles, Settings(modules=LIQ_ONLY, liq=ls))
