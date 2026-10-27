@@ -65,14 +65,16 @@ def shift(candles: list[Candle], points: float) -> list[Candle]:
     return [Candle(k.time, k.open + points, k.high + points, k.low + points, k.close + points) for k in candles]
 
 
-def load_tradingview_csv(path, tz: str = "America/New_York") -> list[Candle]:
-    """A TradingView 'Export chart data' CSV: columns time, open, high, low, close (+ ignored ones).
-    `time` may be unix seconds or an ISO date-time (naive values are read in `tz`)."""
-    out = []
+def load_tradingview_export(path, tz: str = "America/New_York") -> tuple[list[Candle], list[dict]]:
+    """A TradingView 'Export chart data' CSV: columns time, open, high, low, close, then one
+    column per indicator plot (title = header). Returns the candles and every row as
+    {lower-cased header: raw text}. `time` may be unix seconds or an ISO date-time (naive
+    values are read in `tz`)."""
+    candles, rows = [], []
     with open(path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            row = {k.strip().lower(): v for k, v in row.items() if k}
-            t = row["time"].strip()
+            row = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k}
+            t = row["time"]
             if t.replace(".", "", 1).isdigit():
                 ms = int(float(t) * 1000)
             else:
@@ -80,5 +82,10 @@ def load_tradingview_csv(path, tz: str = "America/New_York") -> list[Candle]:
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=ZoneInfo(tz))
                 ms = int(dt.timestamp() * 1000)
-            out.append(Candle(ms, float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])))
-    return out
+            candles.append(Candle(ms, float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])))
+            rows.append(row)
+    return candles, rows
+
+
+def load_tradingview_csv(path, tz: str = "America/New_York") -> list[Candle]:
+    return load_tradingview_export(path, tz)[0]

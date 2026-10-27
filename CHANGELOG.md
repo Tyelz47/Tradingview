@@ -1,5 +1,15 @@
 # Changelog
 
+## Tooling · validation agent 1.1.0 (2026-10-27, branch `tooling/validation-agent`) — no indicator change
+
+* Pine ↔ Python parity from one TradingView *Export chart data* CSV (IST Debug mode ON). The new command is `python -m validation.parity EXPORT.csv --preset balanced`.
+  * It writes `validation/parity/pine_observed.json`.
+  * It compares the 9 IST Data Window series bar by bar with the oracle: FVG verdict and required gap, swing verdicts, reactions, required reaction, and BSL/SSL take codes.
+  * It prints the swing counts to check against debug rows 22–23, and every difference with its New York time.
+  * The validation report shows the comparison.
+* The report's TradingView column and MANUAL list now show the results the user recorded in `docs/TESTS_PHASE2.md` (L00 = PASS, 2026-10-27). The agent never sets them itself.
+* `src/IST.pine`, the detection logic and `PHASE1_BASELINE_v0.3.2` are unchanged.
+
 ## Tooling · validation agent 1.0.0 (2026-10-27, branch `tooling/validation-agent`) — no indicator change
 
 * `validation/`: one command (`python -m validation --mode quick|full|deep`) runs static checks of `src/IST.pine`, the Python reference model (oracle) of Phase 1 and Phase 2, deterministic scenarios, 40 named invariants with negative tests, Hypothesis property and stateful tests, long random walks, regression against a committed baseline and the legacy models in git, a golden dataset and a Pine-parity layer, and writes `validation/reports/VALIDATION_REPORT.md`. Exit code 0 only when every automated check passes.

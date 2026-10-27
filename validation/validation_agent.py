@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -107,11 +108,18 @@ def pine_build() -> str:
     return m.group(1) if m else "unknown"
 
 
-def l_tests() -> list[tuple[str, str]]:
+def l_tests() -> list[tuple[str, str, str]]:
+    """(id, name, status) of each TradingView L-test; the status is what the user recorded."""
     p = ROOT / "docs" / "TESTS_PHASE2.md"
     if not p.exists():
         return []
-    return re.findall(r"^\| (L\d\d) \| ([^|]+) \|", p.read_text(encoding="utf-8"), re.M)
+    rows = re.findall(r"^\| (L\d\d) \| ([^|]+) \|.*\| ([^|]+?) \|\s*$", p.read_text(encoding="utf-8"), re.M)
+    return [(lid, name.strip(), st.strip()) for lid, name, st in rows]
+
+
+def recorded(status: str) -> str:
+    """PASS / FAIL as recorded by the user, else PENDING. Never set by this agent."""
+    return next((k for k in ("PASS", "FAIL") if status.lstrip("* ").startswith(k)), "PENDING")
 
 
 def parse_args(argv):
@@ -216,8 +224,9 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
     w(f"**AUTOMATED LOGIC VALIDATION: {'PASS' if passed else 'FAIL'}**  ")
     w(f"**FINAL STATUS: {status}**\n")
     w("> This report covers the Python reference model (oracle) of the specification and static checks of the "
-      "Pine source text. **It does not compile or run Pine and it does not test TradingView.** Everything in the "
-      "TradingView section stays PENDING until results observed in TradingView are supplied.\n")
+      "Pine source text. **It does not compile or run Pine and it does not test TradingView.** The TradingView "
+      "items show only results the user recorded in docs/TESTS_PHASE2.md or observed data supplied in "
+      "validation/parity/; everything else stays PENDING.\n")
     w("## Build\n")
     w("| | |\n|---|---|")
     w(f"| Pine build | {pine_build()} (src/IST.pine header) |")
@@ -310,11 +319,32 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
         w(f"* {cid} ({v['source']}): {'PASS' if v['ok'] else '**FAIL** ' + '; '.join(v['failures'][:3])}")
     w("")
 
+    from validation.parity import SERIES
     par = stats.RESULTS.get("parity", {"status": "NOT RUN"})
-    parity_txt = ("PENDING — no observed TradingView data (validation/parity/pine_observed.json)"
-                  if par["status"] in ("NO OBSERVED DATA", "NOT RUN") else
-                  f"{par['matched']} / {par['observed']} observations match; {par['differences']} differences")
-    w(f"## Pine / Python parity\n\n* {parity_txt}\n")
+    dw = par.get("data_window")
+    if par["status"] in ("NO OBSERVED DATA", "NOT RUN"):
+        parity_txt = ("PENDING — no observed TradingView data (validation/parity/pine_observed.json)"
+                      + (f": {par['reason']}" if par.get("reason") else ""))
+    else:
+        parts = ([f"Data Window {dw['bars']} bars × {len(SERIES)} series"] if dw else []) + \
+                ([f"{par['matched']} / {par['observed']} observed events match"] if par["observed"] else [])
+        parity_txt = (f"{'PASS' if par['differences'] == 0 else '**FAIL**'} — {', '.join(parts)}; "
+                      f"{par['differences']} differences (observed TradingView data, build {par['build']})")
+    w(f"## Pine / Python parity\n\n* {parity_txt}")
+    if dw:
+        w(f"* export {dw['first_bar']} → {dw['last_bar']} (New York); the last exported bar is never compared\n")
+        w("| Counts over the whole export | Pine (export) | oracle |\n|---|---|---|")
+        tp, to = dw["totals"]["pine"], dw["totals"]["oracle"]
+        swings = lambda d: f"{d['pivots']} pivots · {d['pass']} PASS · {d['reject_or_warmup']} reject/warm-up"
+        takes = lambda d: f"{d['sweep']} sweep · {d['break']} break"
+        fvgs = lambda d: f"{d['bull']} bull · {d['bear']} bear · {d['rejected']} rejected"
+        for side in ("bsl", "ssl"):
+            w(f"| {side.upper()} swings | {swings(tp[side])} | {swings(to[side])} |")
+            w(f"| {side.upper()} take bars | {takes(tp[side])} | {takes(to[side])} |")
+        w(f"| FVG | {fvgs(tp['fvg'])} | {fvgs(to['fvg'])} |\n")
+        for d in dw["first"]:
+            w(f"* {d['time']} `{d['series']}`: Pine {d['pine']} · oracle {d['oracle']}")
+    w("")
 
     w("## Performance\n")
     w("| Section | Time |\n|---|---|")
@@ -334,18 +364,22 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
             for sp in meta["specs"]:
                 cover.setdefault(sp, []).append(r["outcome"])
         w("## TradingView L-tests — model coverage of the logic\n")
-        w("Model coverage means the *rule* behind the test is checked here. The TradingView test itself stays "
-          "**PENDING MANUAL VALIDATION**.\n")
-        w("| L-test | Name | Automated tests (logic) | Model result | TradingView |\n|---|---|---|---|---|")
-        for lid, name in lt:
+        w("Model coverage means the *rule* behind the test is checked here. The TradingView column is what the "
+          "user recorded in docs/TESTS_PHASE2.md; this agent never sets it.\n")
+        w("| L-test | Name | Automated tests (logic) | Model result | TradingView (user) |\n|---|---|---|---|---|")
+        for lid, name, st_ in lt:
             o = cover.get(lid, [])
             res = "—" if not o else ("**FAIL**" if any(x in ("failed", "error") for x in o) else "PASS")
-            w(f"| {lid} | {name.strip()} | {len(o) or '—'} | {res} | PENDING |")
+            w(f"| {lid} | {name} | {len(o) or '—'} | {res} | {recorded(st_)} |")
         w("")
 
     w("## TradingView — MANUAL / TRADINGVIEW REQUIRED\n")
     w("| Item | Status |\n|---|---|")
+    user = {lid: st_ for lid, _, st_ in lt}
     for item, st_ in MANUAL:
+        lid = re.search(r"\((L\d\d)\)", item)
+        if lid and recorded(user.get(lid.group(1), "")) != "PENDING":
+            st_ = f"{user[lid.group(1)]} (recorded by the user in docs/TESTS_PHASE2.md)"
         w(f"| {item} | {st_ or parity_txt} |")
     w("")
 
@@ -385,7 +419,9 @@ def print_summary(col, passed, args, elapsed):
             print(f"  {group:<8} {title:<40} {_verdict(c).strip('*'):<8} {c['passed']}/{len(secs[key])}")
     print("=" * 72)
     print(f"  AUTOMATED LOGIC VALIDATION: {'PASS' if passed else 'FAIL'}   ({elapsed:.1f} s, mode {args.mode})")
-    print("  TradingView compile / runtime / visual / limits: PENDING (manual)")
+    rec = Counter(recorded(st) for _, _, st in l_tests())
+    print(f"  TradingView L-tests recorded by the user: {rec['PASS']} PASS, {rec['FAIL']} FAIL, "
+          f"{rec['PENDING']} PENDING (docs/TESTS_PHASE2.md)")
     print(f"  Report: {args.report}")
 
 

@@ -1,5 +1,5 @@
 {
-  "about": "TEMPLATE. Copy to pine_observed.json and fill it from TradingView by hand. The agent never reads this example. Every value below is an illustration, not an observation.",
+  "about": "TEMPLATE. Usually you do not edit this: `python -m validation.parity EXPORT.csv` writes pine_observed.json from a TradingView export (Debug mode ON) and compares every bar. Add observed_event_lines / observed_states by hand only for what the Data Window lacks (EQ clusters, FVG milestones, sessions, levels). The agent never reads this example; every value below is an illustration, not an observation.",
   "format": "ist-parity/1",
   "build": "v0.4.1-dev",
   "symbol": "NQ1!",

@@ -15,7 +15,7 @@ python -m validation                  # = python validation/validation_agent.py 
 | The specification, as a Python **reference model** (oracle): FVG detection, thresholds and lifecycle, sessions, the chart-side level logic, swings, BSL/SSL, taken / sweep / break, EQH/EQL clusters | deterministic scenarios, 40 named invariants, property, stateful and long-walk fuzzing, golden cases |
 | The **Pine source text** | 15 static checks: calc/view separation, single creation paths, the renderer never writes state, no-leak `request.security`, defaults/presets/constants/event names equal to the oracle, Phase 1 baseline diff guard |
 | **Regressions** | canonical event stream + final state vs a committed baseline; old reference models read from git tags |
-| **Pine ↔ Python parity** | only with observations you copy from TradingView into `parity/pine_observed.json` |
+| **Pine ↔ Python parity** | only with data you export from TradingView by hand: `python -m validation.parity EXPORT.csv` compares the IST Data Window bar by bar |
 
 **Never claimed** (the report marks these MANUAL / TRADINGVIEW REQUIRED, unless observed data is supplied):
 * Pine compilation
@@ -52,7 +52,7 @@ validation/
   tests/                deterministic tests (one file per area) + negative invariant tests
   fuzz/                 Hypothesis strategies, property tests, stateful machine, long walks
   golden/               golden dataset (synthetic/ now, nq/ for real labelled cases) + README
-  parity/               pine_observed.example.json (template) → your pine_observed.json
+  parity/               importer (python -m validation.parity EXPORT.csv) → pine_observed.json; example template
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```
@@ -131,20 +131,43 @@ Add a `test_…` function to the matching file in `tests/`. Mark it with the ids
 
 See `golden/README.md`. Real NQ cases go to `golden/nq/` with `"source": "tradingview"`. Label them from the chart and the IST debug rows, never from the Python output.
 
-## Pine parity (manual data)
+## Pine parity (observed TradingView data)
 
-1. Copy `parity/pine_observed.example.json` to `parity/pine_observed.json`.
-2. Fill it in:
-   * build and settings exactly as used on the chart
-   * the candles: a TradingView *Export chart data* CSV next to the file, or inline
-   * a time window
-   * events copied from the IST debug row "Last events" or from alert messages, pasted verbatim into `observed_event_lines`
-   * optional field values from the inspectors
-3. The agent then compares Pine with the oracle and fails on any difference.
+With Debug mode ON, IST writes its per-bar decisions to the Data Window. TradingView's *Export chart data* includes every Data Window plot as a column, with the plot title as the header. One export therefore holds both the candles and what Pine decided on each bar. Nothing scrapes TradingView: you export by hand.
 
-Two cautions:
-* Warm-up and memory differ when the export starts later than the chart history. Choose a window well after the first exported bar.
-* Nothing scrapes TradingView.
+1. In TradingView:
+   * open NQ1! 1m with **one** IST instance;
+   * use the settings you want to check, with *Confirmed only* ON and **Debug mode ON**;
+   * note debug rows 22–23 (the swing counts).
+2. Layout menu (top right) → *Export chart data…*:
+   * choose the chart with IST;
+   * set time format **UNIX timestamp**;
+   * save the CSV in `validation/parity/` (CSV files there are not committed).
+3. Run:
+   ```bash
+   python -m validation.parity validation/parity/<file>.csv --preset balanced
+   ```
+   * Add `--from 2026-10-27T09:30 --to 2026-10-27T16:00` (New York time) to compare a window.
+   * It writes `parity/pine_observed.json` and prints the Pine and oracle counts, then every difference with its New York time.
+   * Exit codes: 0 = no difference, 1 = differences, 2 = unusable export (for example, Debug mode was off).
+4. `python -m validation` then includes the comparison in the report.
+
+Compared on every bar except the last exported bar, which may still be open:
+
+| Series | IST Data Window plot | Oracle |
+|---|---|---|
+| `fvg_verdict` | candle 3 verdict (±2 PASS · ±1 REJECT · 0) | FVG_CREATED on the bar, else the raw gap |
+| `fvg_required` | required gap = max (points) | §6 thresholds at t−2 |
+| `bsl_pivot` / `ssl_pivot` | LIQ swing high/low judged here (2 · 1 · 0) | BSL/SSL_CREATED on the bar, else a judged pivot |
+| `liq_required` | LIQ required reaction (points) | k × TR average at the swing bar |
+| `bsl_reaction` / `ssl_reaction` | LIQ reaction of that swing | the created level's reaction (on PASS bars) |
+| `bsl_take` / `ssl_take` | LIQ BSL/SSL take on this bar (0 · 1 sweep · 2 break) | SWEEP/BREAK events on the bar (break wins) |
+
+Integer codes must be equal. Prices may differ by up to 1e-4 points, because the export may round. The export's `syminfo.mintick` column must equal the tick size.
+
+**Check the swing counts first.** The Pine counts printed for the export must equal debug rows 22–23. If they do, the export starts at the indicator's first bar and every bar can be compared. If they do not, take codes can differ near the start, because memory and history before the export are missing. In that case, compare a later window with `--from`.
+
+**What the Data Window does not cover:** EQH/EQL clusters, FVG milestones, sessions and previous levels. For those, paste lines from the debug row "Last events" (or alert messages) verbatim into `observed_event_lines`. Optional field values from the inspectors go into `observed_states` (format: `parity/pine_observed.example.json`). The importer keeps both when it rewrites the file.
 
 ## Regression baseline
 

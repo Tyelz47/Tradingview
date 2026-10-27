@@ -12,9 +12,15 @@ Definitions: docs/LIQUIDITY.md (DEF-L1…L7). Phase 1 tests: docs/TESTS.md (unch
 | Kind | Total | PASS | FAIL | Pending |
 |---|---|---|---|---|
 | S · static / model (run here on v0.4.1-dev) | 13 | 13 | 0 | 0 |
-| L · TradingView runtime | 43 (L00–L42) | 0 | 0 | 43 |
+| L · TradingView runtime | 43 (L00–L42) | 1 | 0 | 42 |
 
-**Phase 2 is not complete:** no runtime test has been run.
+**Phase 2 is not complete:** only L00 has been run in TradingView.
+
+**Runtime observation (user, 2026-10-27, NQ1! 1m, Balanced: left 5 · right 3 · k 1.0 · EQ tolerance 4 ticks · minimum touches 2).** This is an observation, not a test result. Debug rows 22–23 showed:
+* Swing highs: 1182 pivots → 1129 PASS · 52 REJECT (~4.4%) · 1 warm-up → 1129 BSL created.
+* Swing lows: 1215 pivots → 1169 PASS · 46 REJECT (~3.8%) → 1169 SSL created.
+
+No DIFFERS indication appeared, and the renderer showed a limited number of levels. On real NQ data, as on noise, the Balanced reaction floor passes ~95–96% of confirmed pivots. The filter stays unchanged until Pine ↔ Python parity is verified on a real export (`python -m validation.parity`, validation/README.md).
 
 ---
 
@@ -50,7 +56,7 @@ Model column: `s_<name>` is the reference-model scenario, now `test_<name>` in `
 
 | ID | Test | Procedure → expected | Model | Status |
 |---|---|---|---|---|
-| L00 | Compiles | Save → Add to chart → **0 errors, 0 warnings**. Report every message verbatim | — | PENDING MANUAL VALIDATION |
+| L00 | Compiles | Save → Add to chart → **0 errors, 0 warnings**. Report every message verbatim | — | **PASS** (user, 2026-10-27: v0.4.1-dev compiles and runs on NQ1! 1m) |
 | L01 | Swing high known only after the right bars | Pick a swing high X. On bars X … X+2 the Data Window "LIQ swing high judged here" is 0. On **X+3** (Balanced: right = 3) it is 2 (or 1 if rejected). The inspector shows `swing → known` = X → X+3. `BSL_CREATED` time = X+3 | s_confirmation_timing | PENDING MANUAL VALIDATION |
 | L02 | Swing low: same behaviour | Mirror of L01 with "LIQ swing low judged here" and `SSL_CREATED` | s_ssl_mirror | PENDING MANUAL VALIDATION |
 | L03 | BSL at the correct price | Inspector price = the high of bar X exactly (hover the candle) | s_confirmation_timing | PENDING MANUAL VALIDATION |
