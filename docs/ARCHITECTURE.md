@@ -1,6 +1,6 @@
 # IST — ICT Structure Toolkit · Architecture and Phase 1 specification
 
-> **Status:** Phase 1, **v0.3.2 — frozen candidate** (`src/IST.pine`). Scope is frozen to Phase 1. No further architectural work unless compilation reveals a problem. **Not compiled or validated in TradingView yet. Not production-ready.**
+> **Status:** Phase 1 = **v0.3.2, frozen safety baseline** (git tag `PHASE1_BASELINE_v0.3.2`, copy in `releases/v0.3.2/`). Phase 2 (liquidity) is in development as **v0.4.0-dev** on branch `phase2/liquidity`; its specification is **docs/LIQUIDITY.md** and its tests are **docs/TESTS_PHASE2.md**. This document remains the Phase 1 specification and the architecture both phases follow. **Not production-ready.**
 >
 > **Roles:**
 > * Claude Code — primary implementation engineer
@@ -500,8 +500,8 @@ ENUMS → INPUTS (tagged) → CONSTANTS → TYPES → STATE → **L1** → **L2+
 
 ### Later phases (proposals; unchanged; not implemented)
 
-* **DEF-D Liquidity (Phase 2).** Swings with strength (L, R), confirmed at p+R. Significance filters. A take is `high > L`. SWEEP or RUN is decided by the first settling close within W bars plus a buffer, and is never relabelled. The level "taken" logic removed in v0.2.0 returns here, defined once.
-* **DEF-E EQH/EQL (Phase 2).** Tolerance in ticks, % or TR average. Distance limits. The pair must be intact. Clusters allowed. Confirmed at the second pivot + R.
+* **DEF-D Liquidity (Phase 2).** *Superseded by DEF-L1…L7 in docs/LIQUIDITY.md (v0.4.0-dev).* Differences from this proposal: W = 1 (classification on the taking bar's close), no buffer; the window is a documented extension point.
+* **DEF-E EQH/EQL (Phase 2).** *Superseded by DEF-L5 in docs/LIQUIDITY.md.* Differences from this proposal: tick tolerance only; no distance limit; the intact-pool rule; confirmed at the member that reaches the minimum touches.
 * **DEF-H Displacement (Phase 3).** body/TR average, body/range, close location, range/average range. STRICT, BALANCED and AGGRESSIVE presets.
 * **DEF-I CISD (Phase 3).** The delivery-origin definition: a close beyond the open of the first candle of the opposing run. Fires only against the delivery state; once per leg.
 * **DEF-C IFVG (Phase 4).** Wick, close or body invalidation of a retained record. Phase 1's `invBar` is the CLOSE mode, and closed records are kept for this.

@@ -1,5 +1,94 @@
 # Changelog
 
+## v0.4.0-dev — Phase 2: liquidity engine (2026-10-27, branch `phase2/liquidity`)
+
+**BASELINE**
+
+* v0.3.2 is preserved as the Phase 1 safety baseline:
+  * git commit tagged `PHASE1_BASELINE_v0.3.2` on `main`, verified byte-exact; `core.autocrlf` is off for this repository
+  * a read-only copy in `releases/v0.3.2/` with `SHA256SUMS.txt`
+* Phase 2 work happens on `phase2/liquidity`.
+
+**CHANGES (new module; specification in docs/LIQUIDITY.md)**
+
+* **Swings (DEF-L1):**
+  * The pivot is strict on the left and non-strict on the right.
+  * Origin = X; confirmation = X + right. Judged on confirmed bars only.
+* **Significance (DEF-L2):** reaction inside the confirmation window ≥ k × TR average at X. The TR average is SMA(TR, 14) with its own fixed length.
+* **Presets (DEF-L3):** Aggressive 3/2/0.5, Balanced 5/3/1.0 (default), Strict 10/5/2.0, and Custom.
+* **BSL/SSL records, taken, sweep, break (DEF-L4):**
+  * take = strictly beyond, with no event on an exact touch
+  * classification = the close of the taking bar: strictly beyond = BREAK, otherwise SWEEP
+  * decided once, never relabelled
+* **EQH/EQL clustering (DEF-L5):**
+  * the reference is the extreme member, fixed at creation
+  * the intact-pool rule; one cluster per pool
+* **Lifecycle and memory (DEF-L6):**
+  * live/closed sets, 100 records per side, 25 clusters per side
+  * every drop is logged
+  * a trigger-price gate keeps the work incremental
+* **Renderer (DEF-L7):**
+  * last-bar rebuild, nearest-first, budgets 5/3/2 per side
+  * EQ members are merged into their cluster line
+  * no duplicate line on visible PDH/PDL/PWH/PWL or session high/low lines
+* **Events:** `BSL/SSL_CREATED`, `_TAKEN`, `_SWEEP`, `_BREAK`, `_DROPPED_MEMORY`; `EQH/EQL_CREATED`, `_TAKEN`, `_DROPPED_MEMORY`.
+* **Alerts:** taken, sweep, break and EQH/EQL taken, all **default OFF**.
+* **Debug:**
+  * table rows 21–30 (engine, swings, BSL, SSL, EQ, drawn, inspector)
+  * 7 Data Window plots
+* **`tests/liq_model.py`:** a reference model with 19 scenarios and a fuzz of invariants.
+
+**SHARED INFRASTRUCTURE CHANGES**
+
+| CHANGE | WHY | PHASE 1 IMPACT | REPAINT IMPACT | REGRESSION TESTS REQUIRED |
+|---|---|---|---|---|
+| `f_evName(k)` → `f_evName(k, dir)`; `f_evText` adds no BULL/HIGH suffix to liquidity kinds | Liquidity event names carry their side (BSL_/SSL_, EQH_/EQL_) | None: kinds 1–9 produce identical text | None | L27 (event text in the T01/T02 logs) |
+| Intrabar alert de-dup key `kind:sid` → `kind:dir:sid` | A BSL and an SSL from one outside bar share a swing-time id | None: FVG keys were already unique (one FVG per bar) | None (alert delivery only) | L27; Phase 1 intrabar-alert tests when run |
+| `f_alertOn` gains liquidity cases | Liquidity alerts | None: the new toggles default OFF, so an existing alert delivers the same messages | None | L27, L31 |
+| Debug table 22 → 32 rows; "Last events" row 21 → 31 | Liquidity rows | Display only; rows 0–20 unchanged | None | T46 (Phase 1 inspector) under L27 |
+| 7 plots appended after the 11 Phase 1 plots | Liquidity Data Window audit | Display only; Phase 1 plot order unchanged | None | T03a reading under L27 |
+| Tooltips for Minimal mode and Debug mode | They mention liquidity | Text only | None | — |
+| The liquidity block runs after Phase 1 inside the same `engineTick` gate | Same confirmed/live contract | None: no Phase 1 state is read or written | None | L27, L31 |
+
+**WHY**
+
+* Phase 2 scope, as instructed.
+* The order was P2.1 → P2.8, in one auditable branch.
+
+**PHASE 1 BEHAVIOUR**
+
+* Unchanged.
+* The diff against the tag (S-06) shows display and text changes only.
+* With liquidity OFF the chart is the Phase 1 chart (L31).
+
+**REPAINT IMPACT**
+
+* None for Phase 1.
+* Liquidity follows the same contract. Declared exceptions: warm-up, the memory window, and drawings that show the present (LIQUIDITY.md §6).
+
+**PERFORMANCE IMPACT**
+
+* 1 SMA and 4 window extremes per bar.
+* Gated per-side loops.
+* Rendering on the last bar only.
+* ≤ 20 lines and 20 labels by default (80 + 80 at maximum).
+* 0 new requests; 18 plots.
+* Execution time is unmeasured (L22).
+
+**TESTS**
+
+* S-01…S-10 PASS (static/model, here).
+* L00–L34 PENDING MANUAL VALIDATION (docs/TESTS_PHASE2.md).
+* Phase 1: unchanged statuses (8 PASS on v0.3.1/v0.3.2, T03 FAIL pending re-test).
+
+**KNOWN LIMITATIONS:** LIQUIDITY.md §11. The main ones:
+
+* a one-bar classification window
+* EQ tolerance in ticks only
+* a weak reaction floor on noise-like data
+* drawings show the present
+* not compiled here
+
 ## v0.3.2 — T03 investigation: explicit, auditable size threshold (2026-10-27)
 
 **ROOT CAUSE**
