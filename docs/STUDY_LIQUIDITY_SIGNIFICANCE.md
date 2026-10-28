@@ -1,8 +1,8 @@
 # Phase 2 · Liquidity significance study
 
 **Status:**
-* **C1 was approved by the user on 2026-10-28 and implemented as experimental IST v0.4.4-dev** (see CHANGELOG).
-* It is not frozen until a new 1,000-bar capture shows Pine ↔ Python parity with 0 differences (TESTS_PHASE2 L48).
+* **C1 was approved by the user on 2026-10-28, implemented in IST v0.4.4-dev, and frozen as the Phase 2 liquidity definition on 2026-10-28** (tag `PHASE2_BASELINE_v0.4.4-dev`, `docs/PHASE2_FREEZE_REPORT.md`).
+* The freeze followed a 1,000-bar real-NQ capture with Pine ↔ Python parity at 0 differences (TESTS_PHASE2 L48).
 * This study itself measured the v0.4.3-dev definition and is kept unchanged as the record of that decision.
 
 **Data.**

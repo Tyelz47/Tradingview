@@ -407,9 +407,10 @@ def compare(cap: dict, preset: str | None = None) -> dict:
 
 
 def latest_capture() -> Path | None:
-    """The most recently saved validation/parity/pine_capture*.csv / .txt (TradingView may
-    append .csv to the name you type)."""
-    files = [p for p in PARITY_DIR.glob("pine_capture*") if p.suffix.lower() in (".csv", ".txt")]
+    """The most recently saved validation/parity/pine_capture*.csv / .txt, or pine-logs-*.csv
+    (the name TradingView gives the file it saves; it may also append .csv to yours)."""
+    files = [p for pat in ("pine_capture*", "pine-logs*") for p in PARITY_DIR.glob(pat)
+             if p.suffix.lower() in (".csv", ".txt")]
     return max(files, key=lambda p: (p.stat().st_mtime, p.name)) if files else None
 
 

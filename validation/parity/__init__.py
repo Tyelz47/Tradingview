@@ -27,6 +27,11 @@ from validation.models.types import Candle, Settings
 
 PARITY_DIR = VALIDATION_DIR / "parity"
 OBSERVED = PARITY_DIR / "pine_observed.json"
+# Real TradingView Parity captures kept as validation evidence: never rewritten, hashed in
+# evidence/SHA256SUMS.txt, described in evidence/README.md.
+EVIDENCE = PARITY_DIR / "evidence"
+CAPTURE_V043 = EVIDENCE / "ist-v0.4.3-dev_nq1-1m_capture-1000_2026-10-27.csv"  # historical: DEF-L2 before C1
+CAPTURE_V044 = EVIDENCE / "ist-v0.4.4-dev_nq1-1m_capture-1000_2026-10-28.csv"  # C1: Phase 2 frozen baseline
 
 # src/IST.pine Data Window plots (Debug mode ON), found by a fragment of the plot title
 # (the export's column header). tests/test_parity.py checks each matches exactly one title.

@@ -12,6 +12,7 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 | `validation/` | Validation agent: Python reference model (oracle), scenarios, invariants, property/stateful fuzzing, regression, golden dataset, Pine parity. Run `python -m validation`; see `validation/README.md`. |
 | `requirements-dev.txt` | Development-only dependencies of the validation agent (pytest, Hypothesis). |
 | `releases/v0.3.2/` | Frozen Phase 1 baseline (read-only, SHA-256). Git tag `PHASE1_BASELINE_v0.3.2`. |
+| `releases/v0.4.4-dev/` | Frozen Phase 2 baseline (read-only, SHA-256). Git tag `PHASE2_BASELINE_v0.4.4-dev`. Report: `docs/PHASE2_FREEZE_REPORT.md`. |
 | `CHANGELOG.md` | CHANGES / REASON / RISKS / TEST for every revision. |
 
 ## Install
@@ -26,7 +27,7 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 |---|---|---|
 | 0 | Architecture (7 layers, calculation independent of visibility) | adopted |
 | 1 | FVG engine, PDH/PDL, PWH/PWL, sessions, FVG alerts, diagnostics | **v0.3.2 frozen safety baseline · runtime 8/50 PASS, 1 FAIL (T03, re-test), 41 pending** |
-| 2 | Swing liquidity, BSL/SSL, taken, sweep vs break, EQH/EQL | **v0.4.4-dev EXPERIMENTAL: C1 significance = reaction AND dominance (W 10/30/60), not frozen until a new 1,000-bar capture gives parity 0 DIFFERENCE (L48) · v0.4.0-dev and v0.4.1-dev tagged · static/model 13/13 PASS · runtime 0/49 on v0.4.4-dev (L00 passed on v0.4.1-dev; re-run), 49 pending · not complete** |
+| 2 | Swing liquidity, BSL/SSL, taken, sweep vs break, EQH/EQL | **v0.4.4-dev FROZEN Phase 2 baseline (2026-10-28) · tag `PHASE2_BASELINE_v0.4.4-dev` · copy in `releases/v0.4.4-dev/` · significance C1 = reaction AND dominance (W 10/30/60) · TradingView L00, L45–L48 PASS (L48: 1,000-bar real-NQ parity, 0 DIFFERENCE); L01–L44 not recorded one by one · `docs/PHASE2_FREEZE_REPORT.md`** |
 | 3 | Displacement, CISD | design in Appendix A |
 | 4 | IFVG, HTF FVG | design in Appendix A |
 | 5 | Quality score, confluence dashboard, UX | later |

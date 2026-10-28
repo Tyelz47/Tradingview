@@ -1,5 +1,25 @@
 # Changelog
 
+## Phase 2 FREEZE — IST v0.4.4-dev = `PHASE2_BASELINE_v0.4.4-dev` (2026-10-28) — no indicator change
+
+**Decision (user, 2026-10-28):** freeze Phase 2 with **C1** (DEF-L2 = reaction AND dominance) as the approved liquidity significance definition. Full record: `docs/PHASE2_FREEZE_REPORT.md`.
+
+**Evidence:**
+* TradingView on v0.4.4-dev (user): L00, L45, L46, L47 and L48 **PASS**.
+* L48 is a bounded Pine-Log parity on a real 1,000-bar NQ1! 1m capture (Balanced, W 30): 1,000 bars × 9 series (dominance references included) and 1,049 events. Result: 29 MATCH, **0 DIFFERENCE**, 6 NOT OBSERVABLE (bounded-window limits). Swings 38/39 · 28/45 and FVG 90/90/43, identical in Pine and the oracle.
+* The FULL validation passes (totals in the report).
+
+**What this commit freezes or adds:**
+* `src/IST.pine` is **byte-identical** to the validated v0.4.4-dev (commit 5ec9a33), SHA-256 `b97f4a11…5664871c`. The version label stays `v0.4.4-dev`, so the frozen bytes are exactly the tested bytes.
+* `releases/v0.4.4-dev/`: a read-only exact copy (source, docs, report) with `SHA256SUMS.txt`, as for Phase 1. Annotated tag `PHASE2_BASELINE_v0.4.4-dev`.
+* `validation/parity/evidence/` (validation 1.5.1):
+  * the new v0.4.4-dev capture, the regression asset of C1 (`test_v044_capture_parity_c1_frozen_baseline`);
+  * the v0.4.3-dev capture, moved here with its version in the name (byte-identical: same SHA-256), as historical evidence of the definition before C1;
+  * `SHA256SUMS.txt` (checked by `test_evidence_captures_are_unchanged`) and `README.md`.
+* `python -m validation` also picks up `pine-logs-*.csv`, the name TradingView gives the file it saves.
+
+**Unchanged:** Phase 1 behaviour and `PHASE1_BASELINE_v0.3.2` (1247abc); W, k, EQ tolerance and pivot parameters. Phase 3 is not started, and nothing is merged into `main`.
+
 ## v0.4.4-dev — C1: liquidity significance = rejection AND dominance (2026-10-28, branch `tooling/validation-agent`) — EXPERIMENTAL
 
 **CHANGE** (DEF-L2, approved by the user 2026-10-28 from `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md`). A confirmed swing becomes BSL/SSL only when both conditions hold:

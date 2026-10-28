@@ -52,11 +52,12 @@ validation/
   tests/                deterministic tests (one file per area) + negative invariant tests
   fuzz/                 Hypothesis strategies, property tests, stateful machine, long walks
   golden/               golden dataset (synthetic/ now, nq/ for real labelled cases) + README
+  parity/evidence/      real TradingView captures kept byte for byte (SHA256SUMS.txt): v0.4.3-dev, v0.4.4-dev (C1)
   parity/               full parity (python -m validation.parity EXPORT.csv → pine_observed.json) and manual
                         parity (manual.py, --manual manual_observed.txt; manual_observed_template.txt) and
                         bounded Pine-Log parity (capture.py, --capture pine_capture.csv or .txt)
   studies/              analyses before a definition is specified (never change the oracle):
-                        liquidity_significance.py + data/ (the committed real NQ capture)
+                        liquidity_significance.py (reads the v0.4.3-dev evidence capture)
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```
@@ -239,6 +240,12 @@ python -m validation.parity --capture validation/parity/pine_capture.csv
 | max(14, left, W) + right | swing verdicts, reactions (on PASS bars), required reaction, dominance references |
 
 A capture without `w=` (IST before v0.4.4-dev) is replayed with the definition its build used, reaction only, and its dominance series are NOT OBSERVABLE. The committed v0.4.3-dev capture is preserved this way.
+
+**Evidence (`parity/evidence/`).** The real TradingView captures are kept byte for byte, with `SHA256SUMS.txt` and `README.md`.
+* **v0.4.3-dev** (before C1): historical evidence.
+* **v0.4.4-dev** (C1): **the Phase 2 freeze evidence and the regression asset of the frozen definition**. It gives 1,000 bars × 9 series and 1,049 events, 0 DIFFERENCE.
+
+Tests replay both on every run and check their hashes. C1 (DEF-L2 dominance) is the frozen Phase 2 liquidity definition: tag `PHASE2_BASELINE_v0.4.4-dev`, `docs/PHASE2_FREEZE_REPORT.md`.
 
 **Events.** Only structures born inside the comparable region are compared. These are FVGs whose candle 3 is after the FVG warm-up, levels whose swing bar is after the liquidity warm-up, and sessions that start inside the window. For each, the check covers type, direction, id, time and price, an event logged twice, an extra event and a missing event. Everything the oracle cannot know is **NOT OBSERVABLE** and never compared:
 * levels and FVGs born before the window, or in its warm-up, including their takes, sweeps and breaks inside the window;

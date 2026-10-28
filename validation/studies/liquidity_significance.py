@@ -29,9 +29,9 @@ from validation.models.fvg import sma, true_range
 from validation.models.ist import IstModel
 from validation.models.liquidity import LiquidityEngine
 from validation.models.types import PRESETS, Settings
-from validation.parity import capture
+from validation.parity import CAPTURE_V043, capture
 
-DATA = Path(__file__).parent / "data" / "nq1_1m_capture_2026-10-27.csv"
+DATA = CAPTURE_V043     # the v0.4.3-dev capture this study measured (validation/parity/evidence)
 TICK, TOL_TICKS, TRA_LEN = 0.25, 4, 14
 LOOKBACK = 60          # features need up to 60 earlier bars: pivots before that are not studied
 MAJOR = 3.0            # outcome: price moved ≥ 3 × TR average away before revisiting the level

@@ -4,6 +4,7 @@ A synthetic 'Pine capture' is written from the oracle's run over the WHOLE histo
 Pine knows when it logs), cut to the last N + warm-up bars. The bounded oracle then sees
 only those bars, as with a real capture, so these tests exercise the warm-up and the
 exclusion of everything born before the window."""
+import hashlib
 import re
 from datetime import datetime
 from functools import lru_cache
@@ -16,7 +17,7 @@ from validation import PINE_SOURCE, stats
 from validation.candles import random_walk
 from validation.models.ist import IstModel
 from validation.models.types import PRESETS, Settings
-from validation.parity import capture, manual, oracle_series
+from validation.parity import CAPTURE_V043, CAPTURE_V044, EVIDENCE, capture, manual, oracle_series
 from validation.parity.__main__ import main
 
 pytestmark = [pytest.mark.common, pytest.mark.section("parity")]
@@ -350,11 +351,10 @@ def test_command_line_exit_codes(tmp_path, capsys):
 
 def test_v043_capture_parity_is_preserved_under_its_own_definition():
     """Historical evidence, versioned: the 1,000-bar TradingView capture of IST v0.4.3-dev
-    (NQ1! 1m, Balanced, 2026-10-27, committed in validation/studies/data, never rewritten)
-    has no w= in its CAPTURE line, so it is replayed with the definition that build used
-    (reaction only, no dominance) and must still match Pine exactly."""
-    from validation.studies.liquidity_significance import DATA
-    r = capture.compare(capture.parse(DATA.read_text(encoding="utf-8")))
+    (NQ1! 1m, Balanced, 2026-10-27; validation/parity/evidence, never rewritten) has no w=
+    in its CAPTURE line, so it is replayed with the definition that build used (reaction
+    only, no dominance) and must still match Pine exactly."""
+    r = capture.compare(capture.parse(CAPTURE_V043.read_text(encoding="utf-8")))
     assert r["differences"] == 0, _diffs(r)
     assert (r["compared_bars"], r["matched_events"], r["warmup"], r["series"]) == (1000, 1258, 17, 7)
     assert r["totals"]["pine"]["swing highs"] == "71 PASS · 7 REJECT" == r["totals"]["oracle"]["swing highs"]
@@ -368,8 +368,7 @@ def test_v043_capture_under_c1_differs_only_by_the_expected_definition_change():
     levels (CREATED / TAKEN / SWEEP / BREAK) have no oracle counterpart. Nothing else
     differs: no swing appears that Pine rejected, no event is missing in Pine, no FVG,
     reaction or required-reaction value changes."""
-    from validation.studies.liquidity_significance import DATA
-    cap = capture.parse(DATA.read_text(encoding="utf-8"))
+    cap = capture.parse(CAPTURE_V043.read_text(encoding="utf-8"))
     cap["head"]["w"] = "30"
     r = capture.compare(cap)
     d = _diffs(r)
@@ -381,6 +380,30 @@ def test_v043_capture_under_c1_differs_only_by_the_expected_definition_change():
     created = [x for x in events if "_CREATED" in x]
     assert len(created) == len(bars), (len(created), len(bars))       # one removed level per changed verdict
     assert not any("missing in Pine" in x for x in d)
+
+
+def test_v044_capture_parity_c1_frozen_baseline():
+    """The Phase 2 freeze evidence: the 1,000-bar TradingView capture of IST v0.4.4-dev
+    (C1, NQ1! 1m, Balanced, W 30, 2026-10-27 13:44 → 2026-10-28 07:56 New York) matches the
+    oracle on every compared bar of all 9 series, dominance references included, and on
+    every event of a structure born in the window."""
+    r = capture.compare(capture.parse(CAPTURE_V044.read_text(encoding="utf-8")))
+    assert r["differences"] == 0, _diffs(r)
+    assert (r["compared_bars"], r["series"], r["matched_events"], r["warmup"]) == (1000, 9, 1049, 33)
+    assert r["totals"]["pine"] == r["totals"]["oracle"] == {
+        "swing highs": "38 PASS · 39 REJECT", "swing lows": "28 PASS · 45 REJECT",
+        "FVG": "90 bull · 90 bear · 43 rejected"}
+    ok = {c["text"].split(":")[0] for c in r["checks"] if c["status"] == manual.MATCH}
+    assert {"balanced W", "dominance reference high", "dominance reference low"} <= ok, ok
+    assert (r["counts"][manual.MATCH], r["counts"][manual.NOBS]) == (29, 6)
+
+
+def test_evidence_captures_are_unchanged():
+    """The evidence files are byte-identical to the hashes recorded at the freeze."""
+    sums = dict(reversed(ln.split(" *", 1)) for ln in (EVIDENCE / "SHA256SUMS.txt").read_text().splitlines() if ln)
+    assert set(sums) == {CAPTURE_V043.name, CAPTURE_V044.name}
+    for name, digest in sums.items():
+        assert hashlib.sha256((EVIDENCE / name).read_bytes()).hexdigest() == digest, name
 
 
 def test_capture_observed_tradingview_data():
