@@ -1,5 +1,14 @@
 # Changelog
 
+## LRL study — user clarification: detection ≠ target quality (2026-10-28, branch `research/lrl`) — no indicator change
+
+**CHANGE.** `docs/STUDY_LRL.md` records the user's clarification. LRL **detection** (the diagonal failure-swing structure, from bars alone) and LRL **target quality** stay separate.
+* No HTF FVG, DOL, displacement, delivery or other context is needed to create an LRL.
+* A singular swing is not an LRL; two points remain an internal candidate; three compatible failure swings are the minimum.
+* A future context layer (L4) may classify an existing LRL as LOW RESISTANCE / NEUTRAL / HIGH RESISTANCE. It is kept as a requirement (DEF-LRL9, read-only, future INV-LRL-11) and **not implemented**.
+
+**TEST.** A new scenario, "two failure swings only (internal candidate)", plus `test_two_points_stay_an_internal_candidate` and `test_detection_reads_no_context`. That makes 34 tests. The detection definition is unchanged; every existing number is identical.
+
 ## LRL research study — validation 1.6.0 (2026-10-28, branch `research/lrl`) — no indicator change, for review
 
 **CHANGE.** Research and specification only, at the user's request ("Do NOT implement LRL in IST.pine yet"): `docs/STUDY_LRL.md`. It covers the formal semantics of a diagonal failure-swing LRL, seven candidate definitions with formulas and pseudocode, pros, cons and failure modes, the measurements on real NQ (both evidence captures merged, 1,639 bars) and on a random-walk null, 16 synthetic scenarios, answers to the 15 study questions, a proposed DEF-LRL1…8, a validation plan and open questions.

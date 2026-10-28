@@ -4,6 +4,7 @@
 * No change to `src/IST.pine`, the oracle, Phase 1 or Phase 2. The frozen baseline `PHASE2_BASELINE_v0.4.4-dev` (0487ec4) is untouched; this work is on branch `research/lrl`.
 * LRL is not implemented in Pine. The static check ST-08 still forbids LRL identifiers in `src/IST.pine`.
 * The request that started this study (2026-10-28) arrived truncated inside deliverable F, after "line break; pivot". This study covers items 1–15 and deliverables A–F as received. It adds G–K (answers, recommendation, validation plan, Pine notes, open questions) as the natural rest of a specification.
+* **User clarification, 2026-10-28: LRL DETECTION and LRL TARGET QUALITY stay separate.** This study specifies detection only: the diagonal failure-swing structure itself, from bars alone. No HTF FVG, draw on liquidity (DOL), displacement, opposing delivery or other context is required to create an LRL. A later, separate context layer may classify an existing LRL as LOW RESISTANCE / NEUTRAL / HIGH RESISTANCE. That layer is **not** part of this phase; it is kept as a future integration requirement (DEF-LRL9, §H).
 
 **Data.**
 * Real data: the two evidence captures (`validation/parity/evidence/`), merged by bar time. That gives 1,639 NQ1! 1m bars, 2026-10-27 03:38 → 2026-10-28 07:56 New York (≈ 27 h, one maintenance gap). The 411 shared bars are identical.
@@ -13,7 +14,7 @@
 
 **Reproduce:** the commands are below.
 * `python -m validation.studies.lrl --svg docs/study_lrl` prints every table of §E/§F and writes the charts.
-* `pytest validation/tests/test_lrl_study.py` runs 31 tests (report section *LRL research study*).
+* `pytest validation/tests/test_lrl_study.py` runs 34 tests (report section *LRL research study*).
 
 **Two kinds of number, kept apart (as in the significance study):**
 * **definition inputs** use only bars up to the decision bar;
@@ -47,6 +48,12 @@ A pivot is (X, P): swing bar and price. τ is the line tolerance. EQ tol is the 
 * On the NQ data, **0 of 56** points 2…n of the recommended LRLs are C1 levels. A C1-only source finds **0 LRLs**.
 * BSL/SSL are the *dominant* swings; LRLs are chains of the *non-dominant* swings that C1 filters out. This is what the user anticipated ("smaller failure swings that are intentionally filtered out of BSL/SSL").
 * The first point is often a BSL anyway: 17 of 27 anchors are C1 levels.
+
+**Detection, not target quality (user clarification).**
+* A singular swing is not an LRL. Two compatible failure swings are only an internal **candidate**: no event, not drawn. **Three** compatible failure swings are the minimum for confirmation. This is tested by the scenario "two failure swings only".
+* Detection answers "is there a diagonal failure-swing structure?". It does not judge whether the LRL is a *good target*.
+* Whether price is likely to run it with low resistance depends on context the detector must not read: HTF / short-term DOL, FVGs supporting or opposing the move, displacement and delivery, and surrounding liquidity. A later context layer judges that (DEF-LRL9).
+* The study's outcome columns ("ran to anchor", time to take) are descriptions only. Their similarity to the random walk is exactly why target quality needs context and cannot come from the geometry.
 
 ---
 
@@ -255,6 +262,7 @@ Built by `zigzag()`: 40 flat bars at 100 (no pivots, TR warm-up), then straight 
 | scenario | LRL-0 | LRL-1 | LRL-2 | LRL-3 | LRL-4 | LRL-5 | LRL-R |
 |---|---|---|---|---|---|---|---|
 | clean bearish LRL (highs 120.5 · 116.5 · 112.5, 16 bars apart) | ▼C@85 ▼E@116 | ▼C@85 ▼E@116 | ▼C@85 ▼E@116 | ▼C@85 ▼E@116 | ▼C@85 ▼E@116 | ▼C@85 ▼E@116 | ▼C@84 ▼E@115 |
+| two failure swings only (internal candidate, never an LRL) | — | — | — | — | — | — | — |
 | clean bullish LRL (mirror of the above) | mirrored: ▲ at the same bars (tested on every scenario, on NQ and on a random walk) | | | | | | |
 | 4th and 5th point extension | ▼C@85 ▼X4@101 ▼X5@117 ▼E@148 | same | same | same | same | same | ▼C@84 ▼X4@100 ▼X5@116 ▼E@147 |
 | line touch → extension (4th high 0.5 below the line) | ▼C@85 ▼X4@101 ▼E@132 | same | same | same | same | same | ▼C@84 ▼X4@100 ▼E@131 (2 touches) |
@@ -272,8 +280,10 @@ Built by `zigzag()`: 40 flat bars at 100 (no pivots, TR warm-up), then straight 
 | points too far apart (gaps 36 > 30) | — | — | — | — | — | — | — |
 | triangle: bearish and bullish together | ▼C@85 ▲C@93 ▼S@99 ▲S@114 | same | same | same | same | same | ▼C@84 ▲C@92 ▼X4@98 ▼S@101 ▲S@114 |
 
-**What the tests prove** (`validation/tests/test_lrl_study.py`, 31 tests):
+**What the tests prove** (`validation/tests/test_lrl_study.py`, 34 tests):
 * every scenario gives exactly the LRL-R events above;
+* two compatible failure swings stay an internal candidate (no event, no record);
+* detection needs no context: an LRL whose anchor is not a C1 level, with no other module running, is confirmed from bars alone;
 * **each guard is load-bearing**: removing the separation, non-horizontal, line or chord-collinearity rule turns a rejected scenario into an LRL;
 * bullish = mirrored bearish (NQ, random walk);
 * **no lookahead**: on NQ and a random walk, every event before bar n is identical with or without the bars ≥ n;
@@ -344,7 +354,7 @@ Built by `zigzag()`: 40 flat bars at 100 (no pivots, TR warm-up), then straight 
 
 ---
 
-## H · Recommendation (for approval): DEF-LRL1 … LRL8
+## H · Recommendation (for approval): DEF-LRL1 … LRL8 (detection) + DEF-LRL9 (future context requirement)
 
 Proposed as the next specification, **not implemented**. Constants are those of LRL-R and were not tuned to a target count.
 
@@ -376,6 +386,13 @@ Proposed as the next specification, **not implemented**. Constants are those of 
   * Reads bars (and, for a label only, whether X₁ is a BSL/SSL); never writes Phase 1 or Phase 2 state.
   * The Phase 1 and Phase 2 event streams must be byte-identical with LRL on and off.
   * Alerts are a separate later decision, default OFF.
+  * **No context input:** detection never reads HTF FVGs, DOLs, displacement, delivery or other modules' context.
+* **DEF-LRL9 · Target quality: FUTURE integration requirement, NOT implemented in this phase.**
+  * A separate context layer (architecture L4, context/filtering) may classify an *existing* LRL as LOW RESISTANCE, NEUTRAL or HIGH RESISTANCE.
+  * It would use HTF / short-term DOL, FVG support or opposition, displacement / delivery and surrounding liquidity.
+  * It is a read-only consumer of LRL records. It never creates, extends, takes or removes an LRL. The LRL events must be byte-identical with the layer on and off (future INV-LRL-11).
+  * What it needs from detection is already in the record: side, points, τ, chord, confirmation and extension bars, status, take bar and class.
+  * Its own definition (inputs, when the class is decided, whether it may change over time, its events) needs a separate study after LRL detection is validated.
 
 **LRL presets.** Measured, **not recommended yet.** Tying the LRL to the liquidity presets (Aggressive 2/2 · G 10, Strict 5/3 · G 60) gave Aggressive *fewer* lines than Balanced on NQ 1m (0.70/h vs 0.99/h, because G = W = 10 is tight). The proposal is one fixed LRL definition first, and presets only after it is validated on TradingView.
 
@@ -395,7 +412,7 @@ Proposed as the next specification, **not implemented**. Constants are those of 
    * INV-LRL-8: Phase 1/2 streams identical with LRL on/off.
    * INV-LRL-9: mirror symmetry.
    * INV-LRL-10: prefix invariance.
-3. **Scenarios.** The 16 of §F become oracle tests; the user's labelled real examples become golden cases.
+3. **Scenarios.** The 17 of §F become oracle tests; the user's labelled real examples become golden cases.
 4. **Parity.** Extend the debug Parity capture with the five `LRL_*` event lines (points, τ) and a per-bar value: the level y + τ of the nearest active LRL per side. Bounded Pine-Log bar-by-bar parity of that series and of the events is then possible on the free plan, as for L48.
 5. **TradingView tests** (draft L-LRL list):
    * compile / runtime;

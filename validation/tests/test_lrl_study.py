@@ -17,6 +17,7 @@ C, X, S, B, E = "LRL_CONFIRMED", "LRL_EXTENDED", "LRL_SWEEP", "LRL_BREAK", "LRL_
 # a record expires on the first bar after X_last + gmax (30) + right (2).
 EXPECTED = {
     "clean bearish LRL": [(84, C, "bear", 50, 3), (115, E, "bear", 50, 3)],
+    "two failure swings only (internal candidate)": [],
     "4th and 5th point extension": [(84, C, "bear", 50, 3), (100, X, "bear", 50, 4), (116, X, "bear", 50, 5),
                                     (147, E, "bear", 50, 5)],
     "line touch → extension": [(84, C, "bear", 50, 3), (100, X, "bear", 50, 4), (131, E, "bear", 50, 4)],
@@ -60,6 +61,20 @@ def test_each_guard_is_load_bearing(name, mutated):
     """Removing one rule makes a rejected scenario produce an LRL."""
     cs = lrl.SCENARIOS[name]
     assert not _ev(cs) and any(k == C for _, k, *_ in _ev(cs, mutated))
+
+
+def test_two_points_stay_an_internal_candidate():
+    """A singular swing is not an LRL and two compatible failure swings are only a candidate:
+    no event, no record. The third point confirms (user requirement, STUDY_LRL §A)."""
+    recs, n = lrl.run(lrl.SCENARIOS["two failure swings only (internal candidate)"], R, "bear")
+    assert recs == [] and n["candidates"] >= 1 and n["confirmed"] == 0
+
+
+def test_detection_reads_no_context():
+    """Detection ≠ target quality: an LRL is created from bars alone. Here the anchor is not a
+    C1 level and no other module runs, yet the LRL is confirmed (STUDY_LRL §H, DEF-LRL9)."""
+    cs = lrl.SCENARIOS["clean bearish LRL"]
+    assert lrl.events(lrl.both(cs, R, {"bear": set(), "bull": set()})) == EXPECTED["clean bearish LRL"]
 
 
 def test_equal_highs_keep_the_frozen_eqh_and_anchor_the_lrl_on_the_later_member():

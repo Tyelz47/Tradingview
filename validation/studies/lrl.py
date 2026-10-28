@@ -377,6 +377,7 @@ def zigzag(vertices, base=100.0, warm=40, tail=40, extra=()) -> list[Candle]:
 _BEAR = [(50, 120), (58, 108), (66, 116), (74, 104), (82, 112)]       # highs 120.5 · 116.5 · 112.5 on one line
 SCENARIOS = {
     "clean bearish LRL": zigzag(_BEAR + [(100, 95)]),
+    "two failure swings only (internal candidate)": zigzag(_BEAR[:4] + [(100, 95)]),
     "4th and 5th point extension": zigzag(_BEAR + [(90, 100), (98, 108), (106, 96), (114, 104), (130, 90)]),
     "line touch → extension": zigzag(_BEAR + [(90, 100), (98, 107.5), (120, 92)]),
     "sweep (wick through, close back)": zigzag(_BEAR + [(92, 100)], extra=[(100, 112, 99.5, 101.5)]),
