@@ -9,7 +9,7 @@ import pytest
 from validation.candles import mirror, random_walk
 from validation.studies import lrl
 
-pytestmark = [pytest.mark.section("research.lrl")]
+pytestmark = [pytest.mark.lrl, pytest.mark.section("research.lrl")]
 R = lrl.RECOMMENDED
 C, X, S, B, E = "LRL_CONFIRMED", "LRL_EXTENDED", "LRL_SWEEP", "LRL_BREAK", "LRL_EXPIRED"
 

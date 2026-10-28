@@ -14,7 +14,8 @@ from zoneinfo import ZoneInfo
 # Pine kind numbers (src/IST.pine EV_*), used as `sid` for LEVEL_SET (K_*).
 LEVEL_KINDS = {"PDH": 0, "PDL": 1, "PWH": 2, "PWL": 3, "DO": 4, "MO": 5}
 
-# Canonical in-bar order: roughly Pine's engine order (levels, sessions, FVG, liquidity).
+# Canonical in-bar order: roughly Pine's engine order (levels, sessions, FVG, liquidity, LRL).
+# LRL types come last so the ranks of every earlier type are unchanged.
 TYPES = (
     "LEVEL_SET",
     "SESSION_END", "SESSION_START",
@@ -23,11 +24,16 @@ TYPES = (
     "EQH_TAKEN", "EQL_TAKEN",
     "BSL_CREATED", "SSL_CREATED", "EQH_CREATED", "EQL_CREATED",
     "EQH_DROPPED_MEMORY", "EQL_DROPPED_MEMORY", "BSL_DROPPED_MEMORY", "SSL_DROPPED_MEMORY",
+    "LRL_SWEEP", "LRL_BREAK", "LRL_EXPIRED", "LRL_EXTENDED", "LRL_CONFIRMED", "LRL_DROPPED_MEMORY",
 )
 RANK = {t: i for i, t in enumerate(TYPES)}
+# Types of opt-in oracle modules that src/IST.pine does not implement yet (ST-14 excludes
+# them; empty this set when Pine gains the module).
+ORACLE_ONLY = frozenset(t for t in TYPES if t.startswith("LRL_"))
 
 # Events that mark a one-time transition of one structure: at most once per (type, dir, sid).
-ONCE = frozenset(t for t in TYPES if t != "LEVEL_SET")
+# LRL_EXTENDED repeats (4th, 5th, … point) and is keyed by its bar, like LEVEL_SET.
+ONCE = frozenset(t for t in TYPES if t not in ("LEVEL_SET", "LRL_EXTENDED"))
 
 
 @dataclass(frozen=True)

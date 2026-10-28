@@ -1,12 +1,13 @@
 """The whole reference model: one bar at a time, modules in the Pine engine order
-(levels → sessions → FVG → liquidity, src/IST.pine "ENGINE RUN"). Confirmed mode:
-every candle is a closed bar."""
+(levels → sessions → FVG → liquidity, src/IST.pine "ENGINE RUN"), then the opt-in LRL
+engine (docs/LRL.md; not in Pine yet). Confirmed mode: every candle is a closed bar."""
 from __future__ import annotations
 
 from validation.models.events import Event, EventLog, canonical
 from validation.models.fvg import FvgEngine
 from validation.models.levels import LevelEngine
 from validation.models.liquidity import LiquidityEngine
+from validation.models.lrl import LrlEngine
 from validation.models.sessions import SessionEngine
 from validation.models.types import Candle, Settings
 
@@ -20,6 +21,7 @@ class IstModel:
         self.sessions = SessionEngine(s.sessions, self.log) if "sessions" in s.modules else None
         self.fvg = FvgEngine(s.fvg, s.tick, self.log) if "fvg" in s.modules else None
         self.liq = LiquidityEngine(s.liq, s.tick, self.log, incremental=incremental_liq) if "liq" in s.modules else None
+        self.lrl = LrlEngine(s.lrl, s.liq.tol_ticks, s.tick, self.log) if "lrl" in s.modules else None
 
     @property
     def bar(self) -> int:
@@ -34,7 +36,7 @@ class IstModel:
         self.candles.append(c)
         self.log.at(bar, c.time)
         n = len(self.log.events)
-        for engine in (self.levels, self.sessions, self.fvg, self.liq):
+        for engine in (self.levels, self.sessions, self.fvg, self.liq, self.lrl):
             if engine is not None:
                 engine.step(bar, c)
         return self.log.events[n:]
@@ -58,6 +60,8 @@ class IstModel:
             out["sessions"] = self.sessions.state()
         if self.levels is not None:
             out["ref_levels"] = self.levels.state()
+        if self.lrl is not None:
+            out["lrl"] = self.lrl.state()
         return out
 
 

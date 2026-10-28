@@ -42,8 +42,9 @@ validation/
     eq.py               DEF-L5.1…L5.6
     sessions.py         DEF-F1…F6
     levels.py           DEF-G2…G6 chart-side logic (day boundary = labelled ASSUMPTION)
+    lrl.py              docs/LRL.md DEF-LRL1…LRL8: opt-in module "lrl", not in Pine, not in default runs
     ist.py              all modules in the Pine engine order → events + state
-  invariants.py         40 named invariants + the per-bar Monitor
+  invariants.py         52 named invariants (9 LRL, checked only when the module runs) + the per-bar Monitor
   static_checks.py      text checks of src/IST.pine
   regression.py         corpus, baseline snapshot, diff/classify, legacy models from git
   candles.py            builders, random walks, TradingView CSV loader, mirror/shift
@@ -93,7 +94,7 @@ python validation/validation_agent.py --mode deep
 ```
 
 **Options:**
-* `--phase 1|2|all` runs one phase plus the shared checks.
+* `--phase 1|2|lrl|all` runs one phase (or LRL detection) plus the shared checks.
 * `--seed N` sets the Hypothesis seed. Walks and the regression corpus are fixed.
 * `--report PATH` writes the report elsewhere.
 * `--verbose` prints every test.

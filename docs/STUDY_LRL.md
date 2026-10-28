@@ -1,6 +1,6 @@
 # LRL · research and specification study (diagonal failure-swing liquidity)
 
-**Status: RESEARCH ONLY, awaiting the user's review. Nothing here is approved.**
+**Status:** the research record. **The user approved LRL-R (§H) with the recommended answers of §K on 2026-10-28.** The approved specification is `docs/LRL.md`. It is implemented in the oracle only (validation 1.7.0), not in Pine. The text below is kept as it was reviewed.
 * No change to `src/IST.pine`, the oracle, Phase 1 or Phase 2. The frozen baseline `PHASE2_BASELINE_v0.4.4-dev` (0487ec4) is untouched; this work is on branch `research/lrl`.
 * LRL is not implemented in Pine. The static check ST-08 still forbids LRL identifiers in `src/IST.pine`.
 * The request that started this study (2026-10-28) arrived truncated inside deliverable F, after "line break; pivot". This study covers items 1–15 and deliverables A–F as received. It adds G–K (answers, recommendation, validation plan, Pine notes, open questions) as the natural rest of a specification.

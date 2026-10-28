@@ -27,7 +27,8 @@ settings.load_profile(MODE)
 
 def pytest_configure(config):
     for line in ("section(name): report section", "spec(*ids): TESTS_PHASE2 / ARCHITECTURE ids this test covers",
-                 "phase1: Phase 1 logic", "phase2: Phase 2 logic", "common: shared infrastructure"):
+                 "phase1: Phase 1 logic", "phase2: Phase 2 logic", "lrl: LRL detection (docs/LRL.md)",
+                 "common: shared infrastructure"):
         config.addinivalue_line("markers", line)
 
 

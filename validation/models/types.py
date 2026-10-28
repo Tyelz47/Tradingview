@@ -102,6 +102,22 @@ class LiqSettings:
 
 
 @dataclass(frozen=True)
+class LrlSettings:
+    """docs/LRL.md DEF-LRL1…LRL6 ([calc]), approved 2026-10-28. Constants of the definition,
+    not user inputs; variable here only so tests can exercise every rule. The EQ tolerance
+    is the shared liquidity input (LiqSettings.tol_ticks)."""
+    left: int = 3               # DEF-LRL1 intermediate pivot engine (DEF-L1 rule, no significance test)
+    right: int = 2
+    tol_k: float = 0.5          # DEF-LRL2 τ = max(EQ tolerance, tol_k × TR average at the anchor)
+    gap: int = 30               # DEF-LRL3 max bars between consecutive points
+    sep_k: float = 1.0          # DEF-LRL3 pullback between consecutive points ≥ sep_k × TR average (0 = off)
+    drop_k: float = 2.0         # DEF-LRL4 first − latest point > drop_k × τ
+    tra_len: int = 14
+    cand_memory: int = 25       # DEF-LRL6 2-point candidates per side
+    memory: int = 50            # DEF-LRL6 LRL records per side
+
+
+@dataclass(frozen=True)
 class SessionSettings:
     """DEF-F1…F6. Windows are `HHMM-HHMM` in `timezone`, every weekday."""
     timezone: str = "America/New_York"
@@ -139,6 +155,9 @@ class ViewSettings:
 
 
 MODULES = ("levels", "sessions", "fvg", "liq")
+# Opt-in modules: not in the default run (src/IST.pine has no LRL yet; baselines and parity
+# compare the default modules only).
+KNOWN_MODULES = MODULES + ("lrl",)
 
 
 @dataclass(frozen=True)
@@ -149,6 +168,7 @@ class Settings:
     sessions: SessionSettings = field(default_factory=SessionSettings)
     levels: LevelSettings = field(default_factory=LevelSettings)
     view: ViewSettings = field(default_factory=ViewSettings)
+    lrl: LrlSettings = field(default_factory=LrlSettings)
     modules: tuple = MODULES
 
     @property
@@ -164,6 +184,8 @@ class Settings:
 
     def to_dict(self) -> dict:
         d = asdict(self)
+        if "lrl" not in self.modules:
+            del d["lrl"]                 # opt-in module: absent cases keep their pre-LRL definition (regression)
         d["modules"] = list(self.modules)
         d["sessions"]["windows"] = [list(w) for w in self.sessions.windows]
         return d
@@ -172,7 +194,7 @@ class Settings:
     def from_dict(cls, d: dict | None) -> "Settings":
         d = dict(d or {})
         sub = {"fvg": FvgSettings, "liq": LiqSettings, "sessions": SessionSettings,
-               "levels": LevelSettings, "view": ViewSettings}
+               "levels": LevelSettings, "view": ViewSettings, "lrl": LrlSettings}
         kw = {}
         for name, typ in sub.items():
             if name in d:
@@ -192,8 +214,8 @@ class Settings:
         if "tick" in d:
             kw["tick"] = float(d["tick"])
         if "modules" in d:
-            bad = set(d["modules"]) - set(MODULES)
+            bad = set(d["modules"]) - set(KNOWN_MODULES)
             if bad:
                 raise ValueError(f"unknown modules: {sorted(bad)}")
-            kw["modules"] = tuple(m for m in MODULES if m in d["modules"])
+            kw["modules"] = tuple(m for m in KNOWN_MODULES if m in d["modules"])
         return cls(**kw)

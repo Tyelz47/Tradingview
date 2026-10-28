@@ -86,6 +86,24 @@ EQ_EVENT = _inv("INV-EQ-12", "EQ", "EQ_TAKEN only for a qualified cluster, at it
 SES_RANGE = _inv("INV-SES-01", "SESSIONS", "final session high/low = max/min of the bars inside; end = last bar inside")
 SES_START = _inv("INV-SES-02", "SESSIONS", "a session starts on its first bar inside the window, never on the first loaded bar")
 LVL_SET = _inv("INV-LVL-01", "LEVELS", "LEVEL_SET carries a price and matches the live level known on that bar")
+# ── LRL (docs/LRL.md DEF-LRL1…LRL6; checked only when the opt-in module runs) ──
+LRL_UNIQUE = _inv("INV-LRL-01", "LRL", "a pivot belongs to at most one LRL")
+LRL_POINTS = _inv("INV-LRL-02", "LRL", "points are DEF-LRL1 pivots; consecutive points fail strictly (step > EQ "
+                                       "tolerance), are ≤ gap bars apart and separated by a pullback ≥ sep_k × TR average")
+LRL_LINE = _inv("INV-LRL-03", "LRL", "≥ 3 points; τ = max(EQ tolerance, tol_k × TR average at the first point); every "
+                                     "point within τ of the chord; first − latest > drop_k × τ")
+LRL_CLEAN = _inv("INV-LRL-04", "LRL", "no high beyond line + τ from the first point to the current bar (active), the "
+                                      "bar before the take (taken) or the expiry bar (expired)")
+LRL_TAKE = _inv("INV-LRL-05", "LRL", "a taken LRL: the taking high is strictly beyond line + τ; BREAK iff the close "
+                                     "is too; the recorded level is line + τ")
+LRL_TIMING = _inv("INV-LRL-06", "LRL", "confirmed at X3 + right, extended at Xn + right; it ends after its last "
+                                       "decision bar and expires on the first bar after Xn + gap + right")
+LRL_FROZEN = _inv("INV-LRL-07", "LRL", "id, τ and confirmation bar never change; points and extensions are "
+                                       "append-only; end facts never change")
+LRL_EVENTS = _inv("INV-LRL-08", "LRL", "events and records agree: CONFIRMED on the confirmation bar, one EXTENDED "
+                                       "per extension, one terminal event on the end bar, prices as specified")
+LRL_MEM = _inv("INV-LRL-09", "LRL", "records per side ≤ memory, candidates ≤ candidate memory; an active record "
+                                    "is dropped only when no ended one exists")
 
 LIQ_FACTS = ("taken_bar", "take_ext", "take_close", "take_gap", "cls")
 
@@ -119,6 +137,7 @@ class Monitor:
         lq = getattr(model, "liq", None)        # CREATED events per side so far, for INV-LIQ-12
         self.liq_made = {1: lq.bsl.levels, -1: lq.ssl.levels} if lq is not None else {1: 0, -1: 0}
         self.eq_snap: dict = {}
+        self.lrl_snap: dict = {}
         self.tol = model.settings.liq.tol_ticks * model.settings.tick
         self.eps = model.settings.eps
 
@@ -141,6 +160,8 @@ class Monitor:
             self._sessions(bar, c, new)
         if m.levels is not None:
             self._levels(bar, new)
+        if getattr(m, "lrl", None) is not None:
+            self._lrl(bar, new, full)
         self.n_events = len(m.events)
         self.last_event = m.events[-1] if m.events else None
 
@@ -156,6 +177,8 @@ class Monitor:
         if m.liq is not None:
             self._liq(bar, c, [], True, final=True)
             self._eq(bar, c, [], True, final=True)
+        if getattr(m, "lrl", None) is not None:
+            self._lrl(bar, [], True, final=True)
 
     # ── events ──
     def _events(self, bar, c, new, full=True):
@@ -178,7 +201,7 @@ class Monitor:
                 self.seen.add(e.ident())
             if fam in self.dropped:
                 self._fail(EV_AFTER_DROP, f"{e.type} id {e.sid} after its DROPPED_MEMORY")
-            if e.type.endswith("_CREATED") or e.type == "SESSION_START":
+            if e.type.endswith("_CREATED") or e.type in ("SESSION_START", "LRL_CONFIRMED"):
                 self.known.add(fam)
             elif e.type != "LEVEL_SET" and fam not in self.known:
                 self._fail(EV_KNOWN, f"{e.type} id {e.sid} refers to no known structure")
@@ -457,6 +480,82 @@ class Monitor:
                 if e.price is None or live is None or live.price != e.price or live.known_time != self.m.candles[bar].time:
                     self._fail(LVL_SET, f"LEVEL_SET {e.meta} {e.price} does not match the live level")
         stats.INV_CHECKS[LVL_SET] += 1
+
+    # ── LRL (docs/LRL.md) ──
+    def _lrl(self, bar, new, full, final=False):
+        e = self.m.lrl
+        s = e.s
+        evs = [x for x in new if x.type.startswith("LRL_")]
+        for side in e.sides():
+            recs = side.records()
+            if len(recs) > s.memory or len(side.cands) > s.cand_memory:
+                self._fail(LRL_MEM, f"{side.name}: {len(recs)} records / {len(side.cands)} candidates")
+            if side.last_drop and side.last_drop["active"] and side.last_drop["ended_available"]:
+                self._fail(LRL_MEM, f"{side.name}: an active record was dropped while an ended one existed")
+            pts = [x for r in recs for x in r.xs]
+            if len(pts) != len(set(pts)):
+                self._fail(LRL_UNIQUE, f"{side.name}: a pivot is a point of two LRLs")
+            mine = [x for x in evs if x.dir == side.sign]
+            touched = {x.sid for x in mine}
+            for r in (recs if full else [r for r in recs if r.end is None or r.id in touched]):
+                self._lrl_record(e, side, r, bar)
+            if not final:                         # this bar's events were compared by check()
+                self._lrl_events(side, mine, recs, bar)
+        stats.peak("lrl.records_per_side", max(len(side.records()) for side in e.sides()))
+        for k in (LRL_UNIQUE, LRL_POINTS, LRL_LINE, LRL_CLEAN, LRL_TAKE, LRL_TIMING, LRL_FROZEN, LRL_EVENTS, LRL_MEM):
+            stats.INV_CHECKS[k] += 1
+
+    def _lrl_record(self, e, side, r, bar):
+        s, eps, hi = e.s, e.eps, side.hi
+        tag = f"{side.name} LRL {r.id}"
+        for i, x in enumerate(r.xs):
+            if not (x >= s.left and hi[x] > max(hi[x - s.left:x]) and hi[x] >= max(hi[x + 1:x + s.right + 1])
+                    and r.ps[i] == hi[x]):
+                self._fail(LRL_POINTS, f"{tag}: point at bar {x} is not a DEF-LRL1 pivot at its price")
+        for (xa, pa), (xb, pb) in zip(zip(r.xs, r.ps), zip(r.xs[1:], r.ps[1:])):
+            tra = e.tra(xa)
+            if not (0 < xb - xa <= s.gap and pb < pa - e.tol - eps) or (
+                    s.sep_k and (tra is None or pb - min(side.lo[xa + 1:xb]) < s.sep_k * tra - eps)):
+                self._fail(LRL_POINTS, f"{tag}: points {xa} → {xb} ({pa} → {pb}) are not a failure step")
+        if len(r.xs) < 3 or r.tau != e.tau(r.xs[0]) or not r.ps[0] - r.ps[-1] > s.drop_k * r.tau + eps \
+                or any(abs(p - r.y(x)) > r.tau + eps for x, p in zip(r.xs, r.ps)):
+            self._fail(LRL_LINE, f"{tag}: {len(r.xs)} points, τ {r.tau} vs {e.tau(r.xs[0])}, off the chord or too flat")
+        limit = r.xs[-1] + s.gap + s.right
+        if r.born != r.xs[2] + s.right or r.ext != [x + s.right for x in r.xs[3:]] or (
+                r.end is None and bar > limit) or (r.end == "EXPIRED" and r.end_bar != limit + 1) or (
+                r.end is not None and r.end_bar <= r.last_decision):
+            self._fail(LRL_TIMING, f"{tag}: born {r.born} ext {r.ext} end {r.end} at {r.end_bar}, points {r.xs}")
+        last = bar if r.end is None else r.end_bar - (r.end != "EXPIRED")
+        bad = next((j for j in range(r.xs[0] + 1, last + 1) if hi[j] > r.y(j) + r.tau + eps), None)
+        if bad is not None:
+            self._fail(LRL_CLEAN, f"{tag}: bar {bad} traded beyond line + τ ({hi[bad]} > {r.y(bad) + r.tau})")
+        if r.end in ("SWEEP", "BREAK"):
+            lv = r.y(r.end_bar) + r.tau
+            if not hi[r.end_bar] > lv + eps or (r.end == "BREAK") != (side.cl[r.end_bar] > lv + eps) or r.end_level != lv:
+                self._fail(LRL_TAKE, f"{tag}: {r.end} on bar {r.end_bar} at level {r.end_level} vs line + τ {lv}")
+        now = (r.tau, r.born, tuple(r.xs), tuple(r.ps), tuple(r.ext), r.end, r.end_bar, r.end_level)
+        old = self.lrl_snap.get((side.sign, r.id))
+        if old is not None:
+            n, k = len(old[2]), len(old[4])
+            if old[:2] != now[:2] or now[2][:n] != old[2] or now[3][:n] != old[3] or now[4][:k] != old[4] or (
+                    old[5] is not None and old[5:] != now[5:]):
+                self._fail(LRL_FROZEN, f"{tag}: {old} → {now}")
+        self.lrl_snap[(side.sign, r.id)] = now
+
+    def _lrl_events(self, side, mine, recs, bar):
+        g = side.sign
+        gone = {x.sid for x in mine if x.type == "LRL_DROPPED_MEMORY"}
+        got = sorted((x.type, x.sid, x.price, x.origin_bar) for x in mine if x.sid not in gone)
+        want = []
+        for r in recs:
+            if r.born == bar:
+                want.append(("LRL_CONFIRMED", r.id, g * r.ps[2], r.xs[0]))
+            if bar in r.ext:
+                want.append(("LRL_EXTENDED", r.id, g * r.ps[3 + r.ext.index(bar)], r.xs[0]))
+            if r.end_bar == bar:
+                want.append((f"LRL_{r.end}", r.id, g * r.end_level, r.xs[0]))
+        if got != sorted(want) or gone & {r.id for r in recs}:
+            self._fail(LRL_EVENTS, f"{side.name}: events {got} vs records {sorted(want)}, dropped {sorted(gone)}")
 
 
 def run_checked(candles, settings=None, model=None, sweep_every: int = 1, **kw):

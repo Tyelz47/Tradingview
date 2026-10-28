@@ -363,6 +363,73 @@ def lvl01():
     mon.check()
 
 
+# ── LRL (opt-in module, docs/LRL.md) ──
+def lrl_case(name="4th and 5th point extension", upto=None):
+    """Scenario bars stepped and checked: by bar 120 the high-side LRL has 5 points and is active."""
+    from validation.studies.lrl import SCENARIOS
+    m = IstModel(Settings(modules=("lrl",)))
+    mon = Monitor(m)
+    for c in SCENARIOS[name][:upto]:
+        m.step(c)
+        mon.check()
+    return m, mon
+
+
+def lrl01():
+    m, mon = lrl_case(upto=120)
+    r = m.lrl.high.live[0]
+    m.lrl.high.hist.append(replace(r, id=r.id + 1, xs=list(r.xs), ps=list(r.ps), ext=list(r.ext)))
+    mon.check()
+
+
+def lrl02():
+    m, mon = lrl_case(upto=120)
+    m.lrl.high.live[0].ps[1] -= 0.25
+    mon.check()
+
+
+def lrl03():
+    m, mon = lrl_case(upto=120)
+    m.lrl.high.live[0].tau += 0.25
+    mon.check()
+
+
+def lrl04():
+    m, mon = lrl_case(upto=120)
+    m.lrl.high.hi[90] += 50                                      # bar 90 lies in no point's pivot window
+    mon.check()
+
+
+def lrl05():
+    m, mon = lrl_case("sweep (wick through, close back)")
+    m.lrl.high.hist[0].end = "BREAK"
+    mon.check()
+
+
+def lrl06():
+    m, mon = lrl_case(upto=120)
+    m.lrl.high.live[0].born += 1
+    mon.check()
+
+
+def lrl07():
+    m, mon = lrl_case("clean bearish LRL")
+    m.lrl.high.hist[0].end_level += 1                            # an expired record's end fact
+    mon.check()
+
+
+def lrl08():
+    m, mon = lrl_case(upto=120)
+    m.log.events.append(ev_now(m, "LRL_EXTENDED", 1, m.lrl.high.live[0].id, 1.0))
+    mon.check()
+
+
+def lrl09():
+    m, mon = lrl_case(upto=120)
+    m.lrl.s = replace(m.lrl.s, memory=0)
+    mon.check()
+
+
 CASES = {
     "INV-EV-01": ev01, "INV-EV-02": ev02, "INV-EV-03": ev03, "INV-EV-04": ev04, "INV-EV-05": ev05,
     "INV-FVG-01": fvg01, "INV-FVG-02": fvg02, "INV-FVG-03": fvg03, "INV-FVG-04": fvg04, "INV-FVG-05": fvg05,
@@ -374,6 +441,8 @@ CASES = {
     "INV-EQ-06": eq06, "INV-EQ-07": eq07, "INV-EQ-08": eq08, "INV-EQ-09": eq09, "INV-EQ-10": eq10,
     "INV-EQ-11": eq11, "INV-EQ-12": eq12,
     "INV-SES-01": ses01, "INV-SES-02": ses02, "INV-LVL-01": lvl01,
+    "INV-LRL-01": lrl01, "INV-LRL-02": lrl02, "INV-LRL-03": lrl03, "INV-LRL-04": lrl04, "INV-LRL-05": lrl05,
+    "INV-LRL-06": lrl06, "INV-LRL-07": lrl07, "INV-LRL-08": lrl08, "INV-LRL-09": lrl09,
 }
 
 

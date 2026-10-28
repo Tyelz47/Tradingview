@@ -1,5 +1,38 @@
 # Changelog
 
+## LRL detection — reference model + validation 1.7.0 (2026-10-28, branch `lrl/oracle`) — no indicator change
+
+**Decision (user, 2026-10-28):** "Definition approved. Proceed with the reference model/oracle + validation, but not Pine yet." The approved definition is LRL-R (`docs/STUDY_LRL.md` §H) with the recommended answers of §K.
+
+**CHANGE:**
+* `docs/LRL.md` is the approved specification: DEF-LRL1…8 (detection), DEF-LRL9 (target-quality context, a future requirement), events, non-repaint guarantees and the validation map.
+* `validation/models/lrl.py` is the oracle. It is the opt-in module `lrl` (`Settings(modules=…+("lrl",))`), constants in `LrlSettings`. Its events are `LRL_CONFIRMED`, `LRL_EXTENDED` (repeats, so it is outside ONCE), `LRL_SWEEP`, `LRL_BREAK`, `LRL_EXPIRED` and `LRL_DROPPED_MEMORY`. They are appended after every existing type, so existing ranks are unchanged.
+* One definition detail is settled here: when memory forces out an *active* LRL, its points become spent, so its id can never return.
+* Invariants INV-LRL-01…09, each with a negative test.
+* `tests/test_lrl.py` (32 tests):
+  * the approved study engine is reproduced exactly (17 scenarios, the NQ captures with 27 LRLs, three walks);
+  * event fields;
+  * Phase 1/2 are identical with LRL on;
+  * the module is opt-in;
+  * the memory path.
+* `fuzz/test_lrl_properties.py`:
+  * invariants, mirror symmetry, translation invariance, no lookahead and Phase 1/2 identity, on random candles and generated staircases;
+  * LRL long walks.
+* Report section "LRL detection", and `--phase lrl` (LRL, the LRL study and the common checks).
+* ST-14 (Pine event names = oracle event names) now excludes `events.ORACLE_ONLY`, the LRL types Pine does not have yet. Empty that set when Pine gains LRL.
+
+**REASON:** validate the approved definition before any Pine code, as for Phase 2.
+
+**RISKS:** none for the indicator.
+* `src/IST.pine` is unchanged (ST-08 still forbids LRL identifiers), and so are Phase 1 and Phase 2, the frozen tags, the regression baseline (the module is off by default, and the serialised settings of default cases are unchanged) and Pine parity.
+* `Settings` gained an `lrl` field. `to_dict()` includes it only when the module runs.
+
+**TEST:** FULL **PASS**, exit 0, 195.8 s: **390 passed, 1 skipped** (the paid CSV export).
+* Unchanged: static 16/16, Phase 1 and Phase 2 sections, regression 5/5, golden 6/6, parity 68/69.
+* Invariant detectors 52/52, properties 17/17, long walks 10/10.
+* LRL detection 32/32, LRL study 34/34.
+* The 9 LRL detectors fire on corrupted states.
+
 ## LRL study — user clarification: detection ≠ target quality (2026-10-28, branch `research/lrl`) — no indicator change
 
 **CHANGE.** `docs/STUDY_LRL.md` records the user's clarification. LRL **detection** (the diagonal failure-swing structure, from bars alone) and LRL **target quality** stay separate.
