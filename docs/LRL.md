@@ -8,7 +8,7 @@
   * a crossing of the projected boundary ends the LRL. **Correction (user, 2026-10-28, before any Pine):** when the boundary moved into price, the end is a separate terminal class, `LRL_DRIFT`, not SWEEP / BREAK (DEF-LRL5);
   * the pivots of a taken LRL are spent;
   * display shows the nearest active LRL per side, and 2-point candidates only in debug.
-* **Implemented in Pine: IST v0.5.0-dev (EXPERIMENTAL, NOT frozen).** The Pine implementation (§6) follows the oracle line by line; the static check ST-17 pins its constants and formulas.
+* **Implemented in Pine: IST v0.5.1-dev (EXPERIMENTAL, NOT frozen; v0.5.0-dev failed to compile, CE10182).** The Pine implementation (§6) follows the oracle line by line; the static check ST-17 pins its constants and formulas.
   * TradingView testing is pending (`docs/TESTS_LRL.md`).
   * LRL is frozen only after a real TradingView Pine ↔ oracle parity with 0 DIFFERENCE (LRL-L11).
 * The frozen baselines `PHASE1_BASELINE_v0.3.2` and `PHASE2_BASELINE_v0.4.4-dev` are untouched.
@@ -53,7 +53,7 @@
 * **DEF-LRL6 · Identity and memory.**
   * id = the time of X₁. It is unique per side: a point belongs to at most one LRL, and spent pivots never return.
   * 25 candidates per side, and **50 LRL records** per side. Beyond 50, the record that ended first is dropped; if none ended, the oldest active one is dropped and its points become spent. Each drop emits `LRL_DROPPED_MEMORY`.
-* **DEF-LRL7 · Display** (renderer, L6; Pine v0.5.0-dev, §6):
+* **DEF-LRL7 · Display** (renderer, L6; Pine v0.5.1-dev, §6):
   * a polyline through the member pivots (fixed points: segments never move) and a dashed projection from the latest point along y while active, ending at the take or expiry bar;
   * label "LRL";
   * by default the nearest active LRL per side, with ended LRLs behind a history toggle.
@@ -133,17 +133,18 @@
 
 1. **TradingView tests** (`docs/TESTS_LRL.md`): LRL-L00 … L12, above all **LRL-L11**, the real 1,000-bar Pine-Log parity with 0 DIFFERENCE.
 2. **Golden cases:** the user's labelled real examples (STUDY_LRL §K 6).
-3. **LRL alerts:** none in v0.5.0-dev. They will be a separate decision, default OFF.
+3. **LRL alerts:** none in v0.5.x. They will be a separate decision, default OFF.
 4. **Freeze**, only after 1.
 5. **DEF-LRL9 context layer:** a separate study.
 
-## 6 · Pine implementation (IST v0.5.0-dev)
+## 6 · Pine implementation (IST v0.5.1-dev)
 
 **Layers:**
 * **L1:** `lrlTra`, its own SMA(TR, 14), and the 3 / 2 pivot windows. `max_bars_back` 5000 on high and low, 100 on `lrlTra`.
 * **L2:** `lrlPivH` / `lrlPivL` (DEF-LRL1).
-* **L3:** UDTs `Lrl` and `LrlSide`, with methods `fits`, `finish`, `advance`, `trim`, `grow` (extend), `promote` (confirm), `seed`, `judge`. Prices are kept in side coordinates, as in the oracle, so the floats are identical.
-* **Engine run:** last, `if lrlOn and barstate.isconfirmed`: `advance` both sides, then `judge` both sides.
+* **L3:** UDTs `Lrl` and `LrlSide`, with methods `fits`, `finish`, `advanceLrl`, `trim`, `grow` (extend), `promote` (confirm), `seed`, `judge`. Prices are kept in side coordinates, as in the oracle, so the floats are identical.
+* **Engine run:** last, `if lrlOn and barstate.isconfirmed`: `advanceLrl` both sides, then `judge` both sides.
+* **Method names:** never shared with another engine. Pine forbids global variables inside overloaded user functions (CE10182, the v0.5.0-dev compile failure), so ST-18 requires every name to be declared once.
 * **L5:** 7 event names.
 * **L6:** rebuilt on the last bar.
 * **L7:** debug rows 35–41 and the Parity capture.

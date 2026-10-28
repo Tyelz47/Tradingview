@@ -21,7 +21,7 @@ CALC_SECTIONS = ("L1 · MARKET DATA", "L2 · DETECTION", "L5 · EVENT BUS", "L3 
 RENDER_SECTIONS = ("L6 · RENDERER (functions", "L6 · RENDERER (run)")
 DRAWING_TYPES = {"line", "box", "label", "linefill", "table", "polyline"}
 STATE_CALLS = re.compile(r"\.(step|register|take|takeEq|cluster|trigger|advance|dropCluster|pushExtreme|markFinal|supersede|"
-                         r"judge|grow|promote|seed|finish|trim)\(|"
+                         r"advanceLrl|judge|grow|promote|seed|finish|trim)\(|"
                          r"\b(f_emit|f_roll|f_sesNew|f_sesStep|f_sesExtend|f_sesFinalize|f_sesSupersede|f_fvgStep)\(")
 
 
@@ -335,7 +335,7 @@ LRL_RULES = {
 }
 # Code lines that must appear in this order: ADVANCE both sides, then JUDGE both sides;
 # inside JUDGE, extend, then confirm, then seed.
-LRL_ORDER = (("lrlHi.advance()", "lrlLo.advance()", "lrlHi.judge(", "lrlLo.judge("),
+LRL_ORDER = (("lrlHi.advanceLrl()", "lrlLo.advanceLrl()", "lrlHi.judge(", "lrlLo.judge("),
              ("bool used = s.grow(", "used := s.promote(", "s.seed(X, XT, P)"))
 LRL_CONSTANTS = {"LRL_L": "left", "LRL_R": "right", "LRL_TOL_K": "tol_k", "LRL_GAP": "gap", "LRL_SEP_K": "sep_k",
                  "LRL_DROP_K": "drop_k", "LRL_TRA_LEN": "tra_len", "LRL_CANDS": "cand_memory", "LRL_MEM": "memory"}
@@ -360,6 +360,16 @@ def st17_lrl_rules(src: str | None = None):
     return not bad, f"{len(LRL_RULES)} formulas, {len(LRL_CONSTANTS)} constants, {len(LRL_ORDER)} orders; wrong or missing: {bad or 'none'}"
 
 
+def st18_no_overloaded_functions(src: str | None = None):
+    """Pine forbids global variables inside an overloaded user function or method (CE10182:
+    'Cannot use global variable … in the local scope of overloaded function'). Every
+    user-defined function and method name is therefore declared exactly once."""
+    lines = src.splitlines() if src is not None else source()
+    names = [m.group(1) for ln in lines if (m := re.match(r"^(?:method\s+)?(\w+)\([^)]*\)\s*=>", ln))]
+    dup = sorted({n for n in names if names.count(n) > 1})
+    return not dup, f"{len(names)} user-defined functions and methods; names declared more than once: {dup or 'none'}"
+
+
 CHECKS = [
     ("ST-01", "Calculation never reads [view]/[alert] inputs (S-01)", st01_calc_independent_of_view),
     ("ST-02", "No identifiers of removed features (S-02)", st02_no_leftovers),
@@ -378,4 +388,5 @@ CHECKS = [
     ("ST-15", "Phase 1 baseline guard (git diff vs PHASE1_BASELINE_v0.3.2) (S-06)", st15_phase1_baseline_guard),
     ("ST-16", "DEF-L2 dominance (C1): window before the swing bar, strict-beyond boundary", st16_dominance_rule),
     ("ST-17", "DEF-LRL1…LRL6: approved constants, oracle formulas, ADVANCE before JUDGE", st17_lrl_rules),
+    ("ST-18", "No overloaded user function or method names (Pine CE10182)", st18_no_overloaded_functions),
 ]

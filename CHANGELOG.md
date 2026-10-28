@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.5.1-dev — LRL compile fix: no overloaded `advance` (2026-10-28, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.9.1
+
+**TradingView LRL-L00 on v0.5.0-dev: FAIL** (user). The compiler reported CE10182, "Cannot use global variable "barEv" in the local scope of overloaded function "advance()"", on the FVG `method advance(Fvg z)`; 9 problems in total.
+
+**ROOT CAUSE:**
+* v0.5.0-dev declared `method advance(LrlSide s)` next to the frozen Phase 1 `method advance(Fvg z)`. Both were then one overloaded `advance` family.
+* Pine forbids global variables, such as `barEv` reached through `f_emit`, inside overloaded user functions.
+* `advance` was the only name declared twice. The Phase 1 and Phase 2 baselines declare every function / method name once.
+
+**CHANGE** (`src/IST.pine`, LRL lines only):
+* The LRL method is renamed `advanceLrl`, with its two call sites in the engine run. A comment explains the name.
+* The frozen FVG `advance(Fvg z)` and its call site are untouched, so no Phase 1 line changes (ST-15 unchanged).
+* No compatibility wrapper is left, and the event bus and `barEv` / `f_emit` are not touched.
+* No other LRL method or function name collides: every name is declared once.
+
+**Validation 1.9.1:**
+* **New ST-18:** every user-defined function and method name is declared exactly once (the CE10182 guard). It fails on v0.5.0-dev with `['advance']` and passes on the current source and on both frozen baselines.
+* **ST-17** order rule and `STATE_CALLS` follow the new name.
+* **`tests/test_lrl_pine.py`:** a test that re-introducing the overload is caught.
+
+No test was weakened. The LRL definition and FVG / Phase 1 / Phase 2 behaviour are unchanged.
+
+**TEST:**
+* QUICK: **PASS**.
+* FULL: **PASS**, exit 0, 213.6 s, **454 passed, 1 skipped**: static 18/18, LRL 77/77, every other section unchanged, regression 5/5 against the frozen baseline. ST-15 still lists the same 11 reviewed Phase 1 lines.
+* TradingView LRL-L00 must be re-run on v0.5.1-dev: it is the only proof that every compiler problem is gone.
+
 ## v0.5.0-dev — LRL detection in Pine (2026-10-28, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.9.0
 
 **Decision (user, 2026-10-28):** "The approved LRL oracle and DRIFT correction are accepted. You may now implement LRL in Pine." The goal is DEF-LRL1…8 exactly as the oracle has them, with no tuning. DEF-LRL9 (context classification), CISD, displacement and HTF FVG are not started.

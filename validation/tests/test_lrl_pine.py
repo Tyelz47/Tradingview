@@ -23,10 +23,10 @@ MUTATIONS = {
     "DRIFT against the current boundary": ("hi <= bPrev + EPS ? LRL_DRIFT", "hi <= bNow + EPS ? LRL_DRIFT"),
     "BREAK on the previous boundary": ("cl > bNow + EPS ? LRL_BREAK", "cl > bPrev + EPS ? LRL_BREAK"),
     "cross without tolerance": ("float bNow  = r.yAt(t) + r.tau", "float bNow  = r.yAt(t)"),
-    "ADVANCE after JUDGE": ("        lrlHi.advance()\n        lrlLo.advance()\n        lrlHi.judge(lrlPivH, lrlX, lrlXT, lrlPxH)\n"
+    "ADVANCE after JUDGE": ("        lrlHi.advanceLrl()\n        lrlLo.advanceLrl()\n        lrlHi.judge(lrlPivH, lrlX, lrlXT, lrlPxH)\n"
                             "        lrlLo.judge(lrlPivL, lrlX, lrlXT, -lrlPxL)",
                             "        lrlHi.judge(lrlPivH, lrlX, lrlXT, lrlPxH)\n        lrlLo.judge(lrlPivL, lrlX, lrlXT, -lrlPxL)\n"
-                            "        lrlHi.advance()\n        lrlLo.advance()"),
+                            "        lrlHi.advanceLrl()\n        lrlLo.advanceLrl()"),
     "confirm before extend": ("        bool used = s.grow(X, XT, P)\n        if not used\n            used := s.promote(X, XT, P)",
                               "        bool used = s.promote(X, XT, P)\n        if not used\n            used := s.grow(X, XT, P)"),
     "spent pivots reused (seeding)": ("if not s.members.includes(xa) and not s.spent.includes(xa) and X - xa <= LRL_GAP",
@@ -61,6 +61,18 @@ def test_st17_passes_on_the_source():
 def test_mutation_is_caught(name):
     ok, detail = st17_lrl_rules(_mutate(MUTATIONS[name]))
     assert not ok, f"{name} was not caught: {detail}"
+
+
+def test_no_overloaded_names_ce10182():
+    """LRL-L00 failed on v0.5.0-dev with CE10182: LRL's `advance(LrlSide)` overloaded the frozen
+    FVG `advance(Fvg)`, and Pine forbids global variables inside overloaded user functions.
+    ST-18 passes now; putting the old name back (or any second declaration) is caught."""
+    from validation.static_checks import st18_no_overloaded_functions as st18
+    assert st18()[0], st18()[1]
+    back = SRC.replace("method advanceLrl(LrlSide s) =>", "method advance(LrlSide s) =>")
+    ok, detail = st18(back)
+    assert not ok and "['advance']" in detail
+    assert "method advance(Fvg z) =>" in SRC                       # the frozen FVG method is untouched
 
 
 def test_lrl_never_reads_phase1_or_phase2_state():

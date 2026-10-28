@@ -30,7 +30,7 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 | 0 | Architecture (7 layers, calculation independent of visibility) | adopted |
 | 1 | FVG engine, PDH/PDL, PWH/PWL, sessions, FVG alerts, diagnostics | **v0.3.2 frozen safety baseline · runtime 8/50 PASS, 1 FAIL (T03, re-test), 41 pending** |
 | 2 | Swing liquidity, BSL/SSL, taken, sweep vs break, EQH/EQL | **v0.4.4-dev FROZEN Phase 2 baseline (2026-10-28) · tag `PHASE2_BASELINE_v0.4.4-dev` · copy in `releases/v0.4.4-dev/` · significance C1 = reaction AND dominance (W 10/30/60) · TradingView L00, L45–L48 PASS (L48: 1,000-bar real-NQ parity, 0 DIFFERENCE); L01–L44 not recorded one by one · `docs/PHASE2_FREEZE_REPORT.md`** |
-| LRL | Diagonal failure-swing liquidity (detection only; target-quality context later) | **v0.5.0-dev EXPERIMENTAL (not frozen) · in Pine, oracle + validation 1.9.0 · terminal classes DRIFT / SWEEP / BREAK / EXPIRED · TradingView LRL-L00…L12 pending (`docs/TESTS_LRL.md`) · `docs/LRL.md`** |
+| LRL | Diagonal failure-swing liquidity (detection only; target-quality context later) | **v0.5.1-dev EXPERIMENTAL (not frozen; v0.5.0-dev failed to compile: CE10182, fixed) · in Pine, oracle + validation 1.9.1 · terminal classes DRIFT / SWEEP / BREAK / EXPIRED · TradingView LRL-L00…L12 pending (`docs/TESTS_LRL.md`) · `docs/LRL.md`** |
 | 3 | Displacement, CISD | design in Appendix A |
 | 4 | IFVG, HTF FVG | design in Appendix A |
 | 5 | Quality score, confluence dashboard, UX | later |

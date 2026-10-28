@@ -1,8 +1,10 @@
-# IST · LRL tests — v0.5.0-dev (EXPERIMENTAL)
+# IST · LRL tests — v0.5.1-dev (EXPERIMENTAL)
 
 **Status.** Automated validation: PASS, FULL (totals in `CHANGELOG.md`). TradingView: **all LRL-L tests PENDING**. They are recorded only from the user's results, never assumed. LRL is frozen only after **LRL-L11** (real Pine ↔ oracle parity) gives **0 DIFFERENCE**.
 
-**Build:** `src/IST.pine` v0.5.0-dev (branch `lrl/pine`). The definition is in `docs/LRL.md`.
+**Build:** `src/IST.pine` v0.5.1-dev (branch `lrl/pine`).
+
+**History:** v0.5.0-dev LRL-L00 **FAIL** (user, 2026-10-28): CE10182, an overloaded `advance` (FVG + LRL). Fixed in v0.5.1-dev (LRL method renamed `advanceLrl`; ST-18). LRL-L00 must be re-run. The definition is in `docs/LRL.md`.
 
 ## Automated (before TradingView)
 
@@ -13,11 +15,12 @@
 | S-LRL-3 | Pine event names = oracle event names, whole family, no exception | ST-14 | PASS |
 | S-LRL-4 | the LRL engine names no Phase 1 / 2 state and reads no [view] input | `tests/test_lrl_pine.py`, ST-01, ST-06 | PASS |
 | S-LRL-5 | the Parity capture writes every LRL key the parser reads; warm-up = 76 from the dependencies | `tests/test_parity_lrl.py` | PASS |
+| S-LRL-7 | no user function / method name declared twice (Pine CE10182) | ST-18 | PASS |
 | S-LRL-6 | bounded LRL parity: 0 DIFFERENCE on faithful synthetic captures; 8 kinds of error detected | `tests/test_parity_lrl.py` | PASS |
 
 ## TradingView procedure (NQ1! 1m unless stated; Confirmed only ON)
 
-Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.5.0-dev, save it, and add it to an NQ1! 1m chart.
+Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.5.1-dev, save it, and add it to an NQ1! 1m chart.
 
 | id | test | how | expected |
 |---|---|---|---|
@@ -33,7 +36,7 @@ Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.5.
 | LRL-L09 | timeframes | NQ1! 3m and 5m | runs; fewer LRLs; same behaviour |
 | LRL-L10 | Live mode | Confirmed only OFF, on a live session | LRL changes only at bar close (rows 36–37 and drawings do not change intrabar, except the projection following the current bar) |
 | LRL-L11 | **Pine ↔ oracle parity (freeze criterion)** | Confirmed only ON, Balanced, Debug can stay OFF. DEVELOPER → Parity capture ON, N = **1000**. Wait for `END\|bars=1076` in Pine Logs, save the logs (CSV) into `validation/parity/`, run `python -m validation.parity --capture validation/parity/<file>.csv`. Then capture OFF | the CAPTURE line has `lrl=1 … warmup=76`; **1,076 BAR lines** (1,000 + 76 warm-up). The report has an `LRL` section. **0 DIFFERENCE** over LRL events (type, side, id, bar, price, τ, points, boundaries) and per-bar boundaries / candidate counts, and the Phase 1 / 2 sections still 0 DIFFERENCE. NOT OBSERVABLE (expected, see below) |
-| LRL-L12 | alerts | an existing "Any alert() function call" alert | delivers exactly what it did in v0.4.4-dev: there are no LRL alerts in v0.5.0-dev |
+| LRL-L12 | alerts | an existing "Any alert() function call" alert | delivers exactly what it did in v0.4.4-dev: there are no LRL alerts in v0.5.x |
 
 **NOT OBSERVABLE in LRL-L11** (bounded window; the oracle starts empty at the first captured bar):
 * LRLs whose first point is in the first 14 captured bars (their τ needs the TR average there) or before the capture;

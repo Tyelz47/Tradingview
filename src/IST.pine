@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.5.0-dev · LRL (diagonal liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.5.1-dev · LRL (diagonal liquidity) development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -1176,7 +1176,9 @@ method finish(LrlSide s, Lrl r, int kind, float bNow, float bPrev) =>
 // y(t) + τ, else SWEEP. Else it expires once no further point can arrive, else a high
 // within τ of the line is a touch. An LRL is never judged on its confirmation bar.
 // Candidates that are crossed, expired or hold a spent point die silently.
-method advance(LrlSide s) =>
+// Not `advance`: the FVG engine's advance(Fvg) exists, and Pine forbids global variables
+// inside overloaded user functions (CE10182). No function or method name is shared (ST-18).
+method advanceLrl(LrlSide s) =>
     int   t  = bar_index
     float hi = s.hiS(t)
     float cl = s.sign * close
@@ -1836,8 +1838,8 @@ if engineTick
     //    TR average and pivots only. Decided at bar close in both modes: ADVANCE both
     //    sides with the geometry known before this bar, then JUDGE both sides. ──
     if lrlOn and barstate.isconfirmed
-        lrlHi.advance()
-        lrlLo.advance()
+        lrlHi.advanceLrl()
+        lrlLo.advanceLrl()
         lrlHi.judge(lrlPivH, lrlX, lrlXT, lrlPxH)
         lrlLo.judge(lrlPivL, lrlX, lrlXT, -lrlPxL)
 
