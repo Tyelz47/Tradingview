@@ -28,7 +28,7 @@ MANUAL = VALIDATION_DIR / "parity" / "manual_observed.txt"
 MATCH, DIFF, NOBS = "MATCH", "DIFFERENCE", "NOT OBSERVABLE"
 SECTIONS = ("settings", "candles", "summary", "events")
 
-FIELDS = ("PIVOTS", "PASS", "REJECT", "WARMUP", "CREATED")
+FIELDS = ("PIVOTS", "PASS", "REJECT", "WARMUP", "CREATED", "REJECT_REACTION", "REJECT_DOMINANCE", "REJECT_BOTH")
 COUNTS = ([f"SWING_{s}_{f}" for s in ("HIGH", "LOW") for f in FIELDS]                    # debug rows 22–23
           + [f"{s}_{f}" for s in ("BSL", "SSL") for f in ("ACTIVE", "TAKEN", "SWEEP", "BREAK")]  # rows 24–25
           + [f"{s}_{f}" for s in ("EQH", "EQL") for f in ("ACTIVE", "TAKEN", "BELOW_MIN")])     # row 26
@@ -235,6 +235,8 @@ def oracle_counts(m: IstModel) -> dict:
         act = sum(x.taken_bar is None for x in lv)
         out.update({f"SWING_{s}_PIVOTS": side.pivots, f"SWING_{s}_PASS": side.levels, f"SWING_{s}_REJECT": side.rejects,
                     f"SWING_{s}_WARMUP": side.pivots - side.levels - side.rejects, f"SWING_{s}_CREATED": side.levels,
+                    f"SWING_{s}_REJECT_REACTION": side.rej_react, f"SWING_{s}_REJECT_DOMINANCE": side.rej_dom,
+                    f"SWING_{s}_REJECT_BOTH": side.rej_both,
                     f"{side.name}_ACTIVE": act, f"{side.name}_TAKEN": len(lv) - act,
                     f"{side.name}_SWEEP": sum(x.taken_bar is not None and x.cls == SWEEP for x in lv),
                     f"{side.name}_BREAK": sum(x.taken_bar is not None and x.cls == BREAK for x in lv),
@@ -247,7 +249,8 @@ def oracle_counts(m: IstModel) -> dict:
 def _label(key: str) -> str:
     if key.startswith("SWING_"):
         s, f = key[6:].split("_", 1)
-        f = {"PIVOTS": "pivots", "WARMUP": "warm-up", "CREATED": "created"}.get(f, f)    # as the row prints them
+        f = {"PIVOTS": "pivots", "WARMUP": "warm-up", "CREATED": "created", "REJECT_REACTION": "REJECT reaction",
+             "REJECT_DOMINANCE": "REJECT dominance", "REJECT_BOTH": "REJECT both"}.get(f, f)   # as the row prints them
         return f"swing {s.lower()}s {f} (row {22 if s == 'HIGH' else 23})"
     s, f = key.split("_", 1)
     return f"{s} {f.lower().replace('_', ' ')} (row {24 if s == 'BSL' else 25 if s == 'SSL' else 26})"
@@ -278,9 +281,9 @@ def compare(man: dict, preset: str | None = None, base: Path = Path(".")) -> dic
         miss = [k for k in ("LEFT", "RIGHT", "REACTION") if k not in v]
         if miss:
             raise ValueError(f"PRESET=custom needs {', '.join(miss)}")
-        left, right, k = v["LEFT"], v["RIGHT"], v["REACTION"]
+        left, right, k, w = v["LEFT"], v["RIGHT"], v["REACTION"], 0      # Custom: no dominance window
     else:
-        left, right, k = PRESETS[name]
+        left, right, k, w = PRESETS[name]
         for key, want in zip(("LEFT", "RIGHT", "REACTION"), (left, right, k)):
             if key in v:
                 add("settings", MATCH if abs(v[key] - want) < 1e-9 else DIFF,
@@ -292,10 +295,11 @@ def compare(man: dict, preset: str | None = None, base: Path = Path(".")) -> dic
     if not (0 <= tol <= 200 and 2 <= touch <= 5):
         raise ValueError("EQ_TOLERANCE_TICKS must be 0–200 and EQ_MIN_TOUCHES 2–5 (the IST input ranges)")
     tf = _tf_seconds(v["TIMEFRAME"]) if "TIMEFRAME" in v else 60
-    settings = Settings.from_dict({"tick": tick, "liq": {"left": left, "right": right, "k": k, "tol_ticks": tol,
-                                                         "min_touch": touch},
+    settings = Settings.from_dict({"tick": tick, "liq": {"left": left, "right": right, "k": k, "dom": w,
+                                                         "tol_ticks": tol, "min_touch": touch},
                                    "sessions": {"timezone": tz, "timeframe_sec": tf}, "levels": {"timeframe_sec": tf}})
-    about = (f"preset {name} → left {left} · right {right} · k {k:g} · EQ tolerance {tol} ticks · minimum touches "
+    about = (f"preset {name} → left {left} · right {right} · k {k:g} · dominance {w or 'off'} · EQ tolerance {tol} "
+             f"ticks · minimum touches "
              f"{touch} · tick {tick:g} · {tz}; other IST inputs at their defaults")
 
     # summary: the debug rows must agree with themselves
@@ -308,6 +312,11 @@ def compare(man: dict, preset: str | None = None, base: Path = Path(".")) -> dic
         if None not in (g["PASS"], g["CREATED"]):
             add("summary", MATCH if g["PASS"] == g["CREATED"] else DIFF,
                 f"swing {s.lower()}s: {lv} created {g['CREATED']} = PASS {g['PASS']} (internal)")
+        why = (g["REJECT_REACTION"], g["REJECT_DOMINANCE"], g["REJECT_BOTH"])
+        if g["REJECT"] is not None and None not in why:
+            add("summary", MATCH if g["REJECT"] == sum(why) else DIFF,
+                f"swing {s.lower()}s: REJECT {g['REJECT']} = reaction {why[0]} + dominance {why[1]} + both {why[2]} "
+                f"(internal)")
 
     # candles: the oracle needs the chart's bars; they must be Pine's loaded history
     hs, he = _local(v.get("HISTORY_START"), tz), _local(v.get("HISTORY_END"), tz)

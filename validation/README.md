@@ -144,7 +144,7 @@ There are three levels, and the report never mixes them:
 | TradingView plan | paid (*Export chart data*) | free | free |
 | Input | one CSV export | `pine_capture.csv` (the Pine Logs file TradingView saves) or `.txt` (pasted): an IST *Parity capture* | `manual_observed.txt`: values and event lines copied by hand |
 | Candles for the oracle | in the export | in the capture (exact, rebuilt from the BAR lines) | a separate OHLC file you supply (`CANDLES=`) |
-| Compared | 9 Data Window series on every bar | 7 per-bar series on every bar after the warm-up, and the events of structures born inside the window | only what you copy: settings, debug-row counts, the listed events |
+| Compared | 11 Data Window series on every bar | 9 per-bar series (7 before v0.4.4-dev) on every bar after the warm-up, and the events of structures born inside the window | only what you copy: settings, debug-row counts, the listed events |
 | A PASS means | Pine and the oracle agree on every exported bar | they agree on that window; nothing about earlier history | no difference in what you copied |
 
 ### Full CSV bar-by-bar parity (Data Window export)
@@ -178,6 +178,7 @@ Compared on every bar except the last exported bar, which may still be open:
 | `liq_required` | LIQ required reaction (points) | k × TR average at the swing bar |
 | `bsl_reaction` / `ssl_reaction` | LIQ reaction of that swing | the created level's reaction (on PASS bars) |
 | `bsl_take` / `ssl_take` | LIQ BSL/SSL take on this bar (0 · 1 sweep · 2 break) | SWEEP/BREAK events on the bar (break wins) |
+| `bsl_dominance` / `ssl_dominance` | LIQ dominance: highest high / lowest low of the W bars before the swing (v0.4.4-dev) | `dominance_ref()` of the swing judged on the bar |
 
 Integer codes must be equal. Prices may differ by up to 1e-4 points, because the export may round. The export's `syminfo.mintick` column must equal the tick size.
 
@@ -187,14 +188,14 @@ Integer codes must be equal. Prices may differ by up to 1e-4 points, because the
 
 ### Bounded Pine-Log bar-by-bar parity (free plan)
 
-IST v0.4.3-dev has a debug-only input, **Parity capture → Pine Logs** (default OFF), with **Capture last N closed bars** (default 300, 50–2,000). When it is ON, IST writes to Pine Logs:
+IST (since v0.4.3-dev) has a debug-only input, **Parity capture → Pine Logs** (default OFF), with **Capture last N closed bars** (default 300, 50–2,000). When it is ON, IST writes to Pine Logs:
 
 ```text
-CAPTURE|sym=CME_MINI:NQ1!|tf=1|tick=0.25|tz=America/New_York|confirmed=1|liq=1|preset=Balanced|left=5|right=3|k=1|…|bars=300|warmup=17
-BAR|2026-10-27T10:31:00-0400|i=10234|O=21345.25|H=21347|L=21344.5|C=21346.75|FV=0|FR=1.0357|SH=0|SL=2|RH=na|RL=6.25|RQ=4.0179
+CAPTURE|sym=CME_MINI:NQ1!|tf=1|tick=0.25|tz=America/New_York|confirmed=1|liq=1|preset=Balanced|left=5|right=3|k=1|w=30|…|bars=300|warmup=33
+BAR|2026-10-27T10:31:00-0400|i=10234|O=21345.25|H=21347|L=21344.5|C=21346.75|FV=0|FR=1.0357|SH=0|SL=2|RH=na|RL=6.25|RQ=4.0179|DH=21351.5|DL=21302.25
 2026-10-27 10:31  SSL_CREATED id=2026-10-27 10:28 px=21340.50 · reaction 1.56×TR ≥ 1
 …
-END|bars=317
+END|bars=333
 ```
 
 * **CAPTURE** holds every calculation setting the oracle needs: the liquidity and EQ inputs, the FVG thresholds and memories, the session windows and the timezone. Nothing has to be typed.
@@ -204,6 +205,7 @@ END|bars=317
   * FVG verdict `FV` (±2 created, ±1 rejected, 0) and required gap `FR`;
   * swing verdicts `SH`/`SL` (2 PASS, 1 REJECT, 0 none);
   * reactions `RH`/`RL` on pivot bars;
+  * dominance references `DH`/`DL` (v0.4.4-dev): the highest high / lowest low of the W bars before the swing judged on this bar;
   * required reaction `RQ` (k × TR average).
 * After each BAR line come that bar's **events**, in the Pine Logs event format.
 * **Only closed bars** are logged. Logging is **bounded**: N + warm-up bars, then END, then nothing more, even in realtime. With the capture ON, events are logged for the captured bars only.
@@ -229,12 +231,14 @@ python -m validation.parity --capture validation/parity/pine_capture.csv
 * a malformed timestamp;
 * a CSV without a Message column, or malformed CSV.
 
-**Warm-up.** The oracle sees only the captured bars, so its first bars lack history: its TR on the first bar has no previous close, and the first pivots lack their left window. IST therefore captures the warm-up automatically (`warmup` = max(FVG length + 2, max(14, left) + right) = 17 for Balanced, 19 for Strict, 16 for Aggressive), and none of it is compared:
+**Warm-up.** The oracle sees only the captured bars, so its first bars lack history: its TR on the first bar has no previous close, and the first pivots lack their left window. IST therefore captures the warm-up automatically. It is derived from the dependency graph (`FvgSettings.lookback`, `LiqSettings.lookback`): `warmup` = max(FVG length + 2, max(14, left, W) + right). On v0.4.4-dev that is 33 for Balanced, 65 for Strict and 16 for Aggressive; before C1 it was 17 / 19 / 16. None of it is compared:
 
 | Compared from capture bar | Series |
 |---|---|
 | FVG length + 2 | FVG verdict, required gap |
-| max(14, left) + right | swing verdicts, reactions (on PASS bars), required reaction |
+| max(14, left, W) + right | swing verdicts, reactions (on PASS bars), required reaction, dominance references |
+
+A capture without `w=` (IST before v0.4.4-dev) is replayed with the definition its build used, reaction only, and its dominance series are NOT OBSERVABLE. The committed v0.4.3-dev capture is preserved this way.
 
 **Events.** Only structures born inside the comparable region are compared. These are FVGs whose candle 3 is after the FVG warm-up, levels whose swing bar is after the liquidity warm-up, and sessions that start inside the window. For each, the check covers type, direction, id, time and price, an event logged twice, an extra event and a missing event. Everything the oracle cannot know is **NOT OBSERVABLE** and never compared:
 * levels and FVGs born before the window, or in its warm-up, including their takes, sweeps and breaks inside the window;

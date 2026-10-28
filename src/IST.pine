@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.4.3-dev · Phase 2 (liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.4.4-dev · Phase 2 (liquidity) development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -88,7 +88,7 @@ TT_PREV = "[view] Provisional, CAN REPAINT. Draws the gap the unfinished candle 
 TT_ANCH = "[view] ON: line starts at the bar that printed the extreme, when that is verifiable from loaded bars. Otherwise it starts where the level became known (period start)."
 TT_SES  = "[calc] IANA timezone for session windows and the midnight open (DST handled by TradingView). Session windows are [calc]; every other setting in this group is [view]. Hidden sessions are still tracked."
 TT_ALT  = "[alert] Bar close: one message per bar, at the close, listing that bar's events.\nIntrabar (experimental): each event fires once, the moment it is logged. Needs Confirmed only = OFF. Close-dependent events still fire at the close.\nCreate the alert with condition 'Any alert() function call'."
-TT_LPRE = "[calc] Each preset is three fixed numbers, nothing else:\nAggressive · left 3 · right 2 · reaction ≥ 0.5 × TR average\nBalanced · left 5 · right 3 · reaction ≥ 1.0 × TR average\nStrict · left 10 · right 5 · reaction ≥ 2.0 × TR average\nCustom · the three inputs below."
+TT_LPRE = "[calc] Each preset is four fixed numbers, nothing else:\nAggressive · left 3 · right 2 · reaction ≥ 0.5 × TR average · dominance 10 bars\nBalanced · left 5 · right 3 · reaction ≥ 1.0 × TR average · dominance 30 bars\nStrict · left 10 · right 5 · reaction ≥ 2.0 × TR average · dominance 60 bars\nCustom · the three inputs below, no dominance.\nDominance: no high above the swing high + EQ tolerance in the W bars before the swing bar (lows mirrored)."
 TT_LWIN = "[calc] Custom only. Swing high at bar X: its high is above every high of the `left` bars before X and at or above every high of the `right` bars after X (swing low mirrored). It is known only when bar X + right closes: that bar is its confirmation."
 TT_LREA = "[calc] Custom only. Reaction = how far price moved away from the swing during the `right` confirmation bars (swing high − lowest low of those bars; mirrored for lows), in multiples of the TR average (14) at the swing bar. 0 = every confirmed swing becomes liquidity."
 TT_LMEM = "[calc] Liquidity records kept per side (BSL, SSL), active and taken. Over the limit, the oldest closed taken record goes first, then the oldest live one. Each removal logs BSL/SSL_DROPPED_MEMORY."
@@ -264,7 +264,8 @@ string PD_STYLE   = f_lineStyle(pdSty)
 string PW_STYLE   = f_lineStyle(pwSty)
 bool   showLiqTxt = liqLabels and not minimalMode
 
-// DEF-L3: every sensitivity preset is exactly three numbers (left, right, k).
+// DEF-L3: every sensitivity preset is exactly four numbers (left, right, k, W). W is
+// the DEF-L2 dominance window (C1, v0.4.4-dev); Custom has no W input: W = 0, off.
 int LIQ_L = switch liqPreset
     LiqPreset.aggressive => 3
     LiqPreset.balanced   => 5
@@ -280,6 +281,11 @@ float LIQ_K = switch liqPreset
     LiqPreset.balanced   => 1.0
     LiqPreset.strict     => 2.0
     => liqReactIn
+int LIQ_W = switch liqPreset
+    LiqPreset.aggressive => 10
+    LiqPreset.balanced   => 30
+    LiqPreset.strict     => 60
+    => 0
 float EQ_TOL = eqTolTk * syminfo.mintick
 
 // ════ TYPES ════════════════════════════════════════════════════════════════════
@@ -412,7 +418,10 @@ type LiqSide
     array<EqCluster> eqs          // active and taken clusters, oldest first
     float            trig         // nearest price at which a live record changes; na = none live
     int              pivots = 0   // confirmed pivots, significant or not
-    int              rejects = 0  // pivots judged and failing the reaction floor (warm-up pivots are neither)
+    int              rejects = 0  // pivots judged and failing significance (warm-up pivots are neither)
+    int              rejReact = 0 // … by reason, disjoint: reaction only, dominance only, both
+    int              rejDom = 0
+    int              rejBoth = 0
     int              levels = 0   // pivots that passed the significance filter (each one creates a level)
     int              dropLive = 0
     int              dropHist = 0
@@ -541,15 +550,30 @@ float swHiPx   = high[LIQ_R]
 float swLoPx   = low[LIQ_R]
 bool  pivHi    = swHiPx > hiL[LIQ_R + 1] and swHiPx >= hiR
 bool  pivLo    = swLoPx < loL[LIQ_R + 1] and swLoPx <= loR
-// DEF-L2: significance = rejection. Within the confirmation window, price must have
-// moved away from the swing by at least k × TR average (taken at X). Only data up to
-// t is used. A reference still warming up is na and rejects.
+// DEF-L2: significance = rejection AND dominance (C1, v0.4.4-dev).
+// (a) Rejection: within the confirmation window, price moved away from the swing by at
+//     least k × TR average (taken at X).
+// (b) Dominance: no high in the W bars BEFORE the swing bar (X−W … X−1; the right bars
+//     are not part of it) above the swing high + EQ tolerance (lows mirrored). Only a
+//     strictly greater extreme rejects; EPS is the float margin EQ clustering uses.
+// Only data up to t is used. A reference still warming up (TR average, or fewer than W
+// bars before X) is na: the pivot is warm-up, neither PASS nor REJECT.
 float swTra    = liqTra[LIQ_R]
 float reactReq = LIQ_K * swTra
 float reactHi  = swHiPx - loR
 float reactLo  = hiR - swLoPx
-bool  sigHi    = pivHi and reactHi >= reactReq
-bool  sigLo    = pivLo and reactLo >= reactReq
+float domHiAll = ta.highest(high, math.max(LIQ_W, 1))
+float domLoAll = ta.lowest(low, math.max(LIQ_W, 1))
+bool  domReady = LIQ_W > 0 and swBar >= LIQ_W
+float domHiRef = domReady ? domHiAll[LIQ_R + 1] : na    // highest high of bars X−W … X−1
+float domLoRef = domReady ? domLoAll[LIQ_R + 1] : na    // lowest low of bars X−W … X−1
+bool  liqWarm  = na(reactReq) or (LIQ_W > 0 and not domReady)
+bool  reactHiOk = reactHi >= reactReq
+bool  reactLoOk = reactLo >= reactReq
+bool  domHiOk  = LIQ_W == 0 or domHiRef <= swHiPx + EQ_TOL + EPS
+bool  domLoOk  = LIQ_W == 0 or domLoRef >= swLoPx - EQ_TOL - EPS
+bool  sigHi    = pivHi and not liqWarm and reactHiOk and domHiOk
+bool  sigLo    = pivLo and not liqWarm and reactLoOk and domLoOk
 
 // ════ L5 · EVENT BUS ═══════════════════════════════════════════════════════════
 
@@ -1368,14 +1392,20 @@ if engineTick
                 bslS.pivots := bslS.pivots + 1
                 if sigHi
                     bslS.register(swHiPx, swBar, swTime, reactHi, reactReq, swTra)
-                else if not na(reactReq)
+                else if not liqWarm
                     bslS.rejects := bslS.rejects + 1
+                    bslS.rejReact := bslS.rejReact + (not reactHiOk and domHiOk ? 1 : 0)
+                    bslS.rejDom := bslS.rejDom + (reactHiOk and not domHiOk ? 1 : 0)
+                    bslS.rejBoth := bslS.rejBoth + (not reactHiOk and not domHiOk ? 1 : 0)
             if pivLo
                 sslS.pivots := sslS.pivots + 1
                 if sigLo
                     sslS.register(swLoPx, swBar, swTime, reactLo, reactReq, swTra)
-                else if not na(reactReq)
+                else if not liqWarm
                     sslS.rejects := sslS.rejects + 1
+                    sslS.rejReact := sslS.rejReact + (not reactLoOk and domLoOk ? 1 : 0)
+                    sslS.rejDom := sslS.rejDom + (reactLoOk and not domLoOk ? 1 : 0)
+                    sslS.rejBoth := sslS.rejBoth + (not reactLoOk and not domLoOk ? 1 : 0)
 
 // ════ L6 · RENDERER (run) ══════════════════════════════════════════════════════
 
@@ -1617,7 +1647,7 @@ f_eqState(LiqSide s) =>
 // Selectivity on the loaded history: pivots → significance PASS / REJECT → levels.
 f_selectivity(LiqSide s) =>
     int judged = s.levels + s.rejects
-    str.tostring(s.pivots) + " pivots · PASS " + str.tostring(s.levels) + " · REJECT " + str.tostring(s.rejects) + (judged > 0 ? " (" + str.tostring(100.0 * s.rejects / judged, "#.#") + "%)" : "") + " · warm-up " + str.tostring(s.pivots - judged) + " → " + str.tostring(s.levels) + (s.isBsl ? " BSL" : " SSL") + " created"
+    str.tostring(s.pivots) + " pivots · PASS " + str.tostring(s.levels) + " · REJECT " + str.tostring(s.rejects) + (judged > 0 ? " (" + str.tostring(100.0 * s.rejects / judged, "#.#") + "%)" : "") + " = reaction " + str.tostring(s.rejReact) + " + dominance " + str.tostring(s.rejDom) + " + both " + str.tostring(s.rejBoth) + " · warm-up " + str.tostring(s.pivots - judged) + " → " + str.tostring(s.levels) + (s.isBsl ? " BSL" : " SSL") + " created"
 
 // Cluster of one level: identity, reference vs current boundary, membership.
 f_eqTxt(EqCluster c) =>
@@ -1659,16 +1689,20 @@ f_takeCode(int dir) =>
 f_cap(float x) =>
     na(x) ? "na" : str.tostring(x, "#.########")
 
-int  capWarm  = math.max(fvgLen + 2, math.max(LIQ_TRA_LEN, LIQ_L) + LIQ_R)
+// Warm-up = the dependency graph of the compared values: an FVG verdict at t needs
+// fvgLen true ranges ending at t − 2 (plus the close before them); a swing verdict at
+// t = X + R needs, before X, the TR average (LIQ_TRA_LEN), the left window and the
+// dominance window. Same formula as validation/models/types.py (lookback).
+int  capWarm  = math.max(fvgLen + 2, math.max(LIQ_TRA_LEN, LIQ_L, LIQ_W) + LIQ_R)
 int  capTotal = capN + capWarm
 var int capDone = 0
 bool capBar   = capOn and barstate.isconfirmed and bar_index > last_bar_index - capTotal and capDone < capTotal
 if capBar
     if capDone == 0
-        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
     capDone += 1
     int fv = bullCand ? 2 : rawBull ? 1 : bearCand ? -2 : rawBear ? -1 : 0
-    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq))
+    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef))
 if barstate.isconfirmed and (capOn ? capBar : dbgOn)
     for e in barEv
         log.info(str.format_time(e.eventTime, "yyyy-MM-dd HH:mm", sesTz) + "  " + f_evText(e))
@@ -1708,7 +1742,7 @@ if dbgOn and barstate.islast
         f_dbgRow(19, "policy: " + f_ruleName(), q.activeAt(bar_index) ? "ACTIVE (not met)" : "MET " + f_mt(q.policyTime()))
         f_dbgRow(20, "record", (na(q.invBar) ? "OPEN" : "CLOSED (invalidated)") + " · fill " + str.tostring(math.round(q.fillPct() * 100)) + "% · age " + str.tostring(q.age()) + "b · drawn " + (na(q.zone) ? "no" : "yes"))
     // ── liquidity (Phase 2) ──
-    f_dbgRow(21, "Liquidity engine", liqOn ? "ON · " + f_presetName() + " → left " + str.tostring(LIQ_L) + " · right " + str.tostring(LIQ_R) + " · reaction ≥ " + str.tostring(LIQ_K, "#.##") + " × TR(" + str.tostring(LIQ_TRA_LEN) + ") · EQ tol " + str.tostring(eqTolTk) + " ticks · min " + str.tostring(eqMinTch) : "OFF")
+    f_dbgRow(21, "Liquidity engine", liqOn ? "ON · " + f_presetName() + " → left " + str.tostring(LIQ_L) + " · right " + str.tostring(LIQ_R) + " · reaction ≥ " + str.tostring(LIQ_K, "#.##") + " × TR(" + str.tostring(LIQ_TRA_LEN) + ") · dominance " + (LIQ_W > 0 ? str.tostring(LIQ_W) + " bars" : "off") + " · EQ tol " + str.tostring(eqTolTk) + " ticks · min " + str.tostring(eqMinTch) : "OFF")
     f_dbgRow(22, "Swing highs (loaded history)", f_selectivity(bslS))
     f_dbgRow(23, "Swing lows (loaded history)", f_selectivity(sslS))
     f_dbgRow(24, "BSL", f_liqSideState(bslS))
@@ -1758,5 +1792,7 @@ plot(dbgLiq ? (sigLo ? 2 : pivLo ? 1 : 0) : na, "dbg · LIQ swing low judged her
 plot(dbgLiq and pivHi ? reactHi : na, "dbg · LIQ reaction of that swing high (points)", color = #787B86, display = display.data_window, editable = false)
 plot(dbgLiq and pivLo ? reactLo : na, "dbg · LIQ reaction of that swing low (points)", color = #787B86, display = display.data_window, editable = false)
 plot(dbgLiq ? reactReq : na, "dbg · LIQ required reaction = k × TR average at swing bar (points)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgLiq ? domHiRef : na, "dbg · LIQ dominance: highest high of the W bars before the swing (points)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgLiq ? domLoRef : na, "dbg · LIQ dominance: lowest low of the W bars before the swing (points)", color = #787B86, display = display.data_window, editable = false)
 plot(dbgLiq ? f_takeCode(1) : na, "dbg · LIQ BSL take on this bar (0 · 1 sweep · 2 break · 3 taken, bar open)", color = #787B86, display = display.data_window, editable = false)
 plot(dbgLiq ? f_takeCode(-1) : na, "dbg · LIQ SSL take on this bar (0 · 1 sweep · 2 break · 3 taken, bar open)", color = #787B86, display = display.data_window, editable = false)

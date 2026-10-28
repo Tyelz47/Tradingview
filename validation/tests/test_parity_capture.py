@@ -26,7 +26,7 @@ TZ = "America/New_York"
 SYM = '={"backadjustment":"default","settlement-as-close":true,"symbol":"CME_MINI:NQ1!"}'
 HEAD = ("CAPTURE|sym=" + SYM.replace("{", "{{").replace("}", "}}")
         + "|tf=1|tick=0.25|tz=America/New_York|confirmed=1|liq=1|preset={preset}|left={l}|right={r}"
-        "|k={k}|eqtol=4|eqmin=2|liqmem=100|fvgticks=2|fvgtra=0.1|fvgrng=0|fvglen=14|fvgmem=50"
+        "|k={k}|w={dw}|eqtol=4|eqmin=2|liqmem=100|fvgticks=2|fvgtra=0.1|fvgrng=0|fvglen=14|fvgmem=50"
         "|ses=Asia@2000-0000,London@0200-0500,NY AM@0930-1200,NY PM@1330-1600|bars={n}|warmup={w}")
 FIXTURE = Path(__file__).parent / "fixtures" / "pine_logs_capture_synthetic.csv"
 MINUTE = 60_000
@@ -34,6 +34,12 @@ MINUTE = 60_000
 
 def _n(x):
     return "na" if x is None else (f"{x:.8f}".rstrip("0").rstrip(".") or "0")
+
+
+def _warm(preset="balanced") -> int:
+    """Capture warm-up from the dependency graph (Pine capWarm): Balanced 33 since C1."""
+    s = Settings.from_dict({"liq": {"preset": preset}})
+    return max(s.fvg.lookback, s.liq.lookback + s.liq.right)
 
 
 @lru_cache(maxsize=None)
@@ -48,14 +54,15 @@ def _capture(seed=7, bars=1500, n=300, preset="balanced", end=True, first_i=None
     """The Pine Logs messages IST writes for the last n closed bars (+ warm-up), oldest
     first, as (bar open time, message). `first_i` / `at` relabel the window's first bar
     index and move its open time, as on a real chart."""
-    w = max(16, max(14, PRESETS[preset][0]) + PRESETS[preset][1])
+    w = _warm(preset)
     a = bars - (n + w)
     cs, s, series, events = _history(seed, bars, preset, price, at - a * MINUTE if at else None)
     off = (first_i - a) if first_i is not None else 0
     by_bar = {}
     for e in events:
         by_bar.setdefault(e.bar, []).append(e)
-    out = [(cs[a].time, HEAD.format(preset=preset.title(), l=s.liq.left, r=s.liq.right, k=_n(s.liq.k), n=n, w=w))]
+    out = [(cs[a].time, HEAD.format(preset=preset.title(), l=s.liq.left, r=s.liq.right, k=_n(s.liq.k), dw=s.liq.dom,
+                                    n=n, w=w))]
     for t in range(a, len(cs)):
         c = cs[t]
         ts = datetime.fromtimestamp(c.time / 1000, ZoneInfo(TZ)).strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -79,7 +86,9 @@ def _tv_csv(rows, crlf=False, bom=False):
 
 def write_fixture():
     """Regenerate tests/fixtures/pine_logs_capture_synthetic.csv (synthetic candles, real
-    TradingView file shape: first bar i=16190 at 2026-10-27 10:50 New York)."""
+    TradingView file shape: first bar i=16190 at 2026-10-27 10:50 New York). The committed
+    file has the v0.4.3-dev shape (no w=, no DH/DL); regenerating now writes the v0.4.4-dev
+    shape, so the fixture test's numbers would change with it."""
     at = int(datetime(2026, 10, 27, 10, 50, tzinfo=ZoneInfo(TZ)).timestamp() * 1000)
     FIXTURE.parent.mkdir(exist_ok=True)
     FIXTURE.write_bytes(_tv_csv(_capture(seed=21, first_i=16190, price=29664.5, at=at)).encode("utf-8"))
@@ -101,9 +110,11 @@ def test_valid_bar_lines_parse():
     lines = _capture()
     cap = capture.parse("\n".join(lines))
     cs, s, series, _ = _history()
-    assert len(cap["bars"]) == 300 + 17 and cap["end"] == 317 and cap["head"]["preset"] == "Balanced"
+    W = _warm()
+    assert W == 33 and len(cap["bars"]) == 300 + W and cap["end"] == 300 + W and cap["head"]["preset"] == "Balanced"
+    assert cap["head"]["w"] == "30" and set(cap["bars"][0]["vals"]) == set(capture.FIELDS.values())
     first = cap["bars"][0]
-    assert first["candle"] == cs[len(cs) - 317] and first["i"] == len(cs) - 317
+    assert first["candle"] == cs[len(cs) - 300 - W] and first["i"] == len(cs) - 300 - W
     assert first["vals"]["liq_required"] == pytest.approx(series["liq_required"][first["i"]], abs=1e-8)
     # as copied from the Pine Logs pane: its own timestamp in front, CRLF, UI text around
     pane = ["Pine Logs", ""] + [f"[2026-10-26T18:59:00.000-04:00]: {ln}" for ln in lines] + ["Load more"]
@@ -189,12 +200,12 @@ def test_header_and_end_are_checked():
     lines = _capture()
     with pytest.raises(ValueError, match="no CAPTURE line"):
         capture.parse("\n".join(lines[1:]))
-    with pytest.raises(ValueError, match="END says 317 bars but 316"):
+    with pytest.raises(ValueError, match="END says 333 bars but 332"):
         capture.parse("\n".join(lines[:1] + lines[2:]))
     with pytest.raises(ValueError, match="no END line: the last bar was still open"):
         capture.parse("\n".join(_capture(end=False)))                 # last bar still open, or the copy is cut
     short = [re.sub(r"bars=300", "bars=299", lines[0])] + lines[1:]
-    with pytest.raises(ValueError, match=r"317 BAR lines, but the CAPTURE line expects 316 \(bars 299 \+ warm-up 17\)"):
+    with pytest.raises(ValueError, match=r"333 BAR lines, but the CAPTURE line expects 332 \(bars 299 \+ warm-up 33\)"):
         capture.parse("\n".join(short))
     with pytest.raises(ValueError, match="preset Balanced but --preset strict"):
         _run(lines, preset="strict")
@@ -215,11 +226,11 @@ def test_tradingview_csv_capture_works():
     cap = capture.parse(_tv_csv(rows))
     assert _same(cap, plain) and cap["source"].startswith("TradingView Pine Logs CSV") and plain["source"] == "pasted text"
     assert cap["head"]["sym"] == SYM                                  # doubled quotes undone, commas kept
-    assert cap["head"]["warmup"] == "17" and cap["head"]["bars"] == "300" and cap["end"] == 317
+    assert cap["head"]["warmup"] == "33" and cap["head"]["bars"] == "300" and cap["end"] == 333
     assert cap["head"]["ses"] == "Asia@2000-0000,London@0200-0500,NY AM@0930-1200,NY PM@1330-1600"
-    assert cap["bars"][0]["i"] == 16190 and cap["bars"][-1]["i"] == 16190 + 316
+    assert cap["bars"][0]["i"] == 16190 and cap["bars"][-1]["i"] == 16190 + 332
     r = capture.compare(cap)
-    assert r["differences"] == 0 and r["warmup"] == 17 and r["symbol"] == "CME_MINI:NQ1!", _diffs(r)
+    assert r["differences"] == 0 and r["warmup"] == 33 and r["symbol"] == "CME_MINI:NQ1!", _diffs(r)
 
 
 @pytest.mark.parametrize("crlf, bom", [(True, False), (False, True), (True, True)])
@@ -236,7 +247,7 @@ def test_csv_rows_pasted_without_their_header():
 
 def test_regression_fixture_real_tradingview_shape():
     """The committed fixture has the shape of the file TradingView saves (synthetic
-    candles; regenerate with write_fixture())."""
+    candles, v0.4.3-dev lines: no w=, no DH/DL, so it replays without dominance)."""
     raw = FIXTURE.read_text(encoding="utf-8")
     assert raw.startswith("Date,Message\n2026-10-27T14:50:00.000-00:00,\"CAPTURE|sym==" + '{""backadjustment"":""default""')
     assert '\n2026-10-27T14:50:00.000-00:00,"BAR|2026-10-27T10:50:00-0400|i=16190|O=' in raw
@@ -337,16 +348,39 @@ def test_command_line_exit_codes(tmp_path, capsys):
     assert "TradingView Pine Logs CSV (Date,Message)" in capsys.readouterr().out
 
 
-def test_real_nq_capture_parity_is_preserved():
-    """The 1,000-bar TradingView capture of IST v0.4.3-dev (NQ1! 1m, Balanced, 2026-10-27,
-    committed in validation/studies/data) still matches the oracle. A change of the
-    significance definition is expected to break this test: it then needs a new capture."""
+def test_v043_capture_parity_is_preserved_under_its_own_definition():
+    """Historical evidence, versioned: the 1,000-bar TradingView capture of IST v0.4.3-dev
+    (NQ1! 1m, Balanced, 2026-10-27, committed in validation/studies/data, never rewritten)
+    has no w= in its CAPTURE line, so it is replayed with the definition that build used
+    (reaction only, no dominance) and must still match Pine exactly."""
     from validation.studies.liquidity_significance import DATA
     r = capture.compare(capture.parse(DATA.read_text(encoding="utf-8")))
     assert r["differences"] == 0, _diffs(r)
-    assert (r["compared_bars"], r["matched_events"], r["warmup"]) == (1000, 1258, 17)
+    assert (r["compared_bars"], r["matched_events"], r["warmup"], r["series"]) == (1000, 1258, 17, 7)
     assert r["totals"]["pine"]["swing highs"] == "71 PASS · 7 REJECT" == r["totals"]["oracle"]["swing highs"]
     assert r["totals"]["pine"]["swing lows"] == "68 PASS · 1 REJECT" == r["totals"]["oracle"]["swing lows"]
+    assert any("W: not in this capture" in c["text"] and c["status"] == manual.NOBS for c in r["checks"])
+
+
+def test_v043_capture_under_c1_differs_only_by_the_expected_definition_change():
+    """The same capture forced to C1 (W = 30): every difference is one C1 intends. Pine
+    v0.4.3 kept a swing (verdict 2) that C1 rejects (1), and the Pine events of those
+    levels (CREATED / TAKEN / SWEEP / BREAK) have no oracle counterpart. Nothing else
+    differs: no swing appears that Pine rejected, no event is missing in Pine, no FVG,
+    reaction or required-reaction value changes."""
+    from validation.studies.liquidity_significance import DATA
+    cap = capture.parse(DATA.read_text(encoding="utf-8"))
+    cap["head"]["w"] = "30"
+    r = capture.compare(cap)
+    d = _diffs(r)
+    bars = [x for x in d if "verdict" in x]
+    events = [x for x in d if "not in the oracle" in x]
+    assert d and len(bars) + len(events) == len(d) - sum("W:" in x for x in d), d[:5]
+    assert all(re.search(r"swing (high|low) verdict: Pine 2\.0 · oracle 1$", x) for x in bars), bars[:5]
+    assert all(re.search(r" (BSL|SSL)_(CREATED|TAKEN|SWEEP|BREAK) ", x) for x in events), events[:5]
+    created = [x for x in events if "_CREATED" in x]
+    assert len(created) == len(bars), (len(created), len(bars))       # one removed level per changed verdict
+    assert not any("missing in Pine" in x for x in d)
 
 
 def test_capture_observed_tradingview_data():

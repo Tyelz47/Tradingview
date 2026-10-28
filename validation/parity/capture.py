@@ -30,10 +30,13 @@ SECTIONS = ("settings", "bars", "events")
 # BAR key → oracle series (parity.SERIES). The take codes are left out on purpose: on one
 # bar a level born before the window can be taken too, and the oracle cannot know it.
 FIELDS = {"FV": "fvg_verdict", "FR": "fvg_required", "SH": "bsl_pivot", "SL": "ssl_pivot",
-          "RH": "bsl_reaction", "RL": "ssl_reaction", "RQ": "liq_required"}
+          "RH": "bsl_reaction", "RL": "ssl_reaction", "RQ": "liq_required",
+          "DH": "bsl_dominance", "DL": "ssl_dominance"}
+NEW_IN_044 = {"DH", "DL"}      # absent from captures of IST builds before v0.4.4-dev (C1)
 LABELS = {"fvg_verdict": "FVG verdict", "fvg_required": "FVG required gap", "bsl_pivot": "swing high verdict",
           "ssl_pivot": "swing low verdict", "bsl_reaction": "swing high reaction",
-          "ssl_reaction": "swing low reaction", "liq_required": "required reaction"}
+          "ssl_reaction": "swing low reaction", "liq_required": "required reaction",
+          "bsl_dominance": "dominance reference high", "ssl_dominance": "dominance reference low"}
 HEAD = ("tick", "tz", "confirmed", "liq", "preset", "left", "right", "k", "eqtol", "eqmin", "liqmem",
         "fvgticks", "fvgtra", "fvgrng", "fvglen", "fvgmem", "ses", "bars", "warmup")
 _TOKEN = re.compile(r"\b(CAPTURE|BAR|END)\|(.*)$")
@@ -67,7 +70,7 @@ def _bar(parts: list[str], tick: float | None) -> dict:
         t = int(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z").timestamp() * 1000)
     except ValueError:
         raise ValueError(f"malformed timestamp {ts!r} (expected yyyy-MM-ddTHH:mm:ss±hhmm)") from None
-    miss = [k for k in ("i", "O", "H", "L", "C", *FIELDS) if k not in kv]
+    miss = [k for k in ("i", "O", "H", "L", "C", *FIELDS) if k not in kv and k not in NEW_IN_044]
     if miss:
         raise ValueError(f"missing {', '.join(miss)}")
     ohlc = [_num(k, kv[k]) for k in "OHLC"]
@@ -78,7 +81,8 @@ def _bar(parts: list[str], tick: float | None) -> dict:
                           if tick and abs(v / tick - round(v / tick)) > 1e-6]
     if bad:
         raise ValueError(f"wrong OHLC: {'; '.join(bad)}")
-    return {"i": int(kv["i"]), "time": t, "candle": c, "vals": {s: _num(k, kv[k]) for k, s in FIELDS.items()}}
+    return {"i": int(kv["i"]), "time": t, "candle": c,
+            "vals": {s: _num(k, kv[k]) for k, s in FIELDS.items() if k in kv}}
 
 
 def _messages(text: str) -> tuple[list[tuple[int, str, str | None]], str]:
@@ -262,8 +266,9 @@ def settings_of(h: dict) -> tuple[Settings, bool]:
     s = {"tick": float(h["tick"]),
          "fvg": {"min_ticks": int(h["fvgticks"]), "k_tra": float(h["fvgtra"]), "k_rng": float(h["fvgrng"]),
                  "length": int(h["fvglen"]), "memory": int(h["fvgmem"])},
-         "liq": {"left": int(h["left"]), "right": int(h["right"]), "k": float(h["k"]), "tol_ticks": int(h["eqtol"]),
-                 "min_touch": int(h["eqmin"]), "memory": int(h["liqmem"])},
+         # no w: a build before C1 (v0.4.4-dev), replayed with the definition it used (no dominance)
+         "liq": {"left": int(h["left"]), "right": int(h["right"]), "k": float(h["k"]), "dom": int(h.get("w", "0")),
+                 "tol_ticks": int(h["eqtol"]), "min_touch": int(h["eqmin"]), "memory": int(h["liqmem"])},
          "sessions": {"timezone": h["tz"], "timeframe_sec": tf, **({"windows": wins} if ses_ok else {})},
          "levels": {"timeframe_sec": tf}}
     return Settings.from_dict(s), ses_ok
@@ -281,7 +286,12 @@ def compare(cap: dict, preset: str | None = None) -> dict:
         raise ValueError("the capture was made with the liquidity engine OFF: turn it on and capture again")
     s, ses_ok = settings_of(h)
     if name in PRESETS:
-        for key, got, want in zip(("left", "right", "k"), (s.liq.left, s.liq.right, s.liq.k), PRESETS[name]):
+        for key, got, want in zip(("left", "right", "k", "W"), (s.liq.left, s.liq.right, s.liq.k, s.liq.dom),
+                                  PRESETS[name]):
+            if key == "W" and "w" not in h:
+                add("settings", NOBS, f"{name} W: not in this capture (IST before v0.4.4-dev); replayed without "
+                                      f"dominance, the definition that build used")
+                continue
             add("settings", MATCH if abs(got - want) < 1e-9 else DIFF, f"{name} {key}: Pine {got:g} · oracle preset {want:g}")
     add("settings", MATCH if h["confirmed"] == "1" else DIFF,
         "confirmed only: ON" if h["confirmed"] == "1" else "confirmed only: OFF · the oracle models ON only")
@@ -290,8 +300,8 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     candles = [b["candle"] for b in bars]
     m = IstModel(s)
     want = oracle_series(candles, s, m)
-    w_fvg = s.fvg.length + 2                                  # t−2 reference: fvgLen true ranges from bar 1 on
-    w_swing = max(s.liq.tra_len, s.liq.left)                  # swing bar X: TR average from bar 1 on, full left window
+    w_fvg = s.fvg.lookback                                    # warm-up from the dependency graph (models.types)
+    w_swing = s.liq.lookback                                  # bars a swing bar X needs before it
     w_liq = w_swing + s.liq.right
     if int(h["warmup"]) < max(w_fvg, w_liq):
         notes.append(f"Pine captured {h['warmup']} warm-up bars; {max(w_fvg, w_liq)} are needed, so fewer bars are compared")
@@ -299,7 +309,7 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     compared, bar_diffs = Counter(), []
     for t, b in enumerate(bars):
         for k, st in start.items():
-            if t < st:
+            if t < st or k not in b["vals"]:
                 continue
             p, o = b["vals"][k], want[k][t]
             if k.endswith("_reaction") and o is None:         # the oracle keeps the reaction of created levels
@@ -312,7 +322,8 @@ def compare(cap: dict, preset: str | None = None) -> dict:
         if compared[k] and k not in bar_diffs:
             add("bars", MATCH, f"{LABELS[k]}: {compared[k]} bars from {fmt(bars[start[k]]['time'])}")
         elif not compared[k]:
-            add("bars", NOBS, f"{LABELS[k]}: no bar after the warm-up")
+            add("bars", NOBS, f"{LABELS[k]}: " + ("no bar after the warm-up" if any(k in b["vals"] for b in bars)
+                                                    else "not in this capture (IST before v0.4.4-dev)"))
 
     def totals(get) -> dict:
         sh, sl, fv = get("bsl_pivot"), get("ssl_pivot"), get("fvg_verdict")
@@ -388,6 +399,7 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     return {"status": "COMPARED", "mode": "BOUNDED PINE-LOG BAR-BY-BAR PARITY", "checks": checks, "counts": cnt,
             "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars),
             "compared_bars": max(0, len(bars) - max(w_fvg, w_liq)), "warmup": max(w_fvg, w_liq),
+            "series": sum(1 for k in FIELDS.values() if compared[k]),
             "matched_events": sum(matched.values()), "window": f"{fmt(t0)} → {fmt(t_end)}",
             "symbol": sym[1] if sym else h.get("sym", "—"), "source": cap.get("source", "—"),
             "about": (f"preset {name} → left {s.liq.left} · right {s.liq.right} · k {s.liq.k:g} · EQ {s.liq.tol_ticks} "
@@ -413,7 +425,7 @@ def run(path=None, preset: str | None = None) -> dict:
 
 def verdict(r: dict) -> str:
     c = r["counts"]
-    tally = (f"{r['compared_bars']} bars × {len(FIELDS)} series and {r['matched_events']} events compared; "
+    tally = (f"{r['compared_bars']} bars × {r['series']} series and {r['matched_events']} events compared; "
              f"{c[MATCH]} MATCH · {c[DIFF]} DIFFERENCE · {c[NOBS]} NOT OBSERVABLE")
     return f"BOUNDED PINE-LOG BAR-BY-BAR PARITY: {'FAIL' if r['differences'] else 'PASS'} — {tally}"
 

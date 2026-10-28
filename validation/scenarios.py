@@ -24,7 +24,8 @@ QUIET_LO = [(100, 101.5, 99.5, 101), (101, 101.25, 100.75, 101)]          # bars
 
 
 def liq_settings(L=2, R=1, K=0.0, **kw) -> Settings:
-    return Settings(modules=("liq",), liq=LiqSettings(left=L, right=R, k=K, **kw))
+    """Explicit numbers = the Custom preset, so dominance is off unless `dom` is given."""
+    return Settings(modules=("liq",), liq=LiqSettings(left=L, right=R, k=K, **{"dom": 0, **kw}))
 
 
 def liq_run(rows, L=2, R=1, K=0.0, warm=True, **kw) -> IstModel:

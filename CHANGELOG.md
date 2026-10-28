@@ -1,5 +1,60 @@
 # Changelog
 
+## v0.4.4-dev — C1: liquidity significance = rejection AND dominance (2026-10-28, branch `tooling/validation-agent`) — EXPERIMENTAL
+
+**CHANGE** (DEF-L2, approved by the user 2026-10-28 from `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md`). A confirmed swing becomes BSL/SSL only when both conditions hold:
+* (a) the existing reaction ≥ k × TR average (unchanged);
+* (b) **dominance:** no high in the W bars *before the swing bar* (X−W … X−1; anchored to the origin, the right bars excluded) above the swing high + EQ tolerance. Lows are mirrored. Only a strictly greater extreme rejects.
+
+Presets are now (left, right, k, **W**): Aggressive 3/2/0.5/**10**, Balanced 5/3/1.0/**30**, Strict 10/5/2.0/**60**. Custom has no W input, so it has no dominance. W is not a user input. k and W were not tuned.
+
+**Implementation:**
+* **Rule:** `domHiRef = ta.highest(high, W)[LIQ_R + 1]`, read only when X ≥ W. A level is dominant iff `domHiRef <= swHiPx + EQ_TOL + EPS`, with the EQ tolerance and float margin. Lows are mirrored.
+* **Warm-up:** fewer than W bars before X means warm-up (neither PASS nor REJECT), like the TR average.
+* **Rejection diagnostics:** disjoint counters for reaction only, dominance only and both. Debug rows 22–23 read `REJECT n (x%) = reaction a + dominance b + both c`.
+* **Debug and Data Window output:**
+  * row 21 shows the dominance window;
+  * 2 Data Window plots show the dominance reference high and low (20 plots in all);
+  * the Parity capture writes `w=` on the CAPTURE line and `DH=` / `DL=` on each BAR line.
+* **Capture warm-up:** taken from the dependency graph, max(fvgLen + 2, max(14, L, W) + R). That is Balanced 33, Strict 65, Aggressive 16.
+
+**WHY.** On real NQ 1m (1,017 exact bars, Pine ↔ Python parity PASS), the reaction floor passed ~95 % of pivots. That reaction is large by construction, so the floor is not a significance test.
+
+**PHASE 1 IMPACT.** None. FVG, session and level events are identical with C1 on or off (tested on random walks and the NQ capture). The Phase 1 baseline guard is unchanged.
+
+**REPAINT IMPACT.** None:
+* only bars X − W … t are read;
+* the confirmation bar is unchanged;
+* a decision is identical when later bars are cut (tested) and when the history starts earlier (tested).
+
+**SEMANTICS KEPT.**
+* C1 levels are a strict subset of the v0.4.3 levels, and every kept level is taken, swept or broken identically (tested).
+* The EQ rules are unchanged. Clusters re-form among the remaining levels. The EQ tolerance inside dominance lets an equal second top still qualify (tested).
+
+**REGRESSION TESTS.**
+* 30 new tests (`validation/tests/test_liquidity_dominance.py`) and 2 new invariants with negative tests:
+  * INV-LIQ-11: dominant at birth;
+  * INV-LIQ-12: counter partition.
+* A new static check, ST-16, covers the exact dominance lines in Pine.
+* Mutation tests: ≥ at the boundary, the window anchored to confirmation, the tolerance dropped, dominance not applied. Each one is caught.
+* Regression baseline refreshed after review. Every diff was in the liquidity / EQ families, plus the new `dom` setting: 433 BSL/SSL events removed, EQ clusters re-formed, state counters. There were no FVG, session or level diffs, no added level and no timing change.
+
+**TradingView:** L00 must be re-run, then L45–L48. C1 is not frozen before L48: a new 1,000-bar capture with parity at 0 DIFFERENCE. The v0.4.3-dev capture stays committed as historical evidence (`test_v043_capture_parity_is_preserved_under_its_own_definition`).
+
+## Tooling · validation agent 1.5.0 (2026-10-28, branch `tooling/validation-agent`) — C1 in the oracle and the parity tools
+
+* **Oracle:**
+  * `LiqSettings.dom` (W) and presets of 4 numbers;
+  * `dominance_ref()` / `dominant()`;
+  * REJECT counters by reason;
+  * `lookback` properties, which derive the capture warm-up from the dependency graph.
+* **Explicit left/right/k without a preset is Custom: no dominance.** So scenario and golden cases keep their definition, and the legacy models (v0.4.0/v0.4.1) are compared with dominance off.
+* **Parity:**
+  * the capture reads `w=` and `DH=` / `DL=`. A capture without `w=` (IST before v0.4.4-dev) is replayed with the definition its build used, and its dominance series is NOT OBSERVABLE;
+  * the CSV parity has 2 more Data Window series;
+  * manual parity checks REJECT = reaction + dominance + both.
+* **The stored v0.4.3-dev capture still passes under its own definition.** A second test forces C1 on it and shows that every difference is the intended one: a swing Pine kept and C1 rejects, plus that level's own events. No swing appears, and no event is missing.
+
 ## Tooling · validation agent 1.4.0 (2026-10-28, branch `tooling/validation-agent`) — liquidity significance study — no indicator change
 
 * `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md`: Phase 2 significance study (A–H), **for review; nothing approved or implemented**.

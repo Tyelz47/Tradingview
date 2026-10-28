@@ -67,6 +67,8 @@ class Side:
         self.eqs: list[EqCluster] = []
         self.trig: float | None = None
         self.pivots = self.rejects = self.levels = 0
+        # REJECT by reason, disjoint (C1): reaction only · dominance only · both. rejects = their sum.
+        self.rej_react = self.rej_dom = self.rej_both = 0
         self.drop_live = self.drop_hist = self.drop_eq = 0
 
     @property
@@ -177,14 +179,37 @@ class LiquidityEngine:
         if Lo[X] < min(Lo[X - L:X]) and Lo[X] <= lo_r:
             self._judged(self.ssl, Lo[X], X, x_time, hi_r - Lo[X], req, tra, t)
 
+    def dominance_ref(self, side: Side, X: int) -> float | None:
+        """DEF-L2 (C1): the extreme of the W bars BEFORE the swing bar X (X−W … X−1; the
+        right bars are not part of it). None when dominance is off (W = 0) or fewer
+        than W earlier bars exist (warm-up)."""
+        w = self.s.dom
+        if not w or X < w:
+            return None
+        return max(self.H[X - w:X]) if side.is_bsl else min(self.Lo[X - w:X])
+
+    def dominant(self, side: Side, px: float, ref: float) -> bool:
+        """Only an earlier extreme STRICTLY beyond the swing price + EQ tolerance rejects
+        (the same tolerance and float margin as EQ clustering)."""
+        return ref <= px + self.tol + self.eps if side.is_bsl else ref >= px - self.tol - self.eps
+
     def _judged(self, side: Side, px, X, x_time, react, req, tra, t) -> None:
         side.pivots += 1
-        if req is None:
+        ref = self.dominance_ref(side, X)
+        if req is None or (self.s.dom and ref is None):
             return                                         # warm-up: neither PASS nor REJECT
-        if react >= req:
+        react_ok = react >= req
+        dom_ok = not self.s.dom or self.dominant(side, px, ref)
+        if react_ok and dom_ok:
             self._register(side, px, X, x_time, react, req, tra, t)
+            return
+        side.rejects += 1
+        if not react_ok and not dom_ok:
+            side.rej_both += 1
+        elif not react_ok:
+            side.rej_react += 1
         else:
-            side.rejects += 1
+            side.rej_dom += 1
 
     def _register(self, side: Side, px, X, x_time, react, req, tra, t) -> None:
         now = self.candles[t]
@@ -238,6 +263,8 @@ class LiquidityEngine:
         levels = [x.state() for side in self.sides() for x in sorted(side.all_levels(), key=lambda x: x.id)]
         clusters = [c.state() for side in self.sides() for c in side.eqs]
         counters = {side.name: {"pivots": side.pivots, "pass": side.levels, "reject": side.rejects,
+                                "reject_reaction": side.rej_react, "reject_dominance": side.rej_dom,
+                                "reject_both": side.rej_both,
                                 "drop_live": side.drop_live, "drop_hist": side.drop_hist, "drop_eq": side.drop_eq}
                     for side in self.sides()}
         return {"levels": levels, "clusters": clusters, "counters": counters}

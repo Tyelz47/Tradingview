@@ -29,12 +29,17 @@ HISTORY_END=
 HISTORY_BARS=
 
 # ── "Swing highs (loaded history)" row (22), e.g.
-#    1182 pivots · PASS 1129 · REJECT 52 (4.4%) · warm-up 1 → 1129 BSL created
+#    1182 pivots · PASS 1129 · REJECT 52 (4.4%) · warm-up 1 → 1129 BSL created           (before v0.4.4-dev)
+#    P pivots · PASS a · REJECT n (x%) = reaction r + dominance d + both b · warm-up w → a BSL created
+#    (the second form, v0.4.4-dev: also fill the three REJECT_… keys; they must add up to REJECT)
 SWING_HIGH_PIVOTS=
 SWING_HIGH_PASS=
 SWING_HIGH_REJECT=
 SWING_HIGH_WARMUP=
 SWING_HIGH_CREATED=
+SWING_HIGH_REJECT_REACTION=
+SWING_HIGH_REJECT_DOMINANCE=
+SWING_HIGH_REJECT_BOTH=
 
 # ── "Swing lows (loaded history)" row (23)
 SWING_LOW_PIVOTS=
@@ -42,6 +47,9 @@ SWING_LOW_PASS=
 SWING_LOW_REJECT=
 SWING_LOW_WARMUP=
 SWING_LOW_CREATED=
+SWING_LOW_REJECT_REACTION=
+SWING_LOW_REJECT_DOMINANCE=
+SWING_LOW_REJECT_BOTH=
 
 # ── "BSL" row (24) and "SSL" row (25), e.g.
 #    active 8 · taken 92 (sweep 21 · break 71) · memory 100/100 · dropped 0 live + 4 closed

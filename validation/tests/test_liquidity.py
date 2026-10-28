@@ -77,9 +77,10 @@ def test_warmup_pivots_are_neither_pass_nor_reject():
 
 @pytest.mark.spec("L32", "DEF-L3")
 def test_presets_are_the_documented_numbers():
-    assert PRESETS == {"aggressive": (3, 2, 0.5), "balanced": (5, 3, 1.0), "strict": (10, 5, 2.0)}
+    """(left, right, k, W): W is the C1 dominance window (v0.4.4-dev)."""
+    assert PRESETS == {"aggressive": (3, 2, 0.5, 10), "balanced": (5, 3, 1.0, 30), "strict": (10, 5, 2.0, 60)}
     b = LiqSettings.preset("balanced")
-    assert (b.left, b.right, b.k) == (5, 3, 1.0) and LiqSettings() == b
+    assert (b.left, b.right, b.k, b.dom) == (5, 3, 1.0, 30) and LiqSettings() == b
 
 
 @pytest.mark.spec("DEF-L2")
@@ -87,8 +88,9 @@ def test_selectivity_counters_add_up():
     from validation.candles import random_walk
     m = run_checked(random_walk(3000, 3), Settings(modules=("liq",)), sweep_every=25)
     for s in m.liq.sides():
-        warm = s.pivots - s.levels - s.rejects
-        assert 0 <= warm <= 3 and s.levels == len([e for e in m.events if e.type == f"{s.name}_CREATED"])
+        warm = s.pivots - s.levels - s.rejects               # only swings in the first `lookback` bars
+        assert 0 <= warm <= LiqSettings().lookback and s.levels == len([e for e in m.events if e.type == f"{s.name}_CREATED"])
+        assert s.rejects == s.rej_react + s.rej_dom + s.rej_both
 
 
 @pytest.mark.spec("DEF-L6")

@@ -3,8 +3,10 @@
     python -m validation.studies.liquidity_significance [--noise]
 
 Reads the exact NQ1! 1m candles of the committed TradingView capture (IST v0.4.3-dev,
-bounded Pine-Log parity PASS), finds every confirmed pivot with the current DEF-L1 rule,
-and measures candidate significance features. Two kinds of number are kept apart:
+bounded Pine-Log parity PASS), finds every confirmed pivot with the DEF-L1 rule, and
+studies the DEF-L2 of v0.4.3-dev (reaction only; "current" below = that definition, which
+C1 replaced in v0.4.4-dev). It measures candidate significance features. Two kinds of
+number are kept apart:
 
 * FEATURES use only bars up to the confirmation bar t = X + right (no lookahead). Only
   these may enter a definition.
@@ -166,7 +168,7 @@ def evaluate(ps: list[Pivot], k: float, hours: float) -> list[str]:
 def study(cs, label: str) -> list[str]:
     hours = len(cs) / 60
     out = [f"## {label}: {len(cs)} bars"]
-    for preset, (left, right, k) in PRESETS.items():
+    for preset, (left, right, k, _) in PRESETS.items():
         ps = pivots(cs, left, right, k)
         out += ["", f"### {preset} (left {left} · right {right} · k {k:g}): {len(ps)} pivots with X ≥ {LOOKBACK} "
                 f"({sum(p.side == 'high' for p in ps)} highs · {sum(p.side == 'low' for p in ps)} lows); "
@@ -231,7 +233,7 @@ def definitions(preset: str) -> dict:
 
 
 def simulate(cs, preset: str) -> list[str]:
-    left, right, _ = PRESETS[preset]
+    left, right = PRESETS[preset][:2]
     rows = [f"| {preset} definition | BSL · SSL created | per hour | EQH · EQL created | sweeps · breaks | "
             "taken ≤ 5 bars after creation | active levels per side (median · max) |", "|---|---|---|---|---|---|---|"]
     hours = len(cs) / 60
@@ -285,7 +287,7 @@ def deferred(cs, preset="balanced", ms=(1.5, 2.0), horizons=(10, 30)) -> list[st
     """Alternative: a pivot qualifies on the first bar s ≥ X + right at which price has moved
     m × TR away from it (bars X+1…s), if that happens within M bars and before the level is
     taken. Decided once, at s (no repaint), but the creation time varies."""
-    left, right, _ = PRESETS[preset]
+    left, right = PRESETS[preset][:2]
     rows = ["| m · M | qualified / pivots | median delay after X + right | taken before qualifying |", "|---|---|---|---|"]
     ps = pivots(cs, left, right, 0)
     for m in ms:

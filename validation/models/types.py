@@ -10,11 +10,12 @@ from dataclasses import asdict, dataclass, field, fields, replace
 
 NQ_TICK = 0.25
 
-# Pine `LiqPreset` → (left, right, k), LIQUIDITY.md DEF-L3.
+# Pine `LiqPreset` → (left, right, k, W), LIQUIDITY.md DEF-L3. W = dominance window (C1,
+# v0.4.4-dev). The Custom preset has no W input: its dominance is off (W = 0).
 PRESETS = {
-    "aggressive": (3, 2, 0.5),
-    "balanced": (5, 3, 1.0),
-    "strict": (10, 5, 2.0),
+    "aggressive": (3, 2, 0.5, 10),
+    "balanced": (5, 3, 1.0, 30),
+    "strict": (10, 5, 2.0, 60),
 }
 
 # Pine `MitRule` values (DEF-A5): which milestone counts as "mitigated" for display.
@@ -67,6 +68,12 @@ class FvgSettings:
     length: int = 14            # fvgLen
     memory: int = 50            # fvgMemory, records per direction
 
+    @property
+    def lookback(self) -> int:
+        """Bars before candle 3 its decision depends on: the t−2 references average
+        `length` true ranges, and the first of them needs the close before it."""
+        return self.length + 2
+
 
 @dataclass(frozen=True)
 class LiqSettings:
@@ -74,6 +81,7 @@ class LiqSettings:
     left: int = 5
     right: int = 3
     k: float = 1.0
+    dom: int = 30               # DEF-L2 dominance window W (bars before the swing bar); 0 = off (Custom)
     tol_ticks: int = 4          # eqTolTk
     min_touch: int = 2          # eqMinTch
     memory: int = 100           # liqMemory, records per side
@@ -82,8 +90,15 @@ class LiqSettings:
 
     @classmethod
     def preset(cls, name: str, **kw) -> "LiqSettings":
-        left, right, k = PRESETS[name]
-        return cls(left=left, right=right, k=k, **kw)
+        left, right, k, w = PRESETS[name]
+        return cls(left=left, right=right, k=k, dom=w, **kw)
+
+    @property
+    def lookback(self) -> int:
+        """Bars before the swing bar X its decision depends on (the dependency graph of
+        DEF-L1/L2): the TR average at X averages `tra_len` true ranges, the first needing
+        the close before it; the pivot reads `left` bars; dominance reads `dom` bars."""
+        return max(self.tra_len, self.left, self.dom)
 
 
 @dataclass(frozen=True)
@@ -163,8 +178,10 @@ class Settings:
             if name in d:
                 part = dict(d[name])
                 if name == "liq" and "preset" in part:
-                    left, right, k = PRESETS[part.pop("preset")]
-                    part = {"left": left, "right": right, "k": k, **part}
+                    left, right, k, w = PRESETS[part.pop("preset")]
+                    part = {"left": left, "right": right, "k": k, "dom": w, **part}
+                elif name == "liq" and {"left", "right", "k"} & set(part):
+                    part = {"dom": 0, **part}            # explicit numbers = the Custom preset: no dominance
                 if name == "sessions" and "windows" in part:
                     part["windows"] = tuple(tuple(w) for w in part["windows"])
                 known = {f.name for f in fields(typ)}

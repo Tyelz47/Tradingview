@@ -1,4 +1,4 @@
-# IST — Phase 2 acceptance tests (liquidity engine, v0.4.3-dev)
+# IST — Phase 2 acceptance tests (liquidity engine, v0.4.4-dev)
 
 Definitions: docs/LIQUIDITY.md (DEF-L1…L7). Phase 1 tests: docs/TESTS.md (unchanged).
 
@@ -12,9 +12,11 @@ Definitions: docs/LIQUIDITY.md (DEF-L1…L7). Phase 1 tests: docs/TESTS.md (unch
 | Kind | Total | PASS | FAIL | Pending |
 |---|---|---|---|---|
 | S · static / model (run here on v0.4.1-dev) | 13 | 13 | 0 | 0 |
-| L · TradingView runtime | 45 (L00–L44) | 0 | 0 | 45 |
+| L · TradingView runtime | 49 (L00–L48) | 0 | 0 | 49 |
 
-**Phase 2 is not complete.** L00 passed on v0.4.1-dev (user, 2026-10-27). v0.4.2-dev and v0.4.3-dev change debug output only: Pine Logs event lines, row 34 "Loaded history", and the Parity capture (default OFF). It is still new source, so L00 must be re-run on v0.4.3-dev.
+**Phase 2 is not complete.**
+* L00 passed on v0.4.1-dev (user, 2026-10-27). v0.4.2-dev and v0.4.3-dev changed debug output only.
+* **v0.4.4-dev changes the liquidity definition (C1: DEF-L2 dominance) and is experimental.** It needs L00 again, then L45–L48. C1 is frozen only after L48: a new 1,000-bar capture with Pine ↔ Python parity at 0 DIFFERENCE.
 
 **Runtime observation (user, 2026-10-27, NQ1! 1m, Balanced: left 5 · right 3 · k 1.0 · EQ tolerance 4 ticks · minimum touches 2).** This is an observation, not a test result. Debug rows 22–23 showed:
 * Swing highs: 1182 pivots → 1129 PASS · 52 REJECT (~4.4%) · 1 warm-up → 1129 BSL created.
@@ -42,7 +44,7 @@ No DIFFERS indication appeared, and the renderer showed a limited number of leve
 | S-01 | No [view]/[alert] input or view-derived value in L1–L5 or the engine run | Scripted scan over the L1→L3 sections and the engine run, with all [view]/[alert] identifiers (Phase 1 + 14 new). The only 2 hits are the Phase 1 `policyBar`/`policyTime` accessors (`switch fvgMitRule`), identical to v0.3.2 and called only from L6/L7 | **PASS** |
 | S-02 | No leftover identifiers from removed features | grep (`fvgOn`, `bullOpen`, `f_qualifies`, sequential ids). `ta.atr` appears only in a comment | **PASS** |
 | S-03 | Exactly 2 `request.security` calls | grep = 2 | **PASS** |
-| S-04 | Debug adds no drawing objects: 18/18 plots are `display.data_window`; no `line/box/label.new` exists because of `dbgOn` | grep | **PASS** |
+| S-04 | Debug adds no drawing objects: 20/20 plots are `display.data_window`; no `line/box/label.new` exists because of `dbgOn` | grep | **PASS** |
 | S-05 | FVG rule unchanged: one `Fvg.new`; `bullCand = rawBull and gapPass`, `bearCand = rawBear and gapPass` | grep | **PASS** |
 | S-06 | Phase 1 diff is display/text only | `git diff PHASE1_BASELINE_v0.3.2`: the only removed lines are the header, 2 tooltips, `f_evName` signature, the `f_evText` suffix line, the alert key, the table size and the "Last events" row index (LIQUIDITY.md §7; v0.4.1-dev: 34 rows, row 33). No Phase 1 logic line was changed | **PASS** |
 | S-07 | The algorithm satisfies DEF-L1…L6 | `python tests/liq_model.py` up to v0.4.1-dev; since then the validation agent (`python -m validation`, validation/README.md), which migrated every scenario and fuzz configuration. The reference model mirrors the Pine engine bar by bar. Results (v0.4.1-dev): **26 scenario checks PASS** (18 from v0.4.0-dev, earlier reported as "19 checks" = 18 scenarios + the fuzz; plus L35–L42), see the "Model" column below. Fuzz on 20,000-bar random walks, **7 runs over 4 configurations** (Balanced defaults × 4 seeds; Aggressive with 8-tick tolerance; Strict with 3 touches; Balanced with 8 ticks, 3 touches and a 3-cluster memory for the drop path): every event fires at most once per (kind, side, id); CREATED exactly at swing + right; TAKEN strictly after confirmation; exactly one of SWEEP/BREAK, on the taking bar; EQ_TAKEN after EQ_CREATED; EQ members within tolerance and inside the boundary; the pool is untraded from the first member's confirmation until its take; **trigger gate ON = full scan** (identical event lists) in every run. *This checks the algorithm, not Pine* | **PASS** |
@@ -67,7 +69,7 @@ Model column: `s_<name>` is the reference-model scenario, now `test_<name>` in `
 
 | ID | Test | Procedure → expected | Model | Status |
 |---|---|---|---|---|
-| L00 | Compiles | Save → Add to chart → **0 errors, 0 warnings**. Report every message verbatim | — | PENDING MANUAL VALIDATION on v0.4.3-dev (v0.4.1-dev: **PASS**, user, 2026-10-27: compiles and runs on NQ1! 1m) |
+| L00 | Compiles | Save → Add to chart → **0 errors, 0 warnings**. Report every message verbatim | — | PENDING MANUAL VALIDATION on v0.4.4-dev (v0.4.1-dev: **PASS**, user, 2026-10-27: compiles and runs on NQ1! 1m) |
 | L01 | Swing high known only after the right bars | Pick a swing high X. On bars X … X+2 the Data Window "LIQ swing high judged here" is 0. On **X+3** (Balanced: right = 3) it is 2 (or 1 if rejected). The inspector shows `swing → known` = X → X+3. `BSL_CREATED` time = X+3 | s_confirmation_timing | PENDING MANUAL VALIDATION |
 | L02 | Swing low: same behaviour | Mirror of L01 with "LIQ swing low judged here" and `SSL_CREATED` | s_ssl_mirror | PENDING MANUAL VALIDATION |
 | L03 | BSL at the correct price | Inspector price = the high of bar X exactly (hover the candle) | s_confirmation_timing | PENDING MANUAL VALIDATION |
@@ -111,7 +113,11 @@ Model column: `s_<name>` is the reference-model scenario, now `test_<name>` in `
 | L41 | Cluster id stable | Inspector on each member of one cluster (and before/after a 3rd member joins, if one does) → the same cluster id and reference; row 32 never shows `DIFFERS` | s_L41_cluster_id_stable | PENDING MANUAL VALIDATION |
 | L42 | No duplicate cluster | A 3rd equal high → still one line (`EQH ×3`) and one `EQH_CREATED` (as L20). After an L35 sweep, a pool formed by later swings has a **different** id | s_L42_boundary_change_no_duplicate | PENDING MANUAL VALIDATION |
 | L43 | Debug output for manual parity | Debug mode ON. (a) Row 34 "Loaded history (closed bars)" shows the first loaded bar → the last closed bar · N bars · tz; scroll to the chart's first bar to confirm the start. (b) Pine Logs (Pine Editor or IST status line → More → Pine Logs) show one line per event, `yyyy-MM-dd HH:mm  NAME … id=… px=…`, the same text as "Last events"; with Debug mode OFF there are none. (c) Report whether the log text can be selected and copied | — | PENDING MANUAL VALIDATION |
-| L44 | Parity capture (bounded) | "Parity capture → Pine Logs" ON, N = 300. Pine Logs show one CAPTURE line, then N + warm-up (Balanced: 317) BAR lines with consecutive `i=`, each followed by that bar's events, then an END line with `bars=317`. Nothing more is logged afterwards (wait 2–3 realtime bars). The capture OFF → no BAR line. Save the Pine Logs into `validation/parity/` as they are (TradingView's `Date,Message` CSV) and run `python -m validation.parity --capture validation/parity/<file>.csv`: report the printed result verbatim | test_parity_capture (parser, warm-up, events) | PENDING MANUAL VALIDATION |
+| L44 | Parity capture (bounded) | "Parity capture → Pine Logs" ON, N = 300. Pine Logs show one CAPTURE line, then N + warm-up (Balanced: 317 on v0.4.3-dev, 333 on v0.4.4-dev) BAR lines with consecutive `i=`, each followed by that bar's events, then an END line with `bars=` that count. Nothing more is logged afterwards (wait 2–3 realtime bars). The capture OFF → no BAR line. Save the Pine Logs into `validation/parity/` as they are (TradingView's `Date,Message` CSV) and run `python -m validation.parity --capture validation/parity/<file>.csv`: report the printed result verbatim | test_parity_capture (parser, warm-up, events) | PENDING MANUAL VALIDATION |
+| L45 | Dominance (C1) in the debug table | Balanced, Debug ON. Row 21 reads `… · dominance 30 bars · …` (Aggressive 10, Strict 60, Custom `off`). Rows 22–23 read `REJECT n (x%) = reaction a + dominance b + both c`, with a + b + c = n, and pivots = PASS + REJECT + warm-up | test_both_fail_is_counted_once_as_both, test_approved_presets_and_pine_constants | PENDING MANUAL VALIDATION |
+| L46 | Dominance rejection on the chart | Find a swing high with a higher high (more than 4 ticks above) inside the 30 bars before it. On its confirmation bar the Data Window shows verdict 1, `dominance: highest high of the W bars before the swing` above the swing high + 1 point, and no BSL is created. Mirror for a low | test_dominance_rejection_inside_the_window, test_window_is_anchored_to_the_origin_not_the_confirmation | PENDING MANUAL VALIDATION |
+| L47 | Double top within tolerance still forms EQH | Two equal highs (second within 4 ticks below the first, both inside 30 bars) both become BSL and form one `EQH ×2` (as L17). A second top more than 4 ticks below the first is not a level | test_double_top_within_tolerance_still_forms_eq | PENDING MANUAL VALIDATION |
+| L48 | C1 parity, 1,000 bars | Parity capture ON, N = 1000 (Balanced: 1,033 BAR lines, END `bars=1033`). Save the Pine Logs and run `python -m validation.parity --capture validation/parity/<file>.csv` → **BOUNDED PINE-LOG BAR-BY-BAR PARITY: PASS, 0 DIFFERENCE**, including the dominance reference series. Required before C1 is frozen | test_parity_capture, test_v043_capture_under_c1_differs_only_by_the_expected_definition_change | PENDING MANUAL VALIDATION |
 
 ---
 

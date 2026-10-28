@@ -237,12 +237,12 @@ def st13_oracle_defaults_match_pine():
         "LIQ_TRA_LEN": (int(re.search(r"LIQ_TRA_LEN\s*=\s*(\d+)", src).group(1)), l.tra_len),
         "EQ_MEM": (int(re.search(r"EQ_MEM\s*=\s*(\d+)", src).group(1)), l.eq_memory),
     }
-    for name, (left, right, k) in PRESETS.items():
-        got = tuple(float(re.search(rf"int {v} = switch liqPreset(?:.|\n)*?LiqPreset\.{name}\s*=>\s*([\d.]+)", src).group(1))
-                    if v != "LIQ_K" else
-                    float(re.search(rf"float LIQ_K = switch liqPreset(?:.|\n)*?LiqPreset\.{name}\s*=>\s*([\d.]+)", src).group(1))
-                    for v in ("LIQ_L", "LIQ_R", "LIQ_K"))
-        pairs[f"preset {name}"] = (got, (float(left), float(right), float(k)))
+    for name, (left, right, k, w) in PRESETS.items():
+        got = tuple(float(re.search(rf"(?:int|float) {v} = switch liqPreset(?:.|\n)*?LiqPreset\.{name}\s*=>\s*([\d.]+)",
+                                    src).group(1)) for v in ("LIQ_L", "LIQ_R", "LIQ_K", "LIQ_W"))
+        pairs[f"preset {name}"] = (got, (float(left), float(right), float(k), float(w)))
+    custom_w = re.search(r"int LIQ_W = switch liqPreset(?:.|\n)*?\n\s*=>\s*(\d+)", src)
+    pairs["preset custom W"] = (int(custom_w.group(1)) if custom_w else None, 0)
     bad = {k: v for k, v in pairs.items() if v[0] != v[1]}
     return not bad, f"{len(pairs)} defaults/constants compared; mismatches (Pine, oracle): {bad or 'none'}"
 
@@ -271,6 +271,31 @@ def st15_phase1_baseline_guard():
     return not new, f"{len(removed)} Phase 1 lines removed since the baseline; not in the reviewed manifest: {new or 'none'}"
 
 
+# DEF-L2 dominance (C1) as it must read in Pine: the window is the W bars before the swing
+# bar (history offset right + 1), only a strictly greater extreme rejects (≤ / ≥ with the
+# EQ tolerance and EPS), and the significance uses both conditions plus the warm-up.
+DOMINANCE_RULES = {
+    "window high": r"^float\s+domHiAll\s*=\s*ta\.highest\(high,\s*math\.max\(LIQ_W,\s*1\)\)",
+    "window low": r"^float\s+domLoAll\s*=\s*ta\.lowest\(low,\s*math\.max\(LIQ_W,\s*1\)\)",
+    "ready": r"^bool\s+domReady\s*=\s*LIQ_W\s*>\s*0\s+and\s+swBar\s*>=\s*LIQ_W\s*$",
+    "anchor high": r"^float\s+domHiRef\s*=\s*domReady\s*\?\s*domHiAll\[LIQ_R \+ 1\]\s*:\s*na\b",
+    "anchor low": r"^float\s+domLoRef\s*=\s*domReady\s*\?\s*domLoAll\[LIQ_R \+ 1\]\s*:\s*na\b",
+    "boundary high": r"^bool\s+domHiOk\s*=\s*LIQ_W == 0 or domHiRef <= swHiPx \+ EQ_TOL \+ EPS\s*$",
+    "boundary low": r"^bool\s+domLoOk\s*=\s*LIQ_W == 0 or domLoRef >= swLoPx - EQ_TOL - EPS\s*$",
+    "warm-up": r"^bool\s+liqWarm\s*=\s*na\(reactReq\) or \(LIQ_W > 0 and not domReady\)\s*$",
+    "significance high": r"^bool\s+sigHi\s*=\s*pivHi and not liqWarm and reactHiOk and domHiOk\s*$",
+    "significance low": r"^bool\s+sigLo\s*=\s*pivLo and not liqWarm and reactLoOk and domLoOk\s*$",
+}
+
+
+def st16_dominance_rule(src: str | None = None):
+    """The C1 dominance lines in IST.pine, exactly: anchored before the swing bar, inclusive
+    of + tolerance, joined with the reaction floor and the warm-up."""
+    text = "\n".join(code(ln) for ln in (src.splitlines() if src is not None else source()))
+    bad = [name for name, rx in DOMINANCE_RULES.items() if len(re.findall(rx, text, re.M)) != 1]
+    return not bad, f"{len(DOMINANCE_RULES)} dominance rules; missing or changed: {bad or 'none'}"
+
+
 CHECKS = [
     ("ST-01", "Calculation never reads [view]/[alert] inputs (S-01)", st01_calc_independent_of_view),
     ("ST-02", "No identifiers of removed features (S-02)", st02_no_leftovers),
@@ -287,4 +312,5 @@ CHECKS = [
     ("ST-13", "Oracle defaults/presets/constants equal the Pine ones", st13_oracle_defaults_match_pine),
     ("ST-14", "Event names: Pine f_evName == oracle", st14_event_names_match_oracle),
     ("ST-15", "Phase 1 baseline guard (git diff vs PHASE1_BASELINE_v0.3.2) (S-06)", st15_phase1_baseline_guard),
+    ("ST-16", "DEF-L2 dominance (C1): window before the swing bar, strict-beyond boundary", st16_dominance_rule),
 ]

@@ -51,10 +51,10 @@ def show(r: dict, preset: str) -> None:
     if dw is None:
         print("  no IST Data Window columns in this export (was IST on the chart?): events only")
     else:
-        left, right, k = PRESETS[preset]
+        left, right, k, w = PRESETS[preset]
         print(f"  export {dw['first_bar']} → {dw['last_bar']} · {r['bars']} bars · {dw['bars']} compared "
               f"(the last bar is never compared: it may still be open)")
-        print(f"  liquidity preset {preset} (left {left} · right {right} · k {k}) · other settings from pine_observed.json\n")
+        print(f"  liquidity preset {preset} (left {left} · right {right} · k {k} · dominance {w}) · other settings from pine_observed.json\n")
         print(f"  {'':<14}{'Pine (export)':<48}oracle")
         p, o = dw["totals"]["pine"], dw["totals"]["oracle"]
         for side in ("bsl", "ssl"):

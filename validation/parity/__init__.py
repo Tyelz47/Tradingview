@@ -40,6 +40,8 @@ SERIES = {
     "ssl_reaction": "liq reaction of that swing low",
     "bsl_take": "liq bsl take on this bar",             # 0 · 1 sweep · 2 break · 3 taken, bar open
     "ssl_take": "liq ssl take on this bar",
+    "bsl_dominance": "liq dominance: highest high",     # C1: extreme of the W bars before the swing bar
+    "ssl_dominance": "liq dominance: lowest low",       # (na: dominance off, or fewer than W earlier bars)
 }
 MINTICK = "syminfo.mintick"
 NUM_TOL = 1e-4          # points: the export may round floats
@@ -103,6 +105,7 @@ def oracle_series(candles: list[Candle], settings: Settings, m: IstModel | None 
             out[f"{k}_reaction"].append(side.live[-1].react if created else None)
             out[f"{k}_take"].append(2 if f"{n}_BREAK" in types else 1 if f"{n}_SWEEP" in types
                                     else 3 if f"{n}_TAKEN" in types else 0)
+            out[f"{k}_dominance"].append(m.liq.dominance_ref(side, t - s.liq.right))
     return out
 
 

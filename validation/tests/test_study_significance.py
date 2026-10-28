@@ -18,11 +18,16 @@ def _nq():
 
 @pytest.mark.parametrize("preset", sorted(PRESETS))
 def test_study_engine_reproduces_the_oracle(preset):
-    """With the current DEF-L2 as its test, the study engine emits exactly the oracle's events."""
-    cs, k = _nq(), PRESETS[preset][2]
-    s = Settings.from_dict({"liq": {"preset": preset}, "modules": ["liq"]})
-    want = [e.compact() for e in IstModel(s).run(cs).events]
+    """The study engine emits exactly the oracle's events: with the v0.4.3-dev DEF-L2
+    (reaction only) against the oracle with dominance off, and with the study's own C1
+    test (written independently) against the v0.4.4-dev oracle."""
+    cs, (_, _, k, w) = _nq(), PRESETS[preset]
+    old = Settings.from_dict({"liq": {"preset": preset, "dom": 0}, "modules": ["liq"]})
+    want = [e.compact() for e in IstModel(old).run(cs).events]
     assert [e.compact() for e in study._run(cs, preset, lambda c: c.react >= k)] == want and want
+    new = Settings.from_dict({"liq": {"preset": preset}, "modules": ["liq"]})
+    want = [e.compact() for e in IstModel(new).run(cs).events]
+    assert [e.compact() for e in study._run(cs, preset, lambda c: c.react >= k and c.dominates(w))] == want and want
 
 
 def _bars(highs, mirror=False):
@@ -58,6 +63,7 @@ def test_dominance_candidate_is_a_subset_with_identical_takes(preset, w, seed):
     """Adding dominance only removes levels; every kept level is taken, swept or broken
     exactly as today (on the NQ capture and on random walks)."""
     k = PRESETS[preset][2]
+    assert PRESETS[preset][3] == w
     for cs in (_nq(), random_walk(4000, seed, gap_prob=0.02)):
         cur = study._run(cs, preset, lambda c: c.react >= k)
         new = study._run(cs, preset, lambda c: c.react >= k and c.dominates(w))

@@ -22,7 +22,7 @@ from validation.models.types import Candle, FvgSettings, LiqSettings, Settings
 pytestmark = [pytest.mark.phase2, pytest.mark.phase1, pytest.mark.section("stateful")]
 TICK = 0.25
 SETTINGS = Settings(fvg=FvgSettings(min_ticks=1, k_tra=0.0, memory=10),
-                    liq=LiqSettings(left=2, right=1, k=0.0, tol_ticks=4, min_touch=2, memory=20, eq_memory=4))
+                    liq=LiqSettings(left=2, right=1, k=0.0, dom=3, tol_ticks=4, min_touch=2, memory=20, eq_memory=4))
 
 
 class IstMachine(RuleBasedStateMachine):

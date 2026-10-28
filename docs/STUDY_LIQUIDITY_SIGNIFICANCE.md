@@ -1,6 +1,9 @@
 # Phase 2 · Liquidity significance study
 
-**Status: study for review. No definition is approved. `src/IST.pine`, the oracle and `PHASE1_BASELINE_v0.3.2` are unchanged.**
+**Status:**
+* **C1 was approved by the user on 2026-10-28 and implemented as experimental IST v0.4.4-dev** (see CHANGELOG).
+* It is not frozen until a new 1,000-bar capture shows Pine ↔ Python parity with 0 differences (TESTS_PHASE2 L48).
+* This study itself measured the v0.4.3-dev definition and is kept unchanged as the record of that decision.
 
 **Data.**
 * Exact NQ1! 1m candles from the IST v0.4.3-dev Parity capture: 1,017 bars, 2026-10-27 03:38 → 21:34 New York.

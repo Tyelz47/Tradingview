@@ -26,7 +26,8 @@
 Not "being a pivot". A swing becomes a liquidity level only when all of these hold:
 
 1. **It dominates its neighbourhood (structure).** Its high is strictly above every high of the `left` bars before it, and at or above every high of the `right` bars after it. Lows mirror this. The left side costs no latency, so the presets lean on `left`: a Balanced 1m swing high is the highest point of the previous 5 minutes and held for 3.
-2. **Price was rejected from it (significance).** Within the `right` confirmation bars, price moved away from the swing by at least **k × TR average** (the TR average is measured at the swing bar). A rejection means orders were left resting beyond the extreme: stops above a high that price walked away from. A pivot where price only stalled sideways (inside bars, a drift) is a pause, not a level.
+2. **Price was rejected from it (significance, part a).** Within the `right` confirmation bars, price moved away from the swing by at least **k × TR average** (the TR average is measured at the swing bar). A rejection means orders were left resting beyond the extreme: stops above a high that price walked away from. A pivot where price only stalled sideways (inside bars, a drift) is a pause, not a level.
+2b. **It is the extreme of its recent past (significance, part b: dominance; C1, v0.4.4-dev, experimental).** No high in the **W bars before the swing bar** is above the swing high + EQ tolerance (lows mirrored). It is the "external" liquidity of that window, not an inner pivot. This was added because, on real NQ 1m data, part (a) alone passed ~95 % of pivots. That reaction is large by construction; see `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md`, approved 2026-10-28.
 3. **It is still untraded.** The moment price trades through it, it stops being *active* liquidity (it is *taken*). Only active levels compete for display.
 4. **It is not a duplicate.** Swings within tolerance merge into one EQ pool instead of two lines (DEF-L5). A level sitting exactly on a visible PDH/PDL/PWH/PWL or session high/low line is not drawn a second time (rendering only, DEF-L7).
 
@@ -36,12 +37,14 @@ Not "being a pivot". A swing becomes a liquidity level only when all of these ho
 
 ### 2.1 Presets: explicit numbers, no hidden logic
 
-| Preset | left | right (= confirmation delay) | k (reaction ≥ k × TR average) | Character |
-|---|---|---|---|---|
-| Aggressive | 3 | 2 | 0.5 | more levels, earlier, more noise |
-| **Balanced** (default) | **5** | **3** | **1.0** | NQ default |
-| Strict | 10 | 5 | 2.0 | fewer, more significant, later |
-| Custom | input | input | input | the three inputs, shown in the debug table |
+| Preset | left | right (= confirmation delay) | k (reaction ≥ k × TR average) | W (dominance window, bars) | Character |
+|---|---|---|---|---|---|
+| Aggressive | 3 | 2 | 0.5 | 10 | more levels, earlier, more noise |
+| **Balanced** (default) | **5** | **3** | **1.0** | **30** | NQ default |
+| Strict | 10 | 5 | 2.0 | 60 | fewer, more significant, later |
+| Custom | input | input | input | none (0: dominance off) | the three inputs, shown in the debug table |
+
+W is part of the preset, not an input. Custom has no W input yet, so it keeps the definition from before C1. On 1m, W = 10 / 30 / 60 bars is 10 minutes, half an hour and an hour; on 5m it is 50 / 150 / 300 minutes.
 
 **Trade-off.**
 * `right` is pure latency: a level is unknown for `right` bars after its extreme printed. On 1m that is 2 / 3 / 5 minutes; on 5m it is 10 / 15 / 25.
@@ -57,7 +60,7 @@ Not "being a pivot". A swing becomes a liquidity level only when all of these ho
 | left 5, right 3 | 72 | 100 % | 98 % | 86 % | 61 % | 38 % |
 | left 10, right 5 | 40 | 100 % | 100 % | 97 % | 86 % | 69 % |
 
-On noise, the window does almost all of the selection and the default floors remove only stalls (≈2 % for Balanced, ≈14–18 % for Strict depending on the walk; v0.4.1-dev fuzz, seed 7: Balanced 2.4 % highs / 1.7 % lows, Strict 17.6 % / 16.0 %). This is a property of the noise model, not of NQ. **The presets are not changed on this evidence.** On real charts debug rows 22–23 (`Swing highs / lows (loaded history)`) show pivots, significance PASS, REJECT (with %), warm-up and levels created, per side. If Balanced proves too busy, the transparent levers are `left` (no latency) or the Strict preset. The k values are not quietly retuned. Real NQ data (1,000-bar capture, parity PASS) confirmed this on 2026-10-27. A study of candidate definitions, **not approved and not implemented**, is in `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md`.
+On noise, the window does almost all of the selection and the default floors remove only stalls (≈2 % for Balanced, ≈14–18 % for Strict depending on the walk; v0.4.1-dev fuzz, seed 7: Balanced 2.4 % highs / 1.7 % lows, Strict 17.6 % / 16.0 %). This is a property of the noise model, not of NQ. **The presets are not changed on this evidence.** On real charts debug rows 22–23 (`Swing highs / lows (loaded history)`) show pivots, significance PASS, REJECT (with %), warm-up and levels created, per side. If Balanced proves too busy, the transparent levers are `left` (no latency) or the Strict preset. The k values are not quietly retuned. Real NQ data (1,000-bar capture, parity PASS) confirmed this on 2026-10-27. The study `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md` led to C1 (dominance, part b above), approved on 2026-10-28 and implemented as an experimental v0.4.4-dev. **k was not changed.**
 
 ---
 
@@ -78,14 +81,23 @@ All prices are chart prices. t = the bar being evaluated (its close in Confirmed
 * **Origin** = X. **Confirmation** = t = X + right. The swing does not exist for the engine before t closes. Pivots are evaluated on confirmed bars only, in both engine modes.
 * During warm-up (the first left + right bars) there are no pivots.
 
-**DEF-L2 · Significance (rejection).**
-* `reaction(high) = high[X] − min(low[X+1 … t])`
-* `reaction(low) = max(high[X+1 … t]) − low[X]`
-* `required = k × TRavg[X]`, where `TRavg = SMA(true range, 14)` is the same deterministic, non-Wilder definition as DEF-A2. It has its own fixed length, so FVG inputs never affect liquidity.
-* The swing becomes a level iff `reaction ≥ required`. While `TRavg[X]` is `na` (the first 14 bars), the swing is rejected.
-* Only data up to t is used.
+**DEF-L2 · Significance = rejection AND dominance** (dominance: C1, v0.4.4-dev, experimental until a new 1,000-bar capture shows Pine ↔ Python parity with 0 differences).
+* (a) Rejection:
+  * `reaction(high) = high[X] − min(low[X+1 … t])`
+  * `reaction(low) = max(high[X+1 … t]) − low[X]`
+  * `required = k × TRavg[X]`, where `TRavg = SMA(true range, 14)` is the same deterministic, non-Wilder definition as DEF-A2. It has its own fixed length, so FVG inputs never affect liquidity.
+  * passes iff `reaction ≥ required`.
+* (b) Dominance, with `tol = EQ tolerance ticks × mintick`, the same tolerance and float margin `EPS` as DEF-L5:
+  * `domRef(high) = max(high[X−W … X−1])`: the W bars **before the swing bar**. The window is anchored to the origin X, not to the confirmation bar, and the right bars are not part of it.
+  * passes iff `domRef(high) ≤ high[X] + tol`. Only an earlier high **strictly** above the swing + tolerance rejects; one exactly at + tolerance does not. Lows mirror it: `domRef(low) = min(low[X−W … X−1])`, passes iff `domRef(low) ≥ low[X] − tol`.
+  * W = 0 (Custom) means dominance is off.
+  * The EQ tolerance is used so that a second top up to the tolerance below an earlier top inside W can still be a level and form an EQH. Changing "EQ tolerance" therefore also changes dominance.
+* The swing becomes a level iff (a) and (b) both pass.
+* **Warm-up:** while `TRavg[X]` is `na` (the first 14 bars) or fewer than W bars exist before X, the pivot is **warm-up**: counted as a pivot, neither PASS nor REJECT.
+* **REJECT reasons are recorded disjointly:** reaction only · dominance only · both. The REJECT total is their sum, and a pivot that fails both is counted once, under "both".
+* Only data up to t is used. A decision depends only on the bars X − max(14, left, W) … t, so it does not change when the loaded history starts earlier (reload invariance).
 
-**DEF-L3 · Presets.** These are exactly the numbers in §2.1. Custom uses `Swing left bars`, `Swing right bars` and `Min reaction × TR average`. The values in force at birth are stored on each level (`pivL`, `pivR`, `reactReq`, `tra`).
+**DEF-L3 · Presets.** These are exactly the numbers in §2.1: (left, right, k, W). Custom uses `Swing left bars`, `Swing right bars` and `Min reaction × TR average`, with no dominance. The values in force at birth are stored on each level (`pivL`, `pivR`, `reactReq`, `tra`).
 
 **DEF-L4 · Taken, sweep, break.** A BSL is described here; an SSL mirrors it, with `low` and "below".
 * **Taken** (the fact): on the first bar k > confirmation with `high > price`. A single tick and a wick are both enough. This emits `BSL_TAKEN` once, with the penetration in ticks.
@@ -374,8 +386,8 @@ Shared code that changed (each documented in CHANGELOG v0.4.0-dev with WHY / PHA
 
 | Row | Shows |
 |---|---|
-| 21 · Liquidity engine | ON/OFF, the preset with its resolved numbers, EQ tolerance and minimum |
-| 22 · Swing highs (loaded history) | pivot candidates · significance PASS · REJECT (share of judged pivots) · warm-up (not judgeable: TR average still `na`) → BSL levels created (= PASS: every PASS creates a level). Counted from the first loaded bar |
+| 21 · Liquidity engine | ON/OFF, the preset with its resolved numbers (incl. dominance W bars, or off), EQ tolerance and minimum |
+| 22 · Swing highs (loaded history) | pivot candidates · significance PASS · REJECT (share of judged pivots) = reaction + dominance + both (disjoint reasons, v0.4.4-dev) · warm-up (not judgeable: TR average still `na`, or fewer than W bars before the swing) → BSL levels created (= PASS: every PASS creates a level). Counted from the first loaded bar |
 | 23 · Swing lows (loaded history) | same for swing lows → SSL |
 | 24 · BSL | active, taken (sweep/break), memory use, drops |
 | 25 · SSL | same as BSL |
@@ -391,6 +403,7 @@ Row 33 · Last events includes liquidity events. Rows 31 and 32 together make DE
 * reaction high and reaction low (pts)
 * required reaction (pts)
 * BSL and SSL take on this bar (1 sweep · 2 break · 3 taken, bar open)
+* dominance reference high and low (v0.4.4-dev): the highest high / lowest low of the W bars before the swing judged on this bar (`na` while warming up, or when dominance is off)
 
 No chart labels are added for debug.
 

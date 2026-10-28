@@ -65,7 +65,8 @@ def test_legacy_models_match_the_oracle(ref, budget):
     total = 0
     for cfg in LEGACY_CONFIGS:
         L, R, K, tol, mt, mem = cfg
-        liq = LiqSettings(left=L, right=R, k=K, tol_ticks=tol, min_touch=mt, eq_memory=mem)
+        # The legacy models are the definition before C1 (v0.4.4-dev): no dominance.
+        liq = LiqSettings(left=L, right=R, k=K, dom=0, tol_ticks=tol, min_touch=mt, eq_memory=mem)
         candles = random_walk(n_bars, 7)
         want = rg.legacy_events(mod, candles, liq)
         got = [(e.bar, e.type, e.sid, e.price) for e in run_model(candles, Settings(modules=("liq",), liq=liq)).events]

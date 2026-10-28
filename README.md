@@ -8,7 +8,7 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 | `docs/ARCHITECTURE.md` | Architecture, Pine limitations, anti-repaint strategy, budgets, and exact definitions (Appendix A). |
 | `docs/TESTS.md` | Acceptance checklist for every module, plus the non-repaint protocol. |
 | `docs/LIQUIDITY.md` | Phase 2 liquidity engine: exact definitions (DEF-L), timing, budgets, limitations. |
-| `docs/TESTS_PHASE2.md` | Phase 2 tests (S-01…S-13, L00–L44) and the manual validation procedure. |
+| `docs/TESTS_PHASE2.md` | Phase 2 tests (S-01…S-13, L00–L48) and the manual validation procedure. |
 | `validation/` | Validation agent: Python reference model (oracle), scenarios, invariants, property/stateful fuzzing, regression, golden dataset, Pine parity. Run `python -m validation`; see `validation/README.md`. |
 | `requirements-dev.txt` | Development-only dependencies of the validation agent (pytest, Hypothesis). |
 | `releases/v0.3.2/` | Frozen Phase 1 baseline (read-only, SHA-256). Git tag `PHASE1_BASELINE_v0.3.2`. |
@@ -26,7 +26,7 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 |---|---|---|
 | 0 | Architecture (7 layers, calculation independent of visibility) | adopted |
 | 1 | FVG engine, PDH/PDL, PWH/PWL, sessions, FVG alerts, diagnostics | **v0.3.2 frozen safety baseline · runtime 8/50 PASS, 1 FAIL (T03, re-test), 41 pending** |
-| 2 | Swing liquidity, BSL/SSL, taken, sweep vs break, EQH/EQL | **v0.4.3-dev (debug output and Parity capture for parity on a free plan; v0.4.0-dev and v0.4.1-dev tagged) · static/model 13/13 PASS · runtime 0/45 on v0.4.3-dev (L00 passed on v0.4.1-dev; re-run), 45 pending · not complete** |
+| 2 | Swing liquidity, BSL/SSL, taken, sweep vs break, EQH/EQL | **v0.4.4-dev EXPERIMENTAL: C1 significance = reaction AND dominance (W 10/30/60), not frozen until a new 1,000-bar capture gives parity 0 DIFFERENCE (L48) · v0.4.0-dev and v0.4.1-dev tagged · static/model 13/13 PASS · runtime 0/49 on v0.4.4-dev (L00 passed on v0.4.1-dev; re-run), 49 pending · not complete** |
 | 3 | Displacement, CISD | design in Appendix A |
 | 4 | IFVG, HTF FVG | design in Appendix A |
 | 5 | Quality score, confluence dashboard, UX | later |

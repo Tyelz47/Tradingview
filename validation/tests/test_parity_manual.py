@@ -67,7 +67,7 @@ def test_valid_manual_input_parses_and_matches(tmp_path):
     assert r["differences"] == 0, _diffs(r)
     by = {s: [c for c in r["checks"] if c["section"] == s and c["status"] == manual.MATCH] for s in manual.SECTIONS}
     assert len(by["settings"]) == 4 and len(by["candles"]) == 4
-    assert len(by["summary"]) == 4 + len(manual.COUNTS)              # 4 internal + every count vs the oracle
+    assert len(by["summary"]) == 6 + len(manual.COUNTS)              # 6 internal + every count vs the oracle
     assert len(by["events"]) == sum(e.type != "LEVEL_SET" for e in _block(m))
     assert manual.verdict(r).startswith("MANUAL EVENT PARITY: PASS")
 

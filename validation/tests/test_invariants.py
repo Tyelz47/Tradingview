@@ -217,6 +217,19 @@ def liq08():
     mon.check()
 
 
+def liq11():
+    m, mon = build(WARM + SWING_HI, liq_settings(dom=10))
+    x = m.liq.bsl.live[0]
+    m.liq.H[x.origin_bar - 1] = x.price + 1.25         # an earlier high 5 ticks above: not dominant
+    mon.check(full=True)
+
+
+def liq12():
+    m, mon = liq_case()
+    m.liq.bsl.rej_react += 1                             # REJECT by reason no longer adds up
+    mon.check()
+
+
 def liq09():
     m, mon = liq_case()
     side = m.liq.bsl
@@ -356,6 +369,7 @@ CASES = {
     "INV-FVG-06": fvg06, "INV-FVG-07": fvg07, "INV-FVG-08": fvg08, "INV-FVG-09": fvg09, "INV-FVG-10": fvg10,
     "INV-LIQ-01": liq01, "INV-LIQ-02": liq02, "INV-LIQ-03": liq03, "INV-LIQ-04": liq04, "INV-LIQ-05": liq05,
     "INV-LIQ-06": liq06, "INV-LIQ-07": liq07, "INV-LIQ-08": liq08, "INV-LIQ-09": liq09, "INV-LIQ-10": liq10,
+    "INV-LIQ-11": liq11, "INV-LIQ-12": liq12,
     "INV-EQ-01": eq01, "INV-EQ-02": eq02, "INV-EQ-03": eq03, "INV-EQ-04": eq04, "INV-EQ-05": eq05,
     "INV-EQ-06": eq06, "INV-EQ-07": eq07, "INV-EQ-08": eq08, "INV-EQ-09": eq09, "INV-EQ-10": eq10,
     "INV-EQ-11": eq11, "INV-EQ-12": eq12,

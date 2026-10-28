@@ -65,6 +65,10 @@ LIQ_SIG = _inv("INV-LIQ-07", "LIQUIDITY", "a level passed the significance filte
 LIQ_PIVOT = _inv("INV-LIQ-08", "LIQUIDITY", "a level is a DEF-L1 pivot (strict left, ≥ right) judged exactly at X + right")
 LIQ_MEM = _inv("INV-LIQ-09", "LIQUIDITY", "live + closed records per side ≤ memory")
 LIQ_EVSTATE = _inv("INV-LIQ-10", "LIQUIDITY", "TAKEN and exactly one of SWEEP/BREAK fire together on the taking bar")
+LIQ_DOM = _inv("INV-LIQ-11", "LIQUIDITY", "a level was dominant at birth: no extreme strictly beyond its price + EQ "
+                                          "tolerance in the W bars before its swing bar (C1)")
+LIQ_COUNT = _inv("INV-LIQ-12", "LIQUIDITY", "selectivity counters partition: REJECT = reaction + dominance + both, "
+                                            "PASS = levels created, pivots ≥ PASS + REJECT")
 # ── EQH / EQL (DEF-L5) ──
 EQ_UNIQUE = _inv("INV-EQ-01", "EQ", "an individual level belongs to at most one cluster")
 EQ_ID = _inv("INV-EQ-02", "EQ", "cluster identity (id, ref, origin, creation bar) never changes")
@@ -112,6 +116,8 @@ class Monitor:
         self.known: set = set()                 # (family, dir, sid) that exist
         self.fvg_snap: dict = {}
         self.liq_snap: dict = {}
+        lq = getattr(model, "liq", None)        # CREATED events per side so far, for INV-LIQ-12
+        self.liq_made = {1: lq.bsl.levels, -1: lq.ssl.levels} if lq is not None else {1: 0, -1: 0}
         self.eq_snap: dict = {}
         self.tol = model.settings.liq.tol_ticks * model.settings.tick
         self.eps = model.settings.eps
@@ -291,6 +297,12 @@ class Monitor:
                         self._fail(LIQ_CONF, f"{side.name} {x.id}: origin {x.origin_bar}, confirm {x.confirm_bar}, right {x.piv_r}")
                     if x.react < x.react_req or abs(x.react_req - s.k * x.tra) > 1e-9:
                         self._fail(LIQ_SIG, f"{side.name} {x.id}: reaction {x.react} < required {x.react_req}")
+                    if s.dom:                        # recomputed here, independently of the engine
+                        X, w = x.origin_bar, s.dom
+                        ref = None if X < w else max(lq.H[X - w:X]) if sg > 0 else min(lq.Lo[X - w:X])
+                        if ref is None or sg * (ref - x.price) > self.tol + self.eps:
+                            self._fail(LIQ_DOM, f"{side.name} {x.id}: earlier extreme {ref} in the {w} bars "
+                                                f"before bar {X} vs price {x.price} ± {self.tol}")
                 if x.taken_bar is None:
                     if x.cls != 0:
                         self._fail(LIQ_CLASS, f"{side.name} {x.id}: classified {x.cls} without a take")
@@ -316,7 +328,14 @@ class Monitor:
             for d, sid in created_now:
                 if d == sg:
                     self._pivot(side, sid, bar, lq)
-        for k in (LIQ_CONF, LIQ_AFTER, LIQ_CLASS, LIQ_FROZEN, LIQ_BEYOND, LIQ_FIRST, LIQ_SIG, LIQ_PIVOT, LIQ_MEM, LIQ_EVSTATE):
+            self.liq_made[sg] += sum(d == sg for d, _ in created_now)
+            if side.rejects != side.rej_react + side.rej_dom + side.rej_both or side.levels != self.liq_made[sg] \
+                    or side.pivots < side.levels + side.rejects:
+                self._fail(LIQ_COUNT, f"{side.name}: pivots {side.pivots}, PASS {side.levels} (created "
+                                      f"{self.liq_made[sg]}), REJECT {side.rejects} = {side.rej_react} + "
+                                      f"{side.rej_dom} + {side.rej_both}?")
+        for k in (LIQ_CONF, LIQ_AFTER, LIQ_CLASS, LIQ_FROZEN, LIQ_BEYOND, LIQ_FIRST, LIQ_SIG, LIQ_PIVOT, LIQ_MEM,
+                  LIQ_EVSTATE, LIQ_DOM, LIQ_COUNT):
             stats.INV_CHECKS[k] += 1
 
     def _pivot(self, side, sid, t, lq):
