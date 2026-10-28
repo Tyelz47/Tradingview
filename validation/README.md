@@ -55,6 +55,8 @@ validation/
   parity/               full parity (python -m validation.parity EXPORT.csv → pine_observed.json) and manual
                         parity (manual.py, --manual manual_observed.txt; manual_observed_template.txt) and
                         bounded Pine-Log parity (capture.py, --capture pine_capture.csv or .txt)
+  studies/              analyses before a definition is specified (never change the oracle):
+                        liquidity_significance.py + data/ (the committed real NQ capture)
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```

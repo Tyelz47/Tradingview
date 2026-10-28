@@ -1,5 +1,21 @@
 # Changelog
 
+## Tooling · validation agent 1.4.0 (2026-10-28, branch `tooling/validation-agent`) — liquidity significance study — no indicator change
+
+* `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md`: Phase 2 significance study (A–H), **for review; nothing approved or implemented**.
+  * Finding: on real NQ 1m (1,017 exact bars), the DEF-L2 reaction floor k = 1 sits at the 10th percentile of a reaction that is large by construction. NQ pivots are statistically indistinguishable from random-walk pivots.
+  * Recommendation: add a dominance condition (W = 10 / 30 / 60 bars, EQ tolerance included) and keep k. It is a strict subset of today's levels with identical take / sweep / break.
+* `python -m validation.studies.liquidity_significance [--grid] [--noise]` runs:
+  * feature distributions and outcome diagnostics;
+  * candidate definitions replayed through the oracle's own liquidity engine via a study subclass (the oracle is unchanged);
+  * a sensitivity grid, halves of the day, and a random-walk null.
+* The real 1,000-bar TradingView capture (IST v0.4.3-dev, bounded Pine-Log parity PASS) is committed in `validation/studies/data/`. `test_real_nq_capture_parity_is_preserved` keeps that parity as a regression.
+* 11 new tests (`tests/test_study_significance.py` and the preserved-parity test):
+  * the study engine reproduces the oracle;
+  * dominance boundaries;
+  * subset and identical takes on NQ and random walks.
+* `src/IST.pine`, the oracle, the presets and `PHASE1_BASELINE_v0.3.2` are unchanged.
+
 ## Tooling · validation agent 1.3.1 (2026-10-27, branch `tooling/validation-agent`) — capture importer reads TradingView's Pine Logs CSV — no indicator change
 
 **ROOT CAUSE.** TradingView saves Pine Logs as a real CSV (`Date,Message`) with every message quoted and inner quotes doubled. The capture importer read physical lines, so the closing quote stayed in the last value (`warmup=17"`, `int()` failed). The doubled quotes of the JSON tickerid in `sym=` were not undone either.

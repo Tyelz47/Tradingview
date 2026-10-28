@@ -57,7 +57,7 @@ Not "being a pivot". A swing becomes a liquidity level only when all of these ho
 | left 5, right 3 | 72 | 100 % | 98 % | 86 % | 61 % | 38 % |
 | left 10, right 5 | 40 | 100 % | 100 % | 97 % | 86 % | 69 % |
 
-On noise, the window does almost all of the selection and the default floors remove only stalls (≈2 % for Balanced, ≈14–18 % for Strict depending on the walk; v0.4.1-dev fuzz, seed 7: Balanced 2.4 % highs / 1.7 % lows, Strict 17.6 % / 16.0 %). This is a property of the noise model, not of NQ. **The presets are not changed on this evidence.** On real charts debug rows 22–23 (`Swing highs / lows (loaded history)`) show pivots, significance PASS, REJECT (with %), warm-up and levels created, per side. If Balanced proves too busy, the transparent levers are `left` (no latency) or the Strict preset. The k values are not quietly retuned.
+On noise, the window does almost all of the selection and the default floors remove only stalls (≈2 % for Balanced, ≈14–18 % for Strict depending on the walk; v0.4.1-dev fuzz, seed 7: Balanced 2.4 % highs / 1.7 % lows, Strict 17.6 % / 16.0 %). This is a property of the noise model, not of NQ. **The presets are not changed on this evidence.** On real charts debug rows 22–23 (`Swing highs / lows (loaded history)`) show pivots, significance PASS, REJECT (with %), warm-up and levels created, per side. If Balanced proves too busy, the transparent levers are `left` (no latency) or the Strict preset. The k values are not quietly retuned. Real NQ data (1,000-bar capture, parity PASS) confirmed this on 2026-10-27. A study of candidate definitions, **not approved and not implemented**, is in `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md`.
 
 ---
 

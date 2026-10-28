@@ -337,6 +337,18 @@ def test_command_line_exit_codes(tmp_path, capsys):
     assert "TradingView Pine Logs CSV (Date,Message)" in capsys.readouterr().out
 
 
+def test_real_nq_capture_parity_is_preserved():
+    """The 1,000-bar TradingView capture of IST v0.4.3-dev (NQ1! 1m, Balanced, 2026-10-27,
+    committed in validation/studies/data) still matches the oracle. A change of the
+    significance definition is expected to break this test: it then needs a new capture."""
+    from validation.studies.liquidity_significance import DATA
+    r = capture.compare(capture.parse(DATA.read_text(encoding="utf-8")))
+    assert r["differences"] == 0, _diffs(r)
+    assert (r["compared_bars"], r["matched_events"], r["warmup"]) == (1000, 1258, 17)
+    assert r["totals"]["pine"]["swing highs"] == "71 PASS · 7 REJECT" == r["totals"]["oracle"]["swing highs"]
+    assert r["totals"]["pine"]["swing lows"] == "68 PASS · 1 REJECT" == r["totals"]["oracle"]["swing lows"]
+
+
 def test_capture_observed_tradingview_data():
     result = capture.run()
     stats.RESULTS["capture_parity"] = result

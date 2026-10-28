@@ -27,6 +27,12 @@ No DIFFERS indication appeared, and the renderer showed a limited number of leve
 * Result: **PASS**. 300 bars × 7 series, and 340 events of structures born inside the window, with 0 differences.
 * That window held **0 REJECT pivots**, so the REJECT branch of the reaction filter is not yet exercised. A 1,000-bar capture is next.
 
+**Bounded Pine-Log parity, 1,000-bar capture (user, 2026-10-27 03:38 → 21:34 New York, NQ1! 1m, Balanced, IST v0.4.3-dev).** This is a parity observation, not an L-test result.
+* Result: **PASS**. 1,000 bars + 17 warm-up × 7 series, and 1,258 events, with 0 differences.
+* After the warm-up, Pine and the oracle agree exactly on the swings: highs 71 PASS / 7 REJECT, lows 68 PASS / 1 REJECT. This includes the REJECT branch.
+* The capture is committed (`validation/studies/data/`) and preserved by `test_real_nq_capture_parity_is_preserved`.
+* Conclusion: the permissiveness of Balanced comes from its definition, not from the Pine implementation. See `docs/STUDY_LIQUIDITY_SIGNIFICANCE.md`, a study awaiting review; no definition is changed.
+
 ---
 
 ## S · Static and model checks (executed here)
