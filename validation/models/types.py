@@ -116,6 +116,14 @@ class LrlSettings:
     cand_memory: int = 25       # DEF-LRL6 2-point candidates per side
     memory: int = 50            # DEF-LRL6 LRL records per side
 
+    @property
+    def lookback(self) -> int:
+        """Bars a 3-point LRL confirmed at t depends on (its dependency graph): its first point
+        is at most 2 × gap bars before the third (X3 = t − right), and τ needs the TR average
+        there (tra_len true ranges, the first needing the close before it). Pine's Parity
+        capture warm-up uses the same formula."""
+        return self.right + 2 * self.gap + self.tra_len
+
 
 @dataclass(frozen=True)
 class SessionSettings:

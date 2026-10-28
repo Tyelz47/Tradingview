@@ -42,9 +42,10 @@ validation/
     eq.py               DEF-L5.1…L5.6
     sessions.py         DEF-F1…F6
     levels.py           DEF-G2…G6 chart-side logic (day boundary = labelled ASSUMPTION)
-    lrl.py              docs/LRL.md DEF-LRL1…LRL8: opt-in module "lrl", not in Pine, not in default runs
+    lrl.py              docs/LRL.md DEF-LRL1…LRL8: opt-in module "lrl" (not in default runs; the Parity
+                        capture turns it on when the CAPTURE line says lrl=1). Pine: v0.5.0-dev, ST-17
     ist.py              all modules in the Pine engine order → events + state
-  invariants.py         52 named invariants (9 LRL, checked only when the module runs) + the per-bar Monitor
+  invariants.py         53 named invariants (10 LRL, checked only when the module runs) + the per-bar Monitor
   static_checks.py      text checks of src/IST.pine
   regression.py         corpus, baseline snapshot, diff/classify, legacy models from git
   candles.py            builders, random walks, TradingView CSV loader, mirror/shift

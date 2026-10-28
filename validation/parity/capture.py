@@ -20,13 +20,18 @@ from pathlib import Path
 
 from validation import VALIDATION_DIR
 from validation.models.ist import IstModel
-from validation.models.types import PRESETS, Candle, Settings
+from validation.models.events import LRL_TERMINAL
+from validation.models.types import MODULES, PRESETS, Candle, LrlSettings, Settings
 from validation.parity import oracle_series
 from validation.parity.manual import DIFF, MATCH, NOBS, _ANY_NAME, _event, _fmt, _same_px, _tf_seconds, pine_text
 
 PARITY_DIR = VALIDATION_DIR / "parity"
 TOL = 1e-6                     # Pine prints these values with 8 decimals
-SECTIONS = ("settings", "bars", "events")
+SECTIONS = ("settings", "bars", "events", "lrl")
+# CAPTURE key → (LrlSettings field, type): the frozen LRL constants Pine ran with (v0.5.0-dev+).
+LRL_HEAD = {"lrlleft": ("left", int), "lrlright": ("right", int), "lrltol": ("tol_k", float), "lrlgap": ("gap", int),
+            "lrlsep": ("sep_k", float), "lrldrop": ("drop_k", float), "lrltra": ("tra_len", int),
+            "lrlcand": ("cand_memory", int), "lrlmem": ("memory", int)}
 # BAR key → oracle series (parity.SERIES). The take codes are left out on purpose: on one
 # bar a level born before the window can be taken too, and the oracle cannot know it.
 FIELDS = {"FV": "fvg_verdict", "FR": "fvg_required", "SH": "bsl_pivot", "SL": "ssl_pivot",
@@ -82,7 +87,25 @@ def _bar(parts: list[str], tick: float | None) -> dict:
     if bad:
         raise ValueError(f"wrong OHLC: {'; '.join(bad)}")
     return {"i": int(kv["i"]), "time": t, "candle": c,
-            "vals": {s: _num(k, kv[k]) for k, s in FIELDS.items() if k in kv}}
+            "vals": {s: _num(k, kv[k]) for k, s in FIELDS.items() if k in kv}, "lrl": _lrl_fields(kv)}
+
+
+def _lrl_fields(kv: dict) -> dict | None:
+    """LH / LL: every active LRL as id:boundary now:previous boundary (';'-separated);
+    KH / KL: candidates per side. None for a build without LRL (before v0.5.0-dev)."""
+    if not {"LH", "LL", "KH", "KL"} <= set(kv):
+        return None
+    out = {}
+    for key, name in (("LH", "high"), ("LL", "low")):
+        recs = {}
+        for item in filter(None, kv[key].split(";")):
+            parts = item.split(":")
+            if len(parts) != 3:
+                raise ValueError(f"{key}: expected id:boundary:previous, got {item!r}")
+            recs[int(parts[0])] = (_num(key, parts[1]), _num(key, parts[2]))
+        out[name] = recs
+    out["cand_high"], out["cand_low"] = int(kv["KH"]), int(kv["KL"])
+    return out
 
 
 def _messages(text: str) -> tuple[list[tuple[int, str, str | None]], str]:
@@ -271,6 +294,9 @@ def settings_of(h: dict) -> tuple[Settings, bool]:
                  "tol_ticks": int(h["eqtol"]), "min_touch": int(h["eqmin"]), "memory": int(h["liqmem"])},
          "sessions": {"timezone": h["tz"], "timeframe_sec": tf, **({"windows": wins} if ses_ok else {})},
          "levels": {"timeframe_sec": tf}}
+    if h.get("lrl") == "1":                   # v0.5.0-dev+: the LRL engine ran in Pine
+        s["modules"] = [*MODULES, "lrl"]
+        s["lrl"] = {f: typ(h[k]) for k, (f, typ) in LRL_HEAD.items() if k in h}
     return Settings.from_dict(s), ses_ok
 
 
@@ -295,6 +321,13 @@ def compare(cap: dict, preset: str | None = None) -> dict:
             add("settings", MATCH if abs(got - want) < 1e-9 else DIFF, f"{name} {key}: Pine {got:g} · oracle preset {want:g}")
     add("settings", MATCH if h["confirmed"] == "1" else DIFF,
         "confirmed only: ON" if h["confirmed"] == "1" else "confirmed only: OFF · the oracle models ON only")
+    lrl_on = "lrl" in s.modules
+    if lrl_on:                                                # the frozen LRL constants (docs/LRL.md)
+        approved = LrlSettings()
+        for k, (f, _) in LRL_HEAD.items():
+            got, ok = getattr(s.lrl, f), getattr(approved, f)
+            add("settings", MATCH if k in h and got == ok else DIFF,
+                f"LRL {f}: Pine {h.get(k, 'missing')} · approved {ok:g}")
 
     # bars: the oracle replays exactly the captured candles; the warm-up is never compared
     candles = [b["candle"] for b in bars]
@@ -303,8 +336,9 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     w_fvg = s.fvg.lookback                                    # warm-up from the dependency graph (models.types)
     w_swing = s.liq.lookback                                  # bars a swing bar X needs before it
     w_liq = w_swing + s.liq.right
-    if int(h["warmup"]) < max(w_fvg, w_liq):
-        notes.append(f"Pine captured {h['warmup']} warm-up bars; {max(w_fvg, w_liq)} are needed, so fewer bars are compared")
+    w_need = max(w_fvg, w_liq, s.lrl.lookback if lrl_on else 0)
+    if int(h["warmup"]) < w_need:
+        notes.append(f"Pine captured {h['warmup']} warm-up bars; {w_need} are needed, so fewer bars are compared")
     start = {k: w_fvg if k.startswith("fvg") else w_liq for k in FIELDS.values()}
     compared, bar_diffs = Counter(), []
     for t, b in enumerate(bars):
@@ -337,10 +371,13 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     t0, t_end = bars[0]["time"], bars[-1]["time"]
     t_fvg = bars[w_fvg]["time"] if len(bars) > w_fvg else None
     t_swing = bars[w_swing]["time"] if len(bars) > w_swing else None
-    oracle = [{"time": e.time, "type": e.type, "dir": e.dir, "sid": e.sid, "price": e.price, "e": e} for e in m.events]
+    is_lrl = lambda e: e["type"].startswith("LRL_")           # compared in their own section (_compare_lrl)
+    oracle = [{"time": e.time, "type": e.type, "dir": e.dir, "sid": e.sid, "price": e.price, "e": e} for e in m.events
+              if not e.type.startswith("LRL_")]
+    pine_events = [e for e in cap["events"] if not is_lrl(e)]
     fam = lambda e: e["type"].split("_")[0]
     drops = {}
-    for e in oracle + cap["events"]:
+    for e in oracle + pine_events:
         if e["type"].endswith("DROPPED_MEMORY"):
             key = (fam(e), e["dir"], e["sid"])
             drops[key] = min(drops.get(key, e["time"]), e["time"])
@@ -368,7 +405,7 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     ident = lambda e: (e["type"], e["dir"], e["sid"])
     by_id = {ident(e): e for e in oracle if outside(e) is None}
     seen, matched, nobs = set(), Counter(), Counter()
-    for o in cap["events"]:
+    for o in pine_events:
         why = outside(o)
         if why:
             nobs[why] += 1
@@ -394,16 +431,151 @@ def compare(cap: dict, preset: str | None = None) -> dict:
         add("events", MATCH, f"{typ}: {n}")
     for why, n in nobs.most_common():
         add("events", NOBS, f"{n} Pine events not compared: {why}")
+    lrl = _compare_lrl(cap, m, want, s, add, fmt) if lrl_on else None
     sym = re.search(r'"symbol"\s*:\s*"([^"]+)"', h.get("sym", ""))       # extended tickerid: a JSON object
     cnt = Counter(c["status"] for c in checks)
     return {"status": "COMPARED", "mode": "BOUNDED PINE-LOG BAR-BY-BAR PARITY", "checks": checks, "counts": cnt,
-            "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars),
+            "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars), "lrl": lrl,
             "compared_bars": max(0, len(bars) - max(w_fvg, w_liq)), "warmup": max(w_fvg, w_liq),
             "series": sum(1 for k in FIELDS.values() if compared[k]),
             "matched_events": sum(matched.values()), "window": f"{fmt(t0)} → {fmt(t_end)}",
             "symbol": sym[1] if sym else h.get("sym", "—"), "source": cap.get("source", "—"),
             "about": (f"preset {name} → left {s.liq.left} · right {s.liq.right} · k {s.liq.k:g} · EQ {s.liq.tol_ticks} "
                       f"ticks · min {s.liq.min_touch} · tick {s.tick:g} · {tz}")}
+
+
+def _kv(text: str) -> dict:
+    """The key=value parts of an event's audit text (after 'px=… · ')."""
+    m = re.search(r"\bpx=\S+ · (.*)$", text)
+    return {k.strip(): v.strip() for k, eq, v in (p.partition("=") for p in (m[1] if m else "").split(" · ")) if eq}
+
+
+def _compare_lrl(cap: dict, m: IstModel, want: dict, s: Settings, add, fmt) -> dict:
+    """LRL in the captured window: every LRL event (type, side, id, bar, price, τ, points,
+    boundaries) and, per bar and side, every active LRL's boundary now and on the previous
+    bar, then the candidate counts.
+
+    NOT OBSERVABLE (never compared), because the oracle starts empty at the first captured bar:
+    * an LRL whose first point lies in the first `tra_len` bars (its τ needs the TR average
+      there) or before the capture;
+    * any LRL sharing a point (same side) with such an LRL, in either stream, transitively:
+      that point was a member, or spent, in one stream and free in the other;
+    * memory drops (Pine's memory also holds records from before the capture);
+    * candidate counts before bar `lookback` (= right + 2 × gap + TR length), while such an LRL
+      is active, and for 2 × gap + right bars after one of its points."""
+    ls, bars, tz = s.lrl, cap["bars"], cap["head"]["tz"]
+    times = [b["time"] for b in bars]
+    index = {t: i for i, t in enumerate(times)}
+    t_anchor = times[ls.tra_len] if len(times) > ls.tra_len else float("inf")
+    names = {1: "high", -1: "low"}
+    pine = [e for e in cap["events"] if e["type"].startswith("LRL_")]
+    for e in pine:
+        e["kv"] = _kv(e["text"])
+    oracle = [{"time": e.time, "type": e.type, "dir": e.dir, "sid": e.sid, "price": e.price, "kv": _kv(f"px=0 · {e.meta}"),
+               "e": e} for e in m.events if e.type.startswith("LRL_")]
+    # points (side, bar time) of every LRL known in each stream
+    pts = {"pine": {}, "oracle": {}}
+    for src, evs in (("pine", pine), ("oracle", oracle)):
+        for e in evs:
+            if "pts" in e["kv"]:
+                pts[src].setdefault((e["dir"], e["sid"]), set()).update((e["dir"], int(t)) for t in e["kv"]["pts"].split(","))
+    keys = {(e["dir"], e["sid"]) for e in pine + oracle}
+    for b in bars:
+        for g in (1, -1):
+            keys |= {(g, i) for i in b["lrl"][names[g]]}
+    for want_side, g in (("lrl_high", 1), ("lrl_low", -1)):
+        for d in want.get(want_side, []):
+            keys |= {(g, i) for i in d}
+    nobs = {k for k in keys if k[1] < t_anchor}
+    nobs |= {(e["dir"], e["sid"]) for e in pine + oracle if e["type"] == "LRL_DROPPED_MEMORY"}
+    grow = True
+    while grow:                                               # contamination by shared points, to closure
+        bad = set().union(*(pts[src].get(k, set()) for src in pts for k in nobs))
+        more = {k for k in keys - nobs if (pts["pine"].get(k, set()) | pts["oracle"].get(k, set())) & bad}
+        nobs |= more
+        grow = bool(more)
+
+    # events
+    ev_key = lambda e: (e["type"], e["dir"], e["sid"], e["time"])
+    left = {ev_key(e): e for e in oracle if (e["dir"], e["sid"]) not in nobs and e["type"] != "LRL_DROPPED_MEMORY"}
+    matched, nobs_ev, diffs = Counter(), Counter(), 0
+    num = lambda kv, k: float(kv[k]) if k in kv and kv[k] != "na" else None
+    for o in pine:
+        if o["type"] == "LRL_DROPPED_MEMORY":
+            nobs_ev["memory drops: Pine's memory also holds LRLs from before the capture"] += 1
+            continue
+        if (o["dir"], o["sid"]) in nobs:
+            nobs_ev["LRLs anchored in the TR warm-up or before the capture, or sharing a point with one"] += 1
+            continue
+        e = left.pop(ev_key(o), None)
+        if e is None:
+            add("lrl", DIFF, f"line {o['line']}: {o['text']}: not in the oracle (an extra Pine event)")
+            diffs += 1
+            continue
+        bad = [] if _same_px(o["price"], e["price"], s.tick) else [f"price Pine {o['price']} · oracle {e['price']}"]
+        for k in ("tau", "bnow", "bprev"):
+            a, b = num(o["kv"], k), num(e["kv"], k)
+            if (a is None) != (b is None) or (a is not None and abs(a - b) > TOL):
+                bad.append(f"{k} Pine {o['kv'].get(k)} · oracle {e['kv'].get(k)}")
+        if o["kv"].get("pts") != e["kv"].get("pts") or o["kv"].get("n") != e["kv"].get("n"):
+            bad.append(f"points Pine {o['kv'].get('pts')} · oracle {e['kv'].get('pts')}")
+        if bad:
+            add("lrl", DIFF, f"line {o['line']}: {o['text']}: {'; '.join(bad)}")
+            diffs += 1
+        else:
+            matched[o["type"]] += 1
+    for e in sorted(left.values(), key=lambda e: e["time"]):
+        add("lrl", DIFF, f"missing in Pine: {pine_text(e['e'], tz, s.tick)} (oracle)")
+        diffs += 1
+
+    # per bar: the boundaries of every observable active LRL, then the candidate counts
+    spans = []
+    for g in (1, -1):
+        for k, src in ((names[g], "pine"), (f"lrl_{names[g]}", "oracle")):
+            for t in range(len(bars)):
+                cur = bars[t]["lrl"][k] if src == "pine" else want[k][t]
+                spans += [(g, t) for i in cur if (g, i) in nobs]
+    busy = set(spans)
+    for (g, _), ps in ((k, v) for src in pts for k, v in pts[src].items() if k in nobs):
+        for _, t in ps:
+            if t in index:
+                busy |= {(g, j) for j in range(index[t], index[t] + 2 * ls.gap + ls.right + 2)}
+    bound_bars, bound_vals, cand_bars = 0, 0, 0
+    for t, b in enumerate(bars):
+        for g in (1, -1):
+            n = names[g]
+            p = {i: v for i, v in b["lrl"][n].items() if (g, i) not in nobs}
+            o = {i: v for i, v in want[f"lrl_{n}"][t].items() if (g, i) not in nobs}
+            bound_bars += 1
+            if p.keys() != o.keys():
+                add("lrl", DIFF, f"{fmt(b['time'])} (i={b['i']}) active {n}-side LRLs: Pine {sorted(p)} · oracle {sorted(o)}")
+                diffs += 1
+                continue
+            for i in p:
+                bound_vals += 1
+                if any(x is None or abs(x - y) > TOL for x, y in zip(p[i], o[i])):
+                    add("lrl", DIFF, f"{fmt(b['time'])} (i={b['i']}) LRL {fmt(i)} {n} boundary now · previous: "
+                                     f"Pine {p[i]} · oracle {o[i]}")
+                    diffs += 1
+            if t >= ls.lookback and (g, t) not in busy:
+                cand_bars += 1
+                if b["lrl"][f"cand_{n}"] != want[f"lrl_cand_{n}"][t]:
+                    add("lrl", DIFF, f"{fmt(b['time'])} (i={b['i']}) {n}-side candidates: Pine {b['lrl'][f'cand_{n}']} · "
+                                     f"oracle {want[f'lrl_cand_{n}'][t]}")
+                    diffs += 1
+    if not diffs:
+        add("lrl", MATCH, f"active LRL boundaries (now · previous bar): {bound_bars} bar-sides, {bound_vals} values")
+        add("lrl", MATCH, f"candidate counts: {cand_bars} bar-sides from bar {ls.lookback}")
+    for typ, n in sorted(matched.items()):
+        add("lrl", MATCH, f"{typ}: {n}")
+    for why, n in nobs_ev.most_common():
+        add("lrl", NOBS, f"{n} Pine LRL events not compared: {why}")
+    if nobs:
+        add("lrl", NOBS, f"{len(nobs)} LRLs not compared (anchored in the TR warm-up or before the capture, "
+                         f"a shared point, or dropped from memory)")
+    ends = lambda evs: Counter(e["type"][4:] for e in evs if e["type"] in LRL_TERMINAL and (e["dir"], e["sid"]) not in nobs)
+    return {"events": sum(matched.values()), "bar_sides": bound_bars, "boundaries": bound_vals, "cand_bars": cand_bars,
+            "lookback": ls.lookback, "not_observable": len(nobs), "ends": {"pine": ends(pine), "oracle": ends(oracle)}}
 
 
 def latest_capture() -> Path | None:
@@ -426,8 +598,11 @@ def run(path=None, preset: str | None = None) -> dict:
 
 def verdict(r: dict) -> str:
     c = r["counts"]
-    tally = (f"{r['compared_bars']} bars × {r['series']} series and {r['matched_events']} events compared; "
-             f"{c[MATCH]} MATCH · {c[DIFF]} DIFFERENCE · {c[NOBS]} NOT OBSERVABLE")
+    lrl = r.get("lrl")
+    tally = (f"{r['compared_bars']} bars × {r['series']} series and {r['matched_events']} events compared"
+             + (f" + LRL: {lrl['events']} events, {lrl['boundaries']} boundaries, {lrl['cand_bars']} candidate counts"
+                if lrl else "")
+             + f"; {c[MATCH]} MATCH · {c[DIFF]} DIFFERENCE · {c[NOBS]} NOT OBSERVABLE")
     return f"BOUNDED PINE-LOG BAR-BY-BAR PARITY: {'FAIL' if r['differences'] else 'PASS'} — {tally}"
 
 
@@ -450,5 +625,9 @@ def show(r: dict, build: str) -> None:
     print(f"\n  {'after the warm-up':<20}{'Pine (log)':<42}oracle")
     for k in r["totals"]["pine"]:
         print(f"  {k:<20}{r['totals']['pine'][k]:<42}{r['totals']['oracle'][k]}")
+    if r.get("lrl"):
+        e = r["lrl"]["ends"]
+        f = lambda c: " · ".join(f"{k} {c.get(k, 0)}" for k in ("DRIFT", "SWEEP", "BREAK", "EXPIRED"))
+        print(f"  {'LRL ends (observable)':<20}{f(e['pine']):<42}{f(e['oracle'])}")
     print(f"\n  {verdict(r)}")
     print("  FULL CSV BAR-BY-BAR PARITY: not run here (it needs the Data Window export).")

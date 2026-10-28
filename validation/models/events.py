@@ -29,9 +29,6 @@ TYPES = (
 # The terminal LRL classes (docs/LRL.md DEF-LRL5): exactly one per LRL, never relabelled.
 LRL_TERMINAL = ("LRL_DRIFT", "LRL_SWEEP", "LRL_BREAK", "LRL_EXPIRED")
 RANK = {t: i for i, t in enumerate(TYPES)}
-# Types of opt-in oracle modules that src/IST.pine does not implement yet (ST-14 excludes
-# them; empty this set when Pine gains the module).
-ORACLE_ONLY = frozenset(t for t in TYPES if t.startswith("LRL_"))
 
 # Events that mark a one-time transition of one structure: at most once per (type, dir, sid).
 # LRL_EXTENDED repeats (4th, 5th, … point) and is keyed by its bar, like LEVEL_SET.

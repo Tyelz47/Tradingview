@@ -36,13 +36,16 @@ def test_approved_constants():
         3, 2, ("tr", 0.5), 30, 1.0, 2.0, "chord", True)
 
 
-def test_event_names_prepared_for_pine():
-    """The exact LRL event names the future Pine f_evName must emit. Until then they are
-    oracle-only, and ST-14 (Pine names = oracle names) excludes exactly them."""
-    from validation.models.events import LRL_TERMINAL, ORACLE_ONLY, TYPES
+def test_event_names_match_pine():
+    """The seven LRL event names, emitted by src/IST.pine f_evName exactly as the oracle
+    names them (ST-14 compares the whole family with no exception)."""
+    from validation.models.events import LRL_TERMINAL, TYPES
+    from validation.static_checks import st14_event_names_match_oracle
     names = {"LRL_CONFIRMED", "LRL_EXTENDED", "LRL_SWEEP", "LRL_BREAK", "LRL_DRIFT", "LRL_EXPIRED", "LRL_DROPPED_MEMORY"}
-    assert {t for t in TYPES if t.startswith("LRL_")} == ORACLE_ONLY == names
+    assert {t for t in TYPES if t.startswith("LRL_")} == names
     assert set(LRL_TERMINAL) == {"LRL_DRIFT", "LRL_SWEEP", "LRL_BREAK", "LRL_EXPIRED"}
+    ok, detail = st14_event_names_match_oracle()
+    assert ok, detail
 
 
 @pytest.mark.parametrize("name", sorted(study.SCENARIOS))

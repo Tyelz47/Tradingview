@@ -39,7 +39,7 @@ KEYS = {"SYMBOL": "text", "TIMEFRAME": "text", "TIMEZONE": "text", "TICK_SIZE": 
         **{k: "int" for k in COUNTS}}
 FAMILIES = ("FVG", "SESSION", "LEVEL", "BSL", "SSL", "EQH", "EQL")
 
-_NAME = r"(?:FVG|SESSION|LEVEL|BSL|SSL|EQH|EQL)_[A-Z_]*[A-Z]"
+_NAME = r"(?:FVG|SESSION|LEVEL|BSL|SSL|EQH|EQL|LRL)_[A-Z_]*[A-Z]"
 _ANY_NAME = re.compile(rf"(?<![A-Z_]){_NAME}(?![A-Z_])", re.I)
 # One "Last events" / Pine Logs line (src/IST.pine f_evText). Searched, not anchored: a
 # Pine Logs timestamp or a row label in front of it is ignored.

@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.5.0-dev — LRL detection in Pine (2026-10-28, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.9.0
+
+**Decision (user, 2026-10-28):** "The approved LRL oracle and DRIFT correction are accepted. You may now implement LRL in Pine." The goal is DEF-LRL1…8 exactly as the oracle has them, with no tuning. DEF-LRL9 (context classification), CISD, displacement and HTF FVG are not started.
+
+**CHANGE** (`src/IST.pine`, additive):
+* **L1:** an own TR average and the 3 / 2 pivot windows; `max_bars_back` 5000 on high / low.
+* **L2:** LRL pivots, with no significance test.
+* **L3:** UDTs `Lrl` / `LrlSide` and the methods `fits` · `finish` · `advance` · `trim` · `grow` · `promote` · `seed` · `judge`, in side coordinates like the oracle.
+* **Engine run:** last, at bar close: ADVANCE both sides, then JUDGE both sides.
+* **L5:** the seven event names; LRL event text carries HIGH / LOW and its audit values.
+* **L6:** the nearest active LRL per side (polyline through the confirmed pivots, a dashed projection, "LRL"), optional history (10 per side) and D / S / B / E markers, and debug candidates. Everything is rebuilt on the last bar.
+* **L7:** debug rows 35–41.
+* **Parity capture:** LRL constants on the CAPTURE line; `LH` / `LL` / `KH` / `KL` on every BAR line; warm-up from the LRL dependencies (= 76).
+* **Inputs:** Enable LRL engine `[calc]` ON · Show LRL ON · Show historical LRL OFF · Show lifecycle markers OFF · (Developer) Inspect LRL, Draw LRL candidates OFF. The definition constants are not inputs.
+
+**Validation 1.9.0:**
+* **ST-08** no longer forbids LRL.
+* **ST-14:** the temporary LRL exception is removed (`events.ORACLE_ONLY` is gone).
+* **New ST-17:** the constants, 30 formulas and two orders.
+* **`tests/test_lrl_pine.py`:** 22 Pine mutations are each caught, and the engine names no Phase 1 / 2 state.
+* **Bounded LRL parity** in `parity/capture.py`: events, per-bar boundaries now / previous, candidate counts, with an explicit NOT OBSERVABLE rule.
+* **`tests/test_parity_lrl.py`:** 0 DIFFERENCE on faithful synthetic captures, including a window opening inside an active LRL; 8 kinds of injected error are detected.
+* **Oracle:** LRL event text identical to Pine's (`n`, `tau`, `pts` / `bnow`, `bprev`, `close`). `LrlSettings.lookback`.
+* **Docs:** `docs/LRL.md` §6, and the new `docs/TESTS_LRL.md` (TradingView procedure).
+
+**PHASE 1 / PHASE 2 IMPACT:** none in logic.
+* LRL never reads or writes FVG, session, level, BSL / SSL or EQ state (ST-17, S-LRL-4).
+* The oracle shows identical Phase 1 / 2 events and state with LRL on and off.
+* Regression is unchanged. ST-15 lists the same 11 reviewed Phase 1 lines.
+* Shared outputs: "Last events" and the debug Pine Logs now also list LRL events.
+
+**REPAINT IMPACT:** none. Every LRL decision is made at bar close from bars ≤ t. Drawn segments join confirmed pivots, and only the active projection follows the current bar.
+
+**RISKS:** Pine compile and runtime are not verified (LRL-L00 pending). The Pine-only bound `LRL_SPAN` = 4,900 bars per LRL is unreachable on real data.
+
+**TEST:** QUICK during development.
+* **FULL: PASS**, exit 0, 199.7 s, **452 passed, 1 skipped** (the paid CSV export). By section:
+  * static 17/17 (ST-17 new);
+  * Phase 1 and Phase 2 sections unchanged;
+  * invariants 53/53 · properties 17/17 · long walks 10/10;
+  * regression 5/5 (frozen baseline) · golden 6/6;
+  * parity 84/85 (incl. 16 LRL parity tests);
+  * LRL 76/76 · LRL study 34/34.
+* TradingView LRL-L00 … L12: PENDING (`docs/TESTS_LRL.md`).
+
 ## LRL correction — terminal class `LRL_DRIFT` · validation 1.8.0 (2026-10-28, branch `lrl/oracle`) — no indicator change
 
 **Decision (user, 2026-10-28, before any Pine):** a crossing caused by the projected boundary moving into otherwise stationary price is not a SWEEP / BREAK. It is the separate terminal event `LRL_DRIFT`.

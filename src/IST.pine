@@ -1,12 +1,15 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.4.4-dev · Phase 2 (liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.5.0-dev · LRL (diagonal liquidity) development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
 //  Scope           Phase 1: FVG engine · PDH/PDL · PWH/PWL · sessions · FVG alerts
 //                  Phase 2: swings · BSL/SSL · taken · sweep vs break · EQH/EQL
 //                  (DEF-L1…L7 → docs/LIQUIDITY.md) · debug
+//                  LRL: diagonal failure-swing liquidity, detection only
+//                  (DEF-LRL1…LRL8 → docs/LRL.md). Phase 2 frozen baseline =
+//                  v0.4.4-dev (tag PHASE2_BASELINE_v0.4.4-dev); LRL is additive.
 //  Layers          L1 market data / time   L2 detection   L3 state management
 //                  L4 context / filtering  L5 event bus   L6 renderer
 //                  L7 alerts / diagnostics
@@ -76,6 +79,7 @@ G_DBG  = "DEVELOPER"
 G_LIQC = "LIQUIDITY · CALCULATION"
 G_LIQV = "LIQUIDITY · DISPLAY"
 G_EQ   = "EQH / EQL"
+G_LRL  = "LRL · DIAGONAL LIQUIDITY"
 
 TT_CONF = "[calc] ON: every state change is evaluated once, at bar close. Realtime output is identical to the historical chart after reload.\nOFF (live): wick milestones update intrabar. Creation and invalidation still wait for the close."
 TT_MIN  = "[view] Hides secondary visuals: CE lines, FVG labels, faded FVGs, session boxes and midpoints, taken liquidity levels and liquidity labels."
@@ -96,6 +100,10 @@ TT_LANC = "[view] Where a level's line starts. Confirmation bar (default) = wher
 TT_LTKN = "[view] Taken levels: a faded dotted line ending at the bar that took the level, tagged sweep or break. Newest first, capped per side."
 TT_EQT  = "[calc] Swings of the same side whose prices differ by at most this many ticks are 'equal'. 0 = identical prices only."
 TT_EQM  = "[calc] Swings needed before a cluster counts as EQH/EQL and EQH/EQL_CREATED is logged."
+TT_LRL  = "[calc] LRL = a diagonal line through three or more successive failure swings: descending swing highs (bearish LRL, buy stops above) or ascending swing lows (bullish LRL). Fixed definition, no tuning inputs (docs/LRL.md): pivots left 3 · right 2 · consecutive points at most 30 bars apart, each beyond the EQ tolerance from the previous one and separated by a pullback ≥ 1.0 × TR average · tolerance τ = max(EQ tolerance, 0.5 × TR average at the first point) · the line through the first and the latest point, every point within τ of it, no high above it + τ, total drop > 2τ. Two points are only an internal candidate. Decided at bar close. OFF: nothing is computed; Phase 1 and Phase 2 output is the same either way."
+TT_LRLS = "[view] The nearest active LRL per side: a thin line through its confirmed pivots (decided segments never move), a dashed projection along the line while it is active, and a small LRL label."
+TT_LRLH = "[view] Also draw ended LRLs (the last 10 per side), faded; the projection ends on the bar where the LRL ended."
+TT_LRLM = "[view] Where an ended LRL finished: D drift (the high crossed the projected boundary but not the boundary projected on the previous bar) · S sweep · B break (closed beyond the boundary) · E expired. Needs Show historical LRL."
 
 confirmedOnly = input.bool(true, "Confirmed only", tooltip = TT_CONF, group = G_GEN, display = display.none)
 minimalMode   = input.bool(false, "Minimal mode", tooltip = TT_MIN, group = G_GEN, display = display.none)
@@ -184,6 +192,11 @@ eqTolTk  = input.int(4, "Tolerance (ticks)", minval = 0, maxval = 200, tooltip =
 eqMinTch = input.int(2, "Minimum touches", minval = 2, maxval = 5, tooltip = TT_EQM, group = G_EQ, display = display.none)
 eqMaxVis = input.int(3, "Max visible per side (nearest first)", minval = 0, maxval = 10, group = G_EQ, display = display.none)
 
+lrlOn    = input.bool(true, "Enable LRL engine", tooltip = TT_LRL, group = G_LRL, display = display.none)
+lrlShow  = input.bool(true, "Show LRL", tooltip = TT_LRLS, group = G_LRL, display = display.none)
+lrlHist  = input.bool(false, "Show historical LRL", tooltip = TT_LRLH, group = G_LRL, display = display.none)
+lrlMarks = input.bool(false, "Show lifecycle markers (D · S · B · E)", tooltip = TT_LRLM, group = G_LRL, display = display.none)
+
 alTiming  = input.enum(AlertTiming.barClose, "Timing", tooltip = TT_ALT, group = G_ALR, display = display.none)
 alBullNew = input.bool(true, "FVG created · bull", inline = "a1", group = G_ALR, display = display.none)
 alBearNew = input.bool(true, "bear", inline = "a1", group = G_ALR, display = display.none)
@@ -203,6 +216,8 @@ dbgInspect = input.int(0, "Inspect FVG (0 = newest, 1 = previous, …)", minval 
 dbgLiqIns  = input.int(0, "Inspect liquidity level (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
 capOn      = input.bool(false, "Parity capture → Pine Logs", tooltip = "[view] Validation tooling, default OFF. Writes the last N closed bars to Pine Logs as machine-readable lines (OHLC and the per-bar debug values, then that bar's events), plus the warm-up bars the comparison needs, for `python -m validation.parity --capture`. Bounded: never more than N + warm-up bars. Changes no calculation.", group = G_DBG, display = display.none)
 capN       = input.int(300, "Capture last N closed bars", minval = 50, maxval = 2000, group = G_DBG, display = display.none)
+dbgLrlIns  = input.int(0, "Inspect LRL (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
+dbgLrlCand = input.bool(false, "Draw LRL candidates (2 points, debug only)", tooltip = "[view] Debug mode only: dotted segments for the internal 2-point candidates. A candidate is never an LRL: it has no event and is not drawn otherwise.", group = G_DBG, display = display.none)
 
 // ════ CONSTANTS ════════════════════════════════════════════════════════════════
 
@@ -243,6 +258,31 @@ CLS_BREAK      = 2
 LIQ_TRA_LEN    = 14                    // liquidity's own TR-average length: FVG inputs never affect it
 EQ_MEM         = 25                    // EQ clusters kept per side
 T_TAKEN        = 55                    // transparency: taken liquidity level
+// LRL (DEF-LRL1…LRL6 → docs/LRL.md, approved 2026-10-28): frozen definition constants, not inputs.
+LRL_L        = 3                       // DEF-LRL1 pivot engine: left bars
+LRL_R        = 2                       //                        right bars
+LRL_TOL_K    = 0.5                     // DEF-LRL2 τ = max(EQ tolerance, 0.5 × TR average at the first point)
+LRL_GAP      = 30                      // DEF-LRL3 max bars between consecutive points
+LRL_SEP_K    = 1.0                     // DEF-LRL3 pullback between consecutive points ≥ 1.0 × TR average
+LRL_DROP_K   = 2.0                     // DEF-LRL4 first − latest point > 2τ: no horizontal line fits
+LRL_TRA_LEN  = 14                      // its own TR-average length (like LIQ_TRA_LEN)
+LRL_CANDS    = 25                      // DEF-LRL6 2-point candidates kept per side
+LRL_MEM      = 50                      // DEF-LRL6 LRL records kept per side
+LRL_SPAN     = 4900                    // Pine only: bars one LRL may span (high/low history kept 5000 bars)
+LRL_DRIFT    = 1                       // terminal classes (DEF-LRL5); 0 = active
+LRL_SWEEP    = 2
+LRL_BREAK    = 3
+LRL_EXPIRED  = 4
+EV_LRL_CONFIRMED = 18                  // LRL: dir +1 = high side (bearish LRL) · −1 = low side (bullish LRL)
+EV_LRL_EXTENDED  = 19
+EV_LRL_SWEEP     = 20
+EV_LRL_BREAK     = 21
+EV_LRL_DRIFT     = 22
+EV_LRL_EXPIRED   = 23
+EV_LRL_DROPPED   = 24
+LRL_VIS_HIST = 10                      // [view] ended LRLs drawn per side (Show historical LRL)
+LRL_BEAR_COL = #E040FB                 // [view] high side (bearish LRL)
+LRL_BULL_COL = #26C6DA                 // [view] low side (bullish LRL)
 
 f_lineStyle(LnStyle s) =>
     switch s
@@ -427,6 +467,48 @@ type LiqSide
     int              dropHist = 0
     int              dropEq = 0
 
+// L3 · one LRL (DEF-LRL1…LRL6) or a 2-point candidate (born = na). Prices are in SIDE
+// coordinates: the high side stores highs, the low side stores −lows, so one set of
+// rules serves both sides and the bullish LRL is the exact mirror of the bearish one.
+// Points are only ever appended; the chord moves only when a point joins.
+type Lrl
+    int          id             // time of the first point's swing bar: unique per side, stable across reloads
+    array<int>   xs             // swing bars (bar_index) of the points
+    array<int>   ts             // their times
+    array<float> ps             // their prices, side coordinates
+    float        tau            // DEF-LRL2, frozen when the candidate formed
+    int          born           // confirmation bar (3rd point known); na = candidate
+    int          bornTime
+    array<int>   ext            // bars where the 4th, 5th, … point joined
+    int          touches = 0    // bars whose high came within τ of the line without crossing it
+    int          endKind = 0    // 0 active · LRL_DRIFT · LRL_SWEEP · LRL_BREAK · LRL_EXPIRED: terminal, never relabelled
+    int          endBar
+    int          endTime
+    float        endNow         // the boundary y + τ on the end bar (side coordinates)
+    float        endPrev        // the previous bar's boundary y(t − 1) + τ, same geometry
+
+// L3 · one side of the LRL engine: sign +1 = swing highs (bearish LRL), −1 = swing lows
+// (bullish LRL). Records, candidates, recent pivots and counters in one object.
+type LrlSide
+    int          sign
+    array<Lrl>   live           // confirmed and active, in confirmation order
+    array<Lrl>   hist           // confirmed and ended, in end order
+    array<Lrl>   cands          // 2-point candidates, oldest first: internal, no event, not drawn
+    array<int>   pivX           // recent LRL pivots, within LRL_GAP bars of the newest
+    array<int>   pivT
+    array<float> pivP
+    array<int>   members        // points of active LRLs
+    array<int>   spent          // points of crossed LRLs (DRIFT / SWEEP / BREAK) or of an active one dropped by memory: never used again
+    int          pivots = 0
+    int          seeded = 0
+    int          confirmed = 0
+    int          extended = 0
+    int          nDrift = 0
+    int          nSweep = 0
+    int          nBreak = 0
+    int          nExpired = 0
+    int          dropped = 0
+
 // ════ STATE ════════════════════════════════════════════════════════════════════
 
 // L3 · logical state
@@ -455,6 +537,14 @@ var array<int>          liqCnt      = array.new<int>(7, 0)      // drawn: BSL, S
 // L3 · liquidity (DEF-L1…L6)
 var LiqSide bslS = LiqSide.new(isBsl = true, live = array.new<Liq>(), hist = array.new<Liq>(), eqs = array.new<EqCluster>())
 var LiqSide sslS = LiqSide.new(isBsl = false, live = array.new<Liq>(), hist = array.new<Liq>(), eqs = array.new<EqCluster>())
+// L3 · LRL (DEF-LRL1…LRL6)
+var LrlSide lrlHi = LrlSide.new(sign = 1, live = array.new<Lrl>(), hist = array.new<Lrl>(), cands = array.new<Lrl>(), pivX = array.new<int>(), pivT = array.new<int>(), pivP = array.new<float>(), members = array.new<int>(), spent = array.new<int>())
+var LrlSide lrlLo = LrlSide.new(sign = -1, live = array.new<Lrl>(), hist = array.new<Lrl>(), cands = array.new<Lrl>(), pivX = array.new<int>(), pivT = array.new<int>(), pivP = array.new<float>(), members = array.new<int>(), spent = array.new<int>())
+// L6 · LRL view, rebuilt on the last bar (dropping these never touches logical state)
+var array<polyline> lrlPolys = array.new<polyline>()
+var array<line>     lrlLns   = array.new<line>()
+var array<label>    lrlLbls  = array.new<label>()
+var array<int>      lrlCnt   = array.new<int>(4, 0)      // drawn: active high side, active low side, ended, candidates
 // L1 · chart-side period trackers: anchors + source validation (DEF-G6)
 var float dHi     = na
 var int   dHiT    = na
@@ -498,6 +588,20 @@ float hiR     = ta.highest(high, LIQ_R)
 float loR     = ta.lowest(low, LIQ_R)
 int   swBar   = bar_index - LIQ_R    // candidate swing bar X, judged when bar X + right closes
 int   swTime  = time[LIQ_R]
+
+// LRL references (DEF-LRL1, DEF-LRL2): own TR average and pivot windows (left 3 · right 2).
+// A clean-line check reads the highs over an LRL's whole span, so high and low keep
+// 5000 bars of history (LRL_SPAN); the TR average is read at most 2 × LRL_GAP bars back.
+float lrlTra  = ta.sma(ta.tr(true), LRL_TRA_LEN)
+float lrlHiL  = ta.highest(high, LRL_L)
+float lrlLoL  = ta.lowest(low, LRL_L)
+float lrlHiR  = ta.highest(high, LRL_R)
+float lrlLoR  = ta.lowest(low, LRL_R)
+int   lrlX    = bar_index - LRL_R    // LRL swing bar X, judged when bar X + 2 closes
+int   lrlXT   = time[LRL_R]
+max_bars_back(high, 5000)
+max_bars_back(low, 5000)
+max_bars_back(lrlTra, 100)
 
 // The single gate between "observe" and "change state" (ARCHITECTURE §5).
 bool engineTick = not confirmedOnly or barstate.isconfirmed
@@ -575,6 +679,14 @@ bool  domLoOk  = LIQ_W == 0 or domLoRef >= swLoPx - EQ_TOL - EPS
 bool  sigHi    = pivHi and not liqWarm and reactHiOk and domHiOk
 bool  sigLo    = pivLo and not liqWarm and reactLoOk and domLoOk
 
+// DEF-LRL1: LRL pivot at swing bar X = t − 2, the DEF-L1 rule (strictly beyond the left
+// bars, at or beyond the right bars) with left 3 · right 2 and NO significance test:
+// failure swings are, by definition, not dominant (docs/STUDY_LRL.md §A).
+float lrlPxH  = high[LRL_R]
+float lrlPxL  = low[LRL_R]
+bool  lrlPivH = lrlPxH > lrlHiL[LRL_R + 1] and lrlPxH >= lrlHiR
+bool  lrlPivL = lrlPxL < lrlLoL[LRL_R + 1] and lrlPxL <= lrlLoR
+
 // ════ L5 · EVENT BUS ═══════════════════════════════════════════════════════════
 
 f_px(float p) =>
@@ -582,6 +694,10 @@ f_px(float p) =>
 
 f_tid(int t) =>
     na(t) ? "—" : str.format_time(t, "yyyy-MM-dd HH:mm", sesTz)
+
+// Unrounded numbers for LRL audit text: τ and line boundaries are not on the tick grid.
+f_x(float x) =>
+    na(x) ? "na" : str.tostring(x, "#.########")
 
 // Logged on history too, so every transition is auditable. No strings are built
 // here beyond the short reason code supplied by the caller.
@@ -615,11 +731,18 @@ f_evName(int k, int dir) =>
         EV_EQ_CREATED  => q + "CREATED"
         EV_EQ_TAKEN    => q + "TAKEN"
         EV_EQ_DROPPED  => q + "DROPPED_MEMORY"
+        EV_LRL_CONFIRMED => "LRL_CONFIRMED"
+        EV_LRL_EXTENDED  => "LRL_EXTENDED"
+        EV_LRL_SWEEP     => "LRL_SWEEP"
+        EV_LRL_BREAK     => "LRL_BREAK"
+        EV_LRL_DRIFT     => "LRL_DRIFT"
+        EV_LRL_EXPIRED   => "LRL_EXPIRED"
+        EV_LRL_DROPPED   => "LRL_DROPPED_MEMORY"
         => "UNKNOWN"
 
 f_evText(Event e) =>
     bool   isFvg = e.kind <= EV_FVG_DROPPED
-    bool   isLiq = e.kind >= EV_LIQ_CREATED
+    bool   isLiq = e.kind >= EV_LIQ_CREATED and e.kind <= EV_EQ_DROPPED   // LRL names carry no side: HIGH / LOW is added
     string d     = isLiq ? "" : e.dir > 0 ? (isFvg ? " BULL" : " HIGH") : e.dir < 0 ? (isFvg ? " BEAR" : " LOW") : ""
     string id    = e.kind == EV_LEVEL_SET ? "" : " id=" + f_tid(e.sid)
     f_evName(e.kind, e.dir) + d + id + " px=" + f_px(e.price) + (e.reason == "" ? "" : " · " + e.reason)
@@ -957,6 +1080,255 @@ method register(LiqSide s, float px, int oBar, int oTime, float react, float req
         f_emit(EV_LIQ_DROPPED, d, old.id, old.originBar, old.price, fromHist ? "closed record" : "live record · tracking stopped")
     l
 
+// ── LRL (DEF-LRL1…LRL6 → docs/LRL.md; reference model validation/models/lrl.py) ──
+// Reads bars and its own TR average only: it never reads or writes FVG, session,
+// reference-level, BSL/SSL or EQ state. Every decision is made at a bar's close.
+// Side coordinates of bar j (j ≤ bar_index): the low side mirrors high ↔ −low.
+method hiS(LrlSide s, int j) =>
+    s.sign > 0 ? high[bar_index - j] : -low[bar_index - j]
+
+method loS(LrlSide s, int j) =>
+    s.sign > 0 ? low[bar_index - j] : -high[bar_index - j]
+
+// DEF-LRL4: the chord through the first and the latest point.
+method slope(Lrl r) =>
+    (r.ps.last() - r.ps.first()) / (r.xs.last() - r.xs.first())
+
+method yAt(Lrl r, int x) =>
+    r.ps.first() + r.slope() * (x - r.xs.first())
+
+// Audit text of CONFIRMED / EXTENDED (parsed by the parity tool): points as bar times.
+f_lrlTxt(Lrl r) =>
+    string pts = ""
+    for t in r.ts
+        pts += (pts == "" ? "" : ",") + str.tostring(t)
+    "n=" + str.tostring(r.xs.size()) + " · tau=" + f_x(r.tau) + " · pts=" + pts
+
+// DEF-LRL3 on the last pair and DEF-LRL4 on the whole list, at this bar: spacing, failure
+// step beyond the EQ tolerance, a pullback of 1.0 × TR average between the two points,
+// a total drop > 2τ (3 points or more), every point within τ of the chord, and no high
+// above the chord + τ from the first point to this bar (clean).
+method fits(LrlSide s, array<int> xs, array<float> ps, float tau) =>
+    int   n  = xs.size()
+    int   xa = xs.get(n - 2)
+    int   xb = xs.get(n - 1)
+    float pa = ps.get(n - 2)
+    float pb = ps.get(n - 1)
+    int   x0 = xs.first()
+    float p0 = ps.first()
+    float sl = (pb - p0) / (xb - x0)
+    bool  ok = xb - xa <= LRL_GAP and pb < pa - EQ_TOL - EPS and bar_index - x0 <= LRL_SPAN
+    if ok
+        float tra  = lrlTra[bar_index - xa]
+        float pull = s.loS(xa + 1)
+        if xb - 1 >= xa + 2
+            for j = xa + 2 to xb - 1
+                pull := math.min(pull, s.loS(j))
+        ok := not na(tra) and pb - pull >= LRL_SEP_K * tra - EPS
+    if ok and n > 2
+        ok := p0 - pb > LRL_DROP_K * tau + EPS
+    if ok
+        for i = 0 to n - 1
+            if math.abs(ps.get(i) - (p0 + sl * (xs.get(i) - x0))) > tau + EPS
+                ok := false
+                break
+    if ok
+        for j = x0 + 1 to bar_index
+            if s.hiS(j) > p0 + sl * (j - x0) + tau + EPS
+                ok := false
+                break
+    ok
+
+// Terminal and immutable: the class is never relabelled. A crossed LRL (DRIFT, SWEEP,
+// BREAK) spends its points; an expired one only releases them.
+method finish(LrlSide s, Lrl r, int kind, float bNow, float bPrev) =>
+    r.endKind := kind
+    r.endBar  := bar_index
+    r.endTime := time
+    r.endNow  := bNow
+    r.endPrev := bPrev
+    s.hist.push(r)
+    for x in r.xs
+        int k = s.members.indexof(x)
+        if k >= 0
+            s.members.remove(k)
+        if kind != LRL_EXPIRED
+            s.spent.push(x)
+    int ev = EV_LRL_EXPIRED
+    if kind == LRL_DRIFT
+        s.nDrift := s.nDrift + 1
+        ev       := EV_LRL_DRIFT
+    else if kind == LRL_SWEEP
+        s.nSweep := s.nSweep + 1
+        ev       := EV_LRL_SWEEP
+    else if kind == LRL_BREAK
+        s.nBreak := s.nBreak + 1
+        ev       := EV_LRL_BREAK
+    else
+        s.nExpired := s.nExpired + 1
+    f_emit(ev, s.sign, r.id, r.xs.first(), s.sign * bNow, "n=" + str.tostring(r.xs.size()) + " · bnow=" + f_x(s.sign * bNow) + " · bprev=" + f_x(s.sign * bPrev) + " · close=" + f_x(close))
+    r
+
+// DEF-LRL5 ADVANCE (before JUDGE), with the geometry in effect before this bar. The
+// boundary y(t) + τ crossed ends an LRL: DRIFT when the high is not beyond the boundary
+// projected on the previous bar, y(t − 1) + τ (the projection moved into price; it does
+// not mean the candle was stationary); otherwise BREAK when the close is beyond
+// y(t) + τ, else SWEEP. Else it expires once no further point can arrive, else a high
+// within τ of the line is a touch. An LRL is never judged on its confirmation bar.
+// Candidates that are crossed, expired or hold a spent point die silently.
+method advance(LrlSide s) =>
+    int   t  = bar_index
+    float hi = s.hiS(t)
+    float cl = s.sign * close
+    array<Lrl> keep = array.new<Lrl>()
+    for r in s.live
+        bool alive = true
+        if r.born < t
+            float bNow  = r.yAt(t) + r.tau
+            float bPrev = r.yAt(t - 1) + r.tau
+            if hi > bNow + EPS
+                s.finish(r, hi <= bPrev + EPS ? LRL_DRIFT : cl > bNow + EPS ? LRL_BREAK : LRL_SWEEP, bNow, bPrev)
+                alive := false
+            else if t > r.xs.last() + LRL_GAP + LRL_R
+                s.finish(r, LRL_EXPIRED, bNow, bPrev)
+                alive := false
+            else if hi >= r.yAt(t) - r.tau - EPS
+                r.touches := r.touches + 1
+        if alive
+            keep.push(r)
+    s.live := keep
+    array<Lrl> kc = array.new<Lrl>()
+    for c in s.cands
+        bool dead = s.spent.includes(c.xs.get(0)) or s.spent.includes(c.xs.get(1)) or hi > c.yAt(t) + c.tau + EPS or t > c.xs.last() + LRL_GAP + LRL_R
+        if not dead
+            kc.push(c)
+    s.cands := kc
+    s
+
+// DEF-LRL6: at most LRL_MEM records per side. The record that ended first goes first;
+// if none ended, the oldest active one, whose points become spent (its id never returns).
+method trim(LrlSide s) =>
+    if s.live.size() + s.hist.size() > LRL_MEM
+        bool active = s.hist.size() == 0
+        Lrl  old    = na
+        if active
+            old := s.live.shift()
+            for x in old.xs
+                int k = s.members.indexof(x)
+                if k >= 0
+                    s.members.remove(k)
+                s.spent.push(x)
+        else
+            old := s.hist.shift()
+        s.dropped := s.dropped + 1
+        f_emit(EV_LRL_DROPPED, s.sign, old.id, old.xs.first(), s.sign * old.ps.last(), active ? "active record · tracking stopped" : "ended record")
+    s
+
+// JUDGE · extend: the active LRL with the oldest first point that the new pivot fits.
+method grow(LrlSide s, int X, int XT, float P) =>
+    bool used = false
+    if s.live.size() > 0
+        array<int> key = array.new<int>()
+        for r in s.live
+            key.push(r.xs.first())
+        for k in key.sort_indices(order.ascending)
+            Lrl          r  = s.live.get(k)
+            array<int>   xs = r.xs.copy()
+            array<float> ps = r.ps.copy()
+            xs.push(X)
+            ps.push(P)
+            if s.fits(xs, ps, r.tau)
+                r.xs.push(X)
+                r.ts.push(XT)
+                r.ps.push(P)
+                r.ext.push(bar_index)
+                s.members.push(X)
+                s.extended := s.extended + 1
+                f_emit(EV_LRL_EXTENDED, s.sign, r.id, r.xs.first(), s.sign * P, f_lrlTxt(r))
+                used := true
+                break
+    used
+
+// JUDGE · confirm: the candidate with the oldest pair (first point, then second) that
+// the new pivot completes becomes an LRL (3 points); candidates sharing a point go.
+method promote(LrlSide s, int X, int XT, float P) =>
+    bool used = false
+    if s.cands.size() > 0
+        array<int> key = array.new<int>()
+        for c in s.cands
+            key.push(c.xs.first() * 64 + (c.xs.last() - c.xs.first()))
+        for k in key.sort_indices(order.ascending)
+            Lrl          c  = s.cands.get(k)
+            array<int>   xs = c.xs.copy()
+            array<float> ps = c.ps.copy()
+            xs.push(X)
+            ps.push(P)
+            if s.fits(xs, ps, c.tau)
+                array<int> ts = c.ts.copy()
+                ts.push(XT)
+                Lrl r = Lrl.new(id = c.id, xs = xs, ts = ts, ps = ps, tau = c.tau, born = bar_index, bornTime = time, ext = array.new<int>())
+                s.live.push(r)
+                array<Lrl> kc = array.new<Lrl>()
+                for d in s.cands
+                    if not (xs.includes(d.xs.get(0)) or xs.includes(d.xs.get(1)))
+                        kc.push(d)
+                s.cands := kc
+                for x in xs
+                    s.members.push(x)
+                s.confirmed := s.confirmed + 1
+                f_emit(EV_LRL_CONFIRMED, s.sign, r.id, r.xs.first(), s.sign * P, f_lrlTxt(r))
+                s.trim()
+                used := true
+                break
+    used
+
+// JUDGE · seed: every recent pivot that is free (not a point of an active LRL, not
+// spent), at most LRL_GAP bars earlier and with a TR average, forms a 2-point candidate
+// with the new pivot when the pair fits. The newest LRL_CANDS are kept.
+method seed(LrlSide s, int X, int XT, float P) =>
+    int n = s.pivX.size()
+    if n > 0
+        for i = 0 to n - 1
+            int xa = s.pivX.get(i)
+            if not s.members.includes(xa) and not s.spent.includes(xa) and X - xa <= LRL_GAP
+                float tra = lrlTra[bar_index - xa]
+                if not na(tra)
+                    float tau = math.max(EQ_TOL, LRL_TOL_K * tra)
+                    if s.fits(array.from(xa, X), array.from(s.pivP.get(i), P), tau)
+                        s.cands.push(Lrl.new(id = s.pivT.get(i), xs = array.from(xa, X), ts = array.from(s.pivT.get(i), XT), ps = array.from(s.pivP.get(i), P), tau = tau, ext = array.new<int>()))
+                        s.seeded := s.seeded + 1
+        while s.cands.size() > LRL_CANDS
+            s.cands.shift()
+    s
+
+// DEF-LRL5 JUDGE: the swing bar X = t − 2. A pivot extends an LRL, else confirms a
+// candidate, else seeds candidates. Recent pivots stay within LRL_GAP bars of the newest;
+// spent points older than 2 × LRL_GAP bars can no longer meet a pivot or a candidate.
+method judge(LrlSide s, bool piv, int X, int XT, float P) =>
+    if piv
+        s.pivots := s.pivots + 1
+        bool used = s.grow(X, XT, P)
+        if not used
+            used := s.promote(X, XT, P)
+        if not used
+            s.seed(X, XT, P)
+        while s.pivX.size() > 0
+            if X - s.pivX.first() > LRL_GAP
+                s.pivX.shift()
+                s.pivT.shift()
+                s.pivP.shift()
+            else
+                break
+        s.pivX.push(X)
+        s.pivT.push(XT)
+        s.pivP.push(P)
+        array<int> keepS = array.new<int>()
+        for x in s.spent
+            if x >= X - 2 * LRL_GAP
+                keepS.push(x)
+        s.spent := keepS
+    s
+
 // ════ L6 · RENDERER (functions: read state, write drawing handles only) ═════════
 
 int rightT = time + rightOffset * TF_MS   // where "extends to now" ends
@@ -1280,6 +1652,59 @@ f_drawEq(LiqSide s, int slot) =>
     liqCnt.set(6, liqCnt.get(6) + merged)
     shown
 
+// ── LRL (DEF-LRL7). Pure reads of L3; the only writes are to the renderer's own pool.
+//    The polyline joins confirmed pivots, so a decided segment never moves; the dashed
+//    projection follows the chord that is in state. No horizontal LRL is ever drawn. ──
+f_lrlEndName(int k) =>
+    k == LRL_DRIFT ? "DRIFT" : k == LRL_SWEEP ? "SWEEP" : k == LRL_BREAK ? "BREAK" : k == LRL_EXPIRED ? "EXPIRED" : "ACTIVE"
+
+f_lrlDraw(LrlSide s, Lrl r) =>
+    bool  active = r.endKind == 0
+    color base   = s.sign > 0 ? LRL_BEAR_COL : LRL_BULL_COL
+    color col    = active ? base : color.new(base, T_HIST)
+    int   x1     = r.xs.last()
+    // Active: to the current bar and on to the right, never past the last bar it can be active.
+    int   x2     = active ? math.max(bar_index, math.min(bar_index + rightOffset, x1 + LRL_GAP + LRL_R)) : r.endBar
+    array<chart.point> pts = array.new<chart.point>()
+    for i = 0 to r.xs.size() - 1
+        pts.push(chart.point.from_index(r.xs.get(i), s.sign * r.ps.get(i)))
+    lrlPolys.push(polyline.new(pts, xloc = xloc.bar_index, line_color = col, line_width = 1))
+    lrlLns.push(line.new(x1, s.sign * r.yAt(x1), x2, s.sign * r.yAt(x2), xloc = xloc.bar_index, color = col, style = line.style_dashed, width = 1))
+    string tip = (s.sign > 0 ? "LRL ▼ bearish · descending highs" : "LRL ▲ bullish · ascending lows") + " · " + str.tostring(r.xs.size()) + " points · τ " + f_x(r.tau) + "\nfirst " + f_tid(r.ts.first()) + " · latest " + f_tid(r.ts.last()) + " · confirmed " + f_tid(r.bornTime) + "\n" + f_lrlEndName(r.endKind) + (active ? "" : " " + f_tid(r.endTime))
+    lrlLbls.push(label.new(x1, s.sign * r.ps.last(), "LRL", xloc = xloc.bar_index, style = s.sign > 0 ? label.style_label_down : label.style_label_up, color = CLR_NONE, textcolor = col, size = size.tiny, tooltip = tip))
+    if lrlMarks and not active
+        string mk = r.endKind == LRL_DRIFT ? "D" : r.endKind == LRL_SWEEP ? "S" : r.endKind == LRL_BREAK ? "B" : "E"
+        lrlLbls.push(label.new(r.endBar, s.sign * r.endNow, mk, xloc = xloc.bar_index, style = s.sign > 0 ? label.style_label_down : label.style_label_up, color = CLR_NONE, textcolor = col, size = size.tiny, tooltip = f_lrlEndName(r.endKind) + " " + f_tid(r.endTime) + " · boundary " + f_x(s.sign * r.endNow) + " · previous bar's boundary " + f_x(s.sign * r.endPrev)))
+    true
+
+// The nearest active LRL of a side (distance of the close to its line on this bar), then,
+// with Show historical LRL, the last LRL_VIS_HIST that ended.
+f_lrlRender(LrlSide s, int slot) =>
+    Lrl   best = na
+    float bd   = na
+    for r in s.live
+        float dd = math.abs(close - s.sign * r.yAt(bar_index))
+        if na(bd) or dd < bd
+            bd   := dd
+            best := r
+    if not na(best)
+        f_lrlDraw(s, best)
+        lrlCnt.set(slot, 1)
+    int n = s.hist.size()
+    if lrlHist and n > 0
+        for i = n - 1 to math.max(0, n - LRL_VIS_HIST)
+            f_lrlDraw(s, s.hist.get(i))
+            lrlCnt.set(2, lrlCnt.get(2) + 1)
+    true
+
+// Debug only: the internal 2-point candidates as dotted segments.
+f_lrlCandDraw(LrlSide s) =>
+    color col = color.new(s.sign > 0 ? LRL_BEAR_COL : LRL_BULL_COL, 40)
+    for c in s.cands
+        lrlLns.push(line.new(c.xs.first(), s.sign * c.ps.first(), c.xs.last(), s.sign * c.ps.last(), xloc = xloc.bar_index, color = col, style = line.style_dotted, width = 1))
+        lrlCnt.set(3, lrlCnt.get(3) + 1)
+    true
+
 // ════ ENGINE RUN · L1 → L2/L4 → L3 → L5 (fixed order) ══════════════════════════
 
 barEv.clear()
@@ -1407,6 +1832,15 @@ if engineTick
                     sslS.rejDom := sslS.rejDom + (reactLoOk and not domLoOk ? 1 : 0)
                     sslS.rejBoth := sslS.rejBoth + (not reactLoOk and not domLoOk ? 1 : 0)
 
+    // ── LRL (DEF-LRL1…LRL8). Runs last and reads no Phase 1 / Phase 2 state: bars, its own
+    //    TR average and pivots only. Decided at bar close in both modes: ADVANCE both
+    //    sides with the geometry known before this bar, then JUDGE both sides. ──
+    if lrlOn and barstate.isconfirmed
+        lrlHi.advance()
+        lrlLo.advance()
+        lrlHi.judge(lrlPivH, lrlX, lrlXT, lrlPxH)
+        lrlLo.judge(lrlPivL, lrlX, lrlXT, -lrlPxL)
+
 // ════ L6 · RENDERER (run) ══════════════════════════════════════════════════════
 
 // Levels: superseded instances freeze and join the capped visual history.
@@ -1483,6 +1917,27 @@ if barstate.islast
         f_drawTaken(bslS, 4)
         f_drawTaken(sslS, 5)
 
+// LRL (DEF-LRL7): rebuilt from state on the last bar, like liquidity. The points are
+// confirmed pivots, so a drawn segment never moves; only the active projection follows
+// the current bar. Visibility never reaches L3.
+if barstate.islast
+    for x in lrlPolys
+        polyline.delete(x)
+    for x in lrlLns
+        line.delete(x)
+    for x in lrlLbls
+        label.delete(x)
+    lrlPolys.clear()
+    lrlLns.clear()
+    lrlLbls.clear()
+    lrlCnt.fill(0)
+    if lrlOn and lrlShow
+        f_lrlRender(lrlHi, 0)
+        f_lrlRender(lrlLo, 1)
+    if lrlOn and dbgOn and dbgLrlCand
+        f_lrlCandDraw(lrlHi)
+        f_lrlCandDraw(lrlLo)
+
 // ════ L7 · ALERTS ══════════════════════════════════════════════════════════════
 // Alert toggles filter delivery only; every event is logged regardless.
 
@@ -1530,7 +1985,7 @@ if barstate.isrealtime and barEv.size() > 0
 
 // ════ L7 · DIAGNOSTICS (one table, no drawing objects) ═════════════════════════
 
-var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 35, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
+var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 42, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
 var table warnTbl = table.new(position.top_right, 1, 2)
 var int   dbgFirstT = time    // first loaded bar: where a replay of the history must start
 
@@ -1681,6 +2136,39 @@ f_takeCode(int dir) =>
                 c := 3
     c
 
+// LRL debug: one side's state in one line.
+f_lrlSideState(LrlSide s) =>
+    "pivots " + str.tostring(s.pivots) + " · candidates " + str.tostring(s.cands.size()) + " (seeded " + str.tostring(s.seeded) + ") · active " + str.tostring(s.live.size()) + " · confirmed " + str.tostring(s.confirmed) + " · extended " + str.tostring(s.extended) + " · DRIFT " + str.tostring(s.nDrift) + " · SWEEP " + str.tostring(s.nSweep) + " · BREAK " + str.tostring(s.nBreak) + " · EXPIRED " + str.tostring(s.nExpired) + " · memory " + str.tostring(s.live.size() + s.hist.size()) + "/" + str.tostring(LRL_MEM) + " · dropped " + str.tostring(s.dropped)
+
+// n-th newest LRL across both sides (by confirmation time), and its side's sign.
+f_lrlNth(int n) =>
+    array<Lrl> all = array.new<Lrl>()
+    array<int> sg  = array.new<int>()
+    array<int> ts  = array.new<int>()
+    for r in lrlHi.live
+        all.push(r)
+        sg.push(1)
+        ts.push(r.bornTime)
+    for r in lrlHi.hist
+        all.push(r)
+        sg.push(1)
+        ts.push(r.bornTime)
+    for r in lrlLo.live
+        all.push(r)
+        sg.push(-1)
+        ts.push(r.bornTime)
+    for r in lrlLo.hist
+        all.push(r)
+        sg.push(-1)
+        ts.push(r.bornTime)
+    Lrl pick = na
+    int side = 0
+    if n < all.size()
+        int k = ts.sort_indices(order.descending).get(n)
+        pick := all.get(k)
+        side := sg.get(k)
+    [pick, side]
+
 // Pine Logs. Debug mode: every event of a closed bar, one line in the "Last events"
 // format with the full date (the pane shows up to 10,000 historical lines).
 // Parity capture: only the last capN closed bars plus the warm-up the comparison
@@ -1689,20 +2177,30 @@ f_takeCode(int dir) =>
 f_cap(float x) =>
     na(x) ? "na" : str.tostring(x, "#.########")
 
+// LRL per bar, for parity: every active LRL as id:boundary now:previous boundary (real
+// prices, the geometry in state after this bar), in confirmation order.
+f_lrlBar(LrlSide s) =>
+    string out = ""
+    for r in s.live
+        out += (out == "" ? "" : ";") + str.tostring(r.id) + ":" + f_cap(s.sign * (r.yAt(bar_index) + r.tau)) + ":" + f_cap(s.sign * (r.yAt(bar_index - 1) + r.tau))
+    out
+
 // Warm-up = the dependency graph of the compared values: an FVG verdict at t needs
 // fvgLen true ranges ending at t − 2 (plus the close before them); a swing verdict at
 // t = X + R needs, before X, the TR average (LIQ_TRA_LEN), the left window and the
-// dominance window. Same formula as validation/models/types.py (lookback).
-int  capWarm  = math.max(fvgLen + 2, math.max(LIQ_TRA_LEN, LIQ_L, LIQ_W) + LIQ_R)
+// dominance window. An LRL confirmed at t has its first point at most 2 × LRL_GAP bars
+// before its third (X3 = t − 2) and needs the TR average there: LRL_R + 2 × LRL_GAP +
+// LRL_TRA_LEN. Same formulas as validation/models/types.py (lookback).
+int  capWarm  = math.max(fvgLen + 2, math.max(LIQ_TRA_LEN, LIQ_L, LIQ_W) + LIQ_R, lrlOn ? LRL_R + 2 * LRL_GAP + LRL_TRA_LEN : 0)
 int  capTotal = capN + capWarm
 var int capDone = 0
 bool capBar   = capOn and barstate.isconfirmed and bar_index > last_bar_index - capTotal and capDone < capTotal
 if capBar
     if capDone == 0
-        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
     capDone += 1
     int fv = bullCand ? 2 : rawBull ? 1 : bearCand ? -2 : rawBear ? -1 : 0
-    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef))
+    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : ""))
 if barstate.isconfirmed and (capOn ? capBar : dbgOn)
     for e in barEv
         log.info(str.format_time(e.eventTime, "yyyy-MM-dd HH:mm", sesTz) + "  " + f_evText(e))
@@ -1764,6 +2262,21 @@ if dbgOn and barstate.islast
     f_dbgRow(33, "Last events", f_lastEvents(6))
     // Closed bars only: in Confirmed mode an open last bar is not processed yet.
     f_dbgRow(34, "Loaded history (closed bars)", f_tid(dbgFirstT) + " → " + f_tid(barstate.isconfirmed ? time : time[1]) + " · " + str.tostring(bar_index + (barstate.isconfirmed ? 1 : 0)) + " bars · tz " + sesTz)
+    // ── LRL (v0.5.0-dev) ──
+    f_dbgRow(35, "LRL engine", lrlOn ? "ON · pivots left " + str.tostring(LRL_L) + " · right " + str.tostring(LRL_R) + " (no significance test) · τ = max(EQ " + str.tostring(eqTolTk) + " ticks, " + str.tostring(LRL_TOL_K) + " × TR(" + str.tostring(LRL_TRA_LEN) + ") at the first point) · gap ≤ " + str.tostring(LRL_GAP) + " · pullback ≥ " + str.tostring(LRL_SEP_K) + " × TR · drop > " + str.tostring(LRL_DROP_K) + "τ · candidates " + str.tostring(LRL_CANDS) + " · memory " + str.tostring(LRL_MEM) + "/side · decided at bar close" : "OFF")
+    f_dbgRow(36, "LRL ▼ highs (bearish)", f_lrlSideState(lrlHi))
+    f_dbgRow(37, "LRL ▲ lows (bullish)", f_lrlSideState(lrlLo))
+    [lq, lsg] = f_lrlNth(dbgLrlIns)
+    if na(lq)
+        f_dbgRow(38, "LRL inspect #" + str.tostring(dbgLrlIns), "no LRL in memory")
+        f_dbgRow(39, "", "")
+        f_dbgRow(40, "", "")
+    else
+        bool lact = lq.endKind == 0
+        f_dbgRow(38, "LRL inspect #" + str.tostring(dbgLrlIns), (lsg > 0 ? "▼ bearish (highs)" : "▲ bullish (lows)") + " · id " + f_tid(lq.id) + " · " + f_lrlEndName(lq.endKind) + " · " + str.tostring(lq.xs.size()) + " points · τ " + f_x(lq.tau))
+        f_dbgRow(39, "anchor → latest pivot", f_mt(lq.ts.first()) + " @ " + f_px(lsg * lq.ps.first()) + " → " + f_mt(lq.ts.last()) + " @ " + f_px(lsg * lq.ps.last()) + " · confirmed " + f_mt(lq.bornTime) + " · extensions " + str.tostring(lq.ext.size()) + " · touches " + str.tostring(lq.touches))
+        f_dbgRow(40, "projected boundary now · previous", lact ? "bar " + str.tostring(bar_index) + ": " + f_x(lsg * (lq.yAt(bar_index) + lq.tau)) + " · " + f_x(lsg * (lq.yAt(bar_index - 1) + lq.tau)) : f_lrlEndName(lq.endKind) + " " + f_mt(lq.endTime) + ": " + f_x(lsg * lq.endNow) + " · " + f_x(lsg * lq.endPrev))
+    f_dbgRow(41, "LRL drawn", "active ▼ " + str.tostring(lrlCnt.get(0)) + " · ▲ " + str.tostring(lrlCnt.get(1)) + " · ended " + str.tostring(lrlCnt.get(2)) + " · candidates " + str.tostring(lrlCnt.get(3)) + " · polylines " + str.tostring(polyline.all.size()))
 
 // Normal-mode warnings: non-standard candles, and objects nearing the hard limit
 // (TradingView would otherwise delete the oldest drawings silently).

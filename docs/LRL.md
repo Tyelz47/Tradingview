@@ -7,10 +7,12 @@
   * G = 30 bars;
   * a crossing of the projected boundary ends the LRL. **Correction (user, 2026-10-28, before any Pine):** when the boundary moved into price, the end is a separate terminal class, `LRL_DRIFT`, not SWEEP / BREAK (DEF-LRL5);
   * the pivots of a taken LRL are spent;
-  * display (later) shows the nearest active LRL per side, and 2-point candidates only in debug.
-* **Reference model and validation only. NOT in Pine.** `src/IST.pine` is unchanged, and the static check ST-08 still forbids LRL identifiers in it.
+  * display shows the nearest active LRL per side, and 2-point candidates only in debug.
+* **Implemented in Pine: IST v0.5.0-dev (EXPERIMENTAL, NOT frozen).** The Pine implementation (§6) follows the oracle line by line; the static check ST-17 pins its constants and formulas.
+  * TradingView testing is pending (`docs/TESTS_LRL.md`).
+  * LRL is frozen only after a real TradingView Pine ↔ oracle parity with 0 DIFFERENCE (LRL-L11).
 * The frozen baselines `PHASE1_BASELINE_v0.3.2` and `PHASE2_BASELINE_v0.4.4-dev` are untouched.
-* In the oracle, LRL is the **opt-in module `lrl`**. Default runs, the regression baseline and Pine parity do not include it.
+* In the oracle, LRL is the **opt-in module `lrl`**. Default runs and the regression baseline do not include it. The Parity capture switches it on when the CAPTURE line says `lrl=1`.
 
 **LRL detection ≠ LRL target quality.** This document defines detection only: the diagonal failure-swing structure, from bars alone. Whether an LRL is a good target (low or high resistance) is a separate, future context layer (DEF-LRL9).
 
@@ -51,7 +53,7 @@
 * **DEF-LRL6 · Identity and memory.**
   * id = the time of X₁. It is unique per side: a point belongs to at most one LRL, and spent pivots never return.
   * 25 candidates per side, and **50 LRL records** per side. Beyond 50, the record that ended first is dropped; if none ended, the oldest active one is dropped and its points become spent. Each drop emits `LRL_DROPPED_MEMORY`.
-* **DEF-LRL7 · Display** (renderer, L6; later, with Pine):
+* **DEF-LRL7 · Display** (renderer, L6; Pine v0.5.0-dev, §6):
   * a polyline through the member pivots (fixed points: segments never move) and a dashed projection from the latest point along y while active, ending at the take or expiry bar;
   * label "LRL";
   * by default the nearest active LRL per side, with ended LRLs behind a history toggle.
@@ -76,7 +78,7 @@
 * `sid`: the time of X₁. `origin_bar`: X₁. Prices are real prices (the low side converted back from the mirrored series).
 * All are once per LRL, except `LRL_EXTENDED`. **Exactly one terminal event per LRL:** `LRL_DRIFT`, `LRL_SWEEP`, `LRL_BREAK` or `LRL_EXPIRED` (`events.LRL_TERMINAL`).
 * In-bar canonical order: SWEEP, BREAK, DRIFT, EXPIRED, EXTENDED, CONFIRMED, DROPPED, after every Phase 1 / 2 type, whose ranks are unchanged.
-* **Names for the future Pine `f_evName`:** exactly these seven: `LRL_CONFIRMED`, `LRL_EXTENDED`, `LRL_SWEEP`, `LRL_BREAK`, `LRL_DRIFT`, `LRL_EXPIRED`, `LRL_DROPPED_MEMORY`. Until Pine emits them they are `events.ORACLE_ONLY`, which ST-14 excludes. Empty that set in the same change that adds them to Pine.
+* **Pine `f_evName`** emits exactly these seven: `LRL_CONFIRMED`, `LRL_EXTENDED`, `LRL_SWEEP`, `LRL_BREAK`, `LRL_DRIFT`, `LRL_EXPIRED`, `LRL_DROPPED_MEMORY`. ST-14 compares the whole family with the oracle; the temporary v0.4.x exception is removed.
 
 **Record state** (`IstModel.state()["lrl"]`):
 * the id, side, points and τ;
@@ -95,7 +97,7 @@
 * The drawn polyline joins fixed, confirmed pivots. Like a BSL line drawn from its swing bar, it shows confirmed facts, not a claim that the line existed earlier.
 * All of this is tested (§4).
 
-## 4 · Validation (oracle `validation/models/lrl.py`, validation 1.8.0)
+## 4 · Validation (oracle `validation/models/lrl.py`, validation 1.9.0)
 
 | what | where | proves |
 |---|---|---|
@@ -121,21 +123,68 @@
 | long walks | `fuzz/test_lrl_properties.py` | LRL module with the approved constants, every invariant: 3,000 bars (quick) · 3 × 20,000 (full) · 6 × 50,000 (deep); memory drops occur from full on |
 | study harness | `tests/test_lrl_study.py` | scenario expectations, guard rules, no-context detection |
 
+| Pine source (ST-17) | `static_checks.py`, `tests/test_lrl_pine.py` | the 9 frozen constants equal `LrlSettings`. 30 formulas match the oracle line by line: pivots, side coordinates, chord, spacing, failure step, separation, non-horizontal, on-chord, clean, τ, boundaries now / previous, cross, DRIFT / BREAK / SWEEP, expiry, touch, candidate death, free-pivot seeding, spent points, memories. ADVANCE comes before JUDGE, and extend → confirm → seed. **22 mutations are each caught**, including 5/3, the τ coefficient, G, a missing separation, a missing non-horizontal rule, current vs previous boundary, the DRIFT inequality, the ADVANCE / JUDGE order and spent-pivot reuse. The LRL engine names no Phase 1 / 2 state |
+| Pine event names (ST-14) | `static_checks.py` | `f_emit` names = oracle names, the whole family, with no exception |
+| bounded LRL parity | `parity/capture.py`, `tests/test_parity_lrl.py` | on faithful synthetic captures (the oracle over the whole history, cut to the window), it gives 0 DIFFERENCE on NQ and walks, including a window opening inside an active LRL. Eight kinds of injected error are detected: boundary, previous boundary, class, τ, points, a missing event, an extra event, candidate counts |
+
 `python -m validation --phase lrl` runs only the LRL and common tests.
 
 ## 5 · Not done yet (in order)
 
-1. **Golden cases:** the user's labelled real examples (STUDY_LRL §K 6).
-2. **Pine implementation, after the user approves the next step:**
-   * the engine, the renderer (DEF-LRL7) and the debug rows;
-   * alerts, default OFF;
-   * ST-08 adjusted to allow LRL identifiers.
-3. **Parity capture extension:** `LRL_*` event lines plus a per-bar value (y + τ of the nearest active LRL per side), so that bounded Pine-Log parity covers LRL as L48 does for Phase 2.
-4. **TradingView L-tests:**
-   * compile and runtime;
-   * the confirmation bar and no early drawing;
-   * reload invariance;
-   * extension / sweep / break / expiry on the chart;
-   * the object budget with Phase 1 + 2 on;
-   * 1m / 3m / 5m.
+1. **TradingView tests** (`docs/TESTS_LRL.md`): LRL-L00 … L12, above all **LRL-L11**, the real 1,000-bar Pine-Log parity with 0 DIFFERENCE.
+2. **Golden cases:** the user's labelled real examples (STUDY_LRL §K 6).
+3. **LRL alerts:** none in v0.5.0-dev. They will be a separate decision, default OFF.
+4. **Freeze**, only after 1.
 5. **DEF-LRL9 context layer:** a separate study.
+
+## 6 · Pine implementation (IST v0.5.0-dev)
+
+**Layers:**
+* **L1:** `lrlTra`, its own SMA(TR, 14), and the 3 / 2 pivot windows. `max_bars_back` 5000 on high and low, 100 on `lrlTra`.
+* **L2:** `lrlPivH` / `lrlPivL` (DEF-LRL1).
+* **L3:** UDTs `Lrl` and `LrlSide`, with methods `fits`, `finish`, `advance`, `trim`, `grow` (extend), `promote` (confirm), `seed`, `judge`. Prices are kept in side coordinates, as in the oracle, so the floats are identical.
+* **Engine run:** last, `if lrlOn and barstate.isconfirmed`: `advance` both sides, then `judge` both sides.
+* **L5:** 7 event names.
+* **L6:** rebuilt on the last bar.
+* **L7:** debug rows 35–41 and the Parity capture.
+
+**Inputs** (group "LRL · DIAGONAL LIQUIDITY"):
+* Enable LRL engine `[calc]`, ON;
+* Show LRL, ON;
+* Show historical LRL, OFF;
+* Show lifecycle markers, OFF.
+
+Developer group: Inspect LRL (0 = newest), and Draw LRL candidates (debug only, OFF). The definition constants are not inputs.
+
+**Renderer:**
+* For the nearest active LRL per side: a polyline through the confirmed pivots (bar-index geometry), a dashed projection along the chord to the current bar + right extension (never past Xₙ + 32), and an "LRL" label above (bearish) or below (bullish).
+* Historical: the last 10 ended LRLs per side, faded, the projection ending at the end bar.
+* Markers D / S / B / E: on the end bar's boundary, with both boundaries in the tooltip.
+* Colours: bearish #E040FB, bullish #26C6DA.
+
+**Debug** (Debug mode):
+* row 35: the engine and its constants;
+* rows 36–37 per side: pivots · candidates (seeded) · active · confirmed · extended · DRIFT · SWEEP · BREAK · EXPIRED · memory · dropped;
+* rows 38–40: the inspected LRL (side, id, status, points, τ; anchor → latest pivot, confirmation, extensions, touches; the projected boundary now · on the previous bar, or at its end);
+* row 41: what is drawn, and the polylines.
+
+**Parity capture:**
+* The CAPTURE line adds `lrl=1` and the nine constants.
+* Each BAR line adds `LH` / `LL`: every active LRL as `id:boundary now:previous boundary` in real prices, low side y − τ.
+* Each BAR line also adds `KH` / `KL`: the candidate counts.
+* LRL events carry `n`, `tau` and `pts` (point bar times), or `bnow`, `bprev` and `close`.
+* Warm-up = max(FVG 16, swing 33, LRL `right + 2 × gap + TR length` = **76**). N = 1,000 therefore gives **1,076 BAR lines**.
+
+**Pine-specific compromises** (none changes an LRL on real data):
+1. **Bar close in both modes.** LRL is decided at bar close in Live mode too: no intrabar LRL take. This is what the oracle models (Confirmed).
+2. **Span limit.** One LRL may span at most 4,900 bars (`LRL_SPAN`, the high / low history kept). Beyond that it cannot be confirmed or extended. The oracle has no limit; reaching it needs ≥ 164 points.
+3. **Pruning.** Spent points older than 2 × G bars are forgotten. Nothing can reach them any more, so this is equivalent to the oracle.
+4. **Display only.** Only the nearest active LRL per side is drawn. History is capped at 10 per side, and the projection stops at the last bar the LRL can be active.
+5. **Shared debug output.** "Last events" and the Debug Pine Logs lines now include LRL events.
+
+**Resources:**
+* **Drawings:** ≤ 2 polylines + 2 lines + 2 labels (active). With history: + 20 polylines + 20 lines + 20 labels (+ 20 markers). The polyline limit is 50 by default.
+* **Debug candidates:** ≤ 50 dotted lines.
+* **Memory:** ≤ 50 records + 25 candidates per side.
+* **Per closed bar and side:** O(active + candidates).
+* **On a pivot bar:** ≤ (active + 25) clean-line scans over the LRL span.

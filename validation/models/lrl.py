@@ -29,6 +29,12 @@ from validation.models.types import Candle, LrlSettings
 SWEEP, BREAK, DRIFT, EXPIRED = "SWEEP", "BREAK", "DRIFT", "EXPIRED"
 
 
+def fx(x: float) -> str:
+    """A number as Pine's str.tostring(x, "#.########") prints it (audit text)."""
+    s = f"{x:.8f}".rstrip("0").rstrip(".")
+    return "0" if s in ("", "-0") else s
+
+
 @dataclass
 class Lrl:
     """One LRL record, or a 2-point candidate (born = −1). Prices in side coordinates."""
@@ -137,9 +143,14 @@ class LrlEngine:
         side.ends[kind] += 1
         if kind != EXPIRED:
             side.spent.update(r.xs)
-        prev = f" · previous boundary {side.sign * (r.y(t - 1) + r.tau):.4f}" if kind != EXPIRED else ""
-        self.log.emit(f"LRL_{kind}", side.sign, r.id, r.xs[0], side.sign * level,
-                      f"{len(r.xs)} points · close {self.candles[t].close}{prev}")
+        g = side.sign
+        self.log.emit(f"LRL_{kind}", g, r.id, r.xs[0], g * level,
+                      f"n={len(r.xs)} · bnow={fx(g * level)} · bprev={fx(g * (r.y(t - 1) + r.tau))} · "
+                      f"close={fx(self.candles[t].close)}")
+
+    def _text(self, r: Lrl) -> str:
+        """The audit text of CONFIRMED / EXTENDED, as src/IST.pine f_lrlTxt writes it."""
+        return f"n={len(r.xs)} · tau={fx(r.tau)} · pts={','.join(str(self.candles[x].time) for x in r.xs)}"
 
     def fits(self, side: Side, xs: list, ps: list, tau: float, t: int) -> bool:
         """DEF-LRL3 (last pair) and DEF-LRL4 (whole list) at bar t."""
@@ -177,8 +188,7 @@ class LrlEngine:
                 r.ext.append(t)
                 side.members.add(X)
                 side.extended += 1
-                self.log.emit("LRL_EXTENDED", side.sign, r.id, r.xs[0], side.sign * P,
-                              f"{len(r.xs)} points · tau {r.tau:.4f} · slope {side.sign * r.slope:.4f}/bar")
+                self.log.emit("LRL_EXTENDED", side.sign, r.id, r.xs[0], side.sign * P, self._text(r))
                 return True
         return False
 
@@ -190,8 +200,7 @@ class LrlEngine:
                 side.members.update(r.xs)
                 side.cands = [d for d in side.cands if not set(d.xs) & set(r.xs)]
                 side.confirmed += 1
-                self.log.emit("LRL_CONFIRMED", side.sign, r.id, r.xs[0], side.sign * P,
-                              f"3 points · tau {r.tau:.4f} · slope {side.sign * r.slope:.4f}/bar")
+                self.log.emit("LRL_CONFIRMED", side.sign, r.id, r.xs[0], side.sign * P, self._text(r))
                 self._memory(side)
                 return True
         return False

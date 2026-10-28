@@ -111,6 +111,12 @@ def oracle_series(candles: list[Candle], settings: Settings, m: IstModel | None 
             out[f"{k}_take"].append(2 if f"{n}_BREAK" in types else 1 if f"{n}_SWEEP" in types
                                     else 3 if f"{n}_TAKEN" in types else 0)
             out[f"{k}_dominance"].append(m.liq.dominance_ref(side, t - s.liq.right))
+        if m.lrl is not None:                       # what the capture's LH / LL / KH / KL must show
+            for side in m.lrl.sides():
+                g, k = side.sign, side.name.lower()
+                out.setdefault(f"lrl_{k}", []).append(
+                    {r.id: (g * (r.y(t) + r.tau), g * (r.y(t - 1) + r.tau)) for r in side.live})
+                out.setdefault(f"lrl_cand_{k}", []).append(len(side.cands))
     return out
 
 

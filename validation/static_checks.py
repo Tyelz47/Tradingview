@@ -14,13 +14,14 @@ from validation import PINE_SOURCE, ROOT, VALIDATION_DIR
 # [calc] inputs: everything else declared with input.* is [view] or [alert] (ARCHITECTURE §2.2).
 CALC_INPUTS = {"confirmedOnly", "fvgMinTicks", "fvgMinTra", "fvgMinRng", "fvgLen", "fvgMemory", "sesTz",
                "s1Nm", "s2Nm", "s3Nm", "s4Nm", "s1Ss", "s2Ss", "s3Ss", "s4Ss", "liqOn", "liqPreset", "liqLeftIn",
-               "liqRightIn", "liqReactIn", "liqMemory", "eqTolTk", "eqMinTch"}
+               "liqRightIn", "liqReactIn", "liqMemory", "eqTolTk", "eqMinTch", "lrlOn"}
 # Display policy accessors: they read fvgMitRule but are called only from L6/L7 (S-01 since v0.3.2).
 VIEW_READ_ALLOWED = {"policyBar", "policyTime"}
 CALC_SECTIONS = ("L1 · MARKET DATA", "L2 · DETECTION", "L5 · EVENT BUS", "L3 · STATE MANAGEMENT", "ENGINE RUN")
 RENDER_SECTIONS = ("L6 · RENDERER (functions", "L6 · RENDERER (run)")
 DRAWING_TYPES = {"line", "box", "label", "linefill", "table", "polyline"}
-STATE_CALLS = re.compile(r"\.(step|register|take|takeEq|cluster|trigger|advance|dropCluster|pushExtreme|markFinal|supersede)\(|"
+STATE_CALLS = re.compile(r"\.(step|register|take|takeEq|cluster|trigger|advance|dropCluster|pushExtreme|markFinal|supersede|"
+                         r"judge|grow|promote|seed|finish|trim)\(|"
                          r"\b(f_emit|f_roll|f_sesNew|f_sesStep|f_sesExtend|f_sesFinalize|f_sesSupersede|f_fvgStep)\(")
 
 
@@ -187,7 +188,7 @@ def st07_single_creation_paths():
 
 
 def st08_scope_no_later_phases():
-    pat = re.compile(r"\b(cisd|ifvg|smt|lrl|displacement|confluence|qualityscore)\b", re.I)
+    pat = re.compile(r"\b(cisd|ifvg|smt|displacement|confluence|qualityscore)\b", re.I)
     bad = [f"line {i + 1}: {m.group(0)}" for i, ln in enumerate(source()) if (m := pat.search(code(ln)))]
     return not bad, f"later-phase identifiers in code: {bad or 'none'}"
 
@@ -248,15 +249,13 @@ def st13_oracle_defaults_match_pine():
 
 
 def st14_event_names_match_oracle():
-    from validation.models.events import ORACLE_ONLY, TYPES
+    from validation.models.events import TYPES
     src = "\n".join(source())
     fixed = set(re.findall(r'EV_\w+\s*=>\s*"([A-Z_]+)"', src))
     sided = re.findall(r"EV_\w+\s*=>\s*([sq]) \+ \"([A-Z_]+)\"", src)
     names = fixed | {f"{p}{n}" for k, n in sided for p in (("BSL_", "SSL_") if k == "s" else ("EQH_", "EQL_"))}
-    want = set(TYPES) - ORACLE_ONLY
-    ok = names == want
-    return ok, (f"Pine names {len(names)}, oracle names {len(want)} (+{len(ORACLE_ONLY)} oracle-only, not in Pine yet); "
-                f"only in Pine: {sorted(names - want) or 'none'}; only in oracle: {sorted(want - names) or 'none'}")
+    ok = names == set(TYPES)
+    return ok, f"Pine names {len(names)}, oracle names {len(TYPES)}; only in Pine: {sorted(names - set(TYPES)) or 'none'}; only in oracle: {sorted(set(TYPES) - names) or 'none'}"
 
 
 def st15_phase1_baseline_guard():
@@ -298,6 +297,69 @@ def st16_dominance_rule(src: str | None = None):
     return not bad, f"{len(DOMINANCE_RULES)} dominance rules; missing or changed: {bad or 'none'}"
 
 
+# DEF-LRL1…LRL6 as they must read in Pine: the approved oracle (validation/models/lrl.py)
+# line by line. Each rule must match exactly one code line (comments and strings ignored).
+LRL_RULES = {
+    "TR average": r"^float\s+lrlTra\s+=\s+ta\.sma\(ta\.tr\(true\), LRL_TRA_LEN\)\s*$",
+    "left window high": r"^float\s+lrlHiL\s+=\s+ta\.highest\(high, LRL_L\)\s*$",
+    "left window low": r"^float\s+lrlLoL\s+=\s+ta\.lowest\(low, LRL_L\)\s*$",
+    "right window high": r"^float\s+lrlHiR\s+=\s+ta\.highest\(high, LRL_R\)\s*$",
+    "right window low": r"^float\s+lrlLoR\s+=\s+ta\.lowest\(low, LRL_R\)\s*$",
+    "pivot high (strict left, ≥ right)": r"^bool\s+lrlPivH\s+=\s+lrlPxH > lrlHiL\[LRL_R \+ 1\] and lrlPxH >= lrlHiR\s*$",
+    "pivot low (mirror)": r"^bool\s+lrlPivL\s+=\s+lrlPxL < lrlLoL\[LRL_R \+ 1\] and lrlPxL <= lrlLoR\s*$",
+    "side coordinates (high)": r"^\s+s\.sign > 0 \? high\[bar_index - j\] : -low\[bar_index - j\]\s*$",
+    "side coordinates (low)": r"^\s+s\.sign > 0 \? low\[bar_index - j\] : -high\[bar_index - j\]\s*$",
+    "chord slope": r"^\s+\(r\.ps\.last\(\) - r\.ps\.first\(\)\) / \(r\.xs\.last\(\) - r\.xs\.first\(\)\)\s*$",
+    "chord value": r"^\s+r\.ps\.first\(\) \+ r\.slope\(\) \* \(x - r\.xs\.first\(\)\)\s*$",
+    "spacing · failure step": r"^\s+bool\s+ok\s+=\s+xb - xa <= LRL_GAP and pb < pa - EQ_TOL - EPS and bar_index - x0 <= LRL_SPAN\s*$",
+    "separation (pullback ≥ k × TR)": r"^\s+ok := not na\(tra\) and pb - pull >= LRL_SEP_K \* tra - EPS\s*$",
+    "non-horizontal (drop > 2τ)": r"^\s+ok := p0 - pb > LRL_DROP_K \* tau \+ EPS\s*$",
+    "candidate chord": r"^\s+float\s+sl\s+=\s+\(pb - p0\) / \(xb - x0\)\s*$",
+    "points on the chord": r"^\s+if math\.abs\(ps\.get\(i\) - \(p0 \+ sl \* \(xs\.get\(i\) - x0\)\)\) > tau \+ EPS\s*$",
+    "clean line": r"^\s+if s\.hiS\(j\) > p0 \+ sl \* \(j - x0\) \+ tau \+ EPS\s*$",
+    "tau at the first point": r"^\s+float\s+tau\s+=\s+math\.max\(EQ_TOL, LRL_TOL_K \* tra\)\s*$",
+    "never judged on its confirmation bar": r"^\s+if r\.born < t\s*$",
+    "boundary now": r"^\s+float\s+bNow\s+=\s+r\.yAt\(t\) \+ r\.tau\s*$",
+    "boundary of the previous bar": r"^\s+float\s+bPrev\s+=\s+r\.yAt\(t - 1\) \+ r\.tau\s*$",
+    "cross": r"^\s+if hi > bNow \+ EPS\s*$",
+    "classification DRIFT · BREAK · SWEEP":
+        r"^\s+s\.finish\(r, hi <= bPrev \+ EPS \? LRL_DRIFT : cl > bNow \+ EPS \? LRL_BREAK : LRL_SWEEP, bNow, bPrev\)\s*$",
+    "expiry": r"^\s+else if t > r\.xs\.last\(\) \+ LRL_GAP \+ LRL_R\s*$",
+    "touch": r"^\s+else if hi >= r\.yAt\(t\) - r\.tau - EPS\s*$",
+    "candidates die": r"^\s+bool\s+dead\s+=\s+s\.spent\.includes\(c\.xs\.get\(0\)\) or s\.spent\.includes\(c\.xs\.get\(1\)\) "
+                      r"or hi > c\.yAt\(t\) \+ c\.tau \+ EPS or t > c\.xs\.last\(\) \+ LRL_GAP \+ LRL_R\s*$",
+    "seed only free pivots": r"^\s+if not s\.members\.includes\(xa\) and not s\.spent\.includes\(xa\) and X - xa <= LRL_GAP\s*$",
+    "a crossed LRL spends its points": r"^\s+if kind != LRL_EXPIRED\s*\n\s+s\.spent\.push\(x\)\s*$",
+    "candidate memory": r"^\s+while s\.cands\.size\(\) > LRL_CANDS\s*$",
+    "record memory": r"^\s+if s\.live\.size\(\) \+ s\.hist\.size\(\) > LRL_MEM\s*$",
+}
+# Code lines that must appear in this order: ADVANCE both sides, then JUDGE both sides;
+# inside JUDGE, extend, then confirm, then seed.
+LRL_ORDER = (("lrlHi.advance()", "lrlLo.advance()", "lrlHi.judge(", "lrlLo.judge("),
+             ("bool used = s.grow(", "used := s.promote(", "s.seed(X, XT, P)"))
+LRL_CONSTANTS = {"LRL_L": "left", "LRL_R": "right", "LRL_TOL_K": "tol_k", "LRL_GAP": "gap", "LRL_SEP_K": "sep_k",
+                 "LRL_DROP_K": "drop_k", "LRL_TRA_LEN": "tra_len", "LRL_CANDS": "cand_memory", "LRL_MEM": "memory"}
+
+
+def st17_lrl_rules(src: str | None = None):
+    """DEF-LRL1…LRL6 in IST.pine: the approved constants (= LrlSettings), every formula of the
+    oracle line by line, ADVANCE before JUDGE and extend → confirm → seed."""
+    from validation.models.types import LrlSettings
+    lines = [code(ln) for ln in (src.splitlines() if src is not None else source())]
+    text = "\n".join(lines)
+    bad = [name for name, rx in LRL_RULES.items() if len(re.findall(rx, text, re.M)) != 1]
+    want = LrlSettings()
+    for name, field in LRL_CONSTANTS.items():
+        m = re.findall(rf"^{name}\s*=\s*([\d.]+)\s*$", text, re.M)
+        if len(m) != 1 or float(m[0]) != float(getattr(want, field)):
+            bad.append(f"{name} = {m or 'missing'} (oracle {getattr(want, field)})")
+    for seq in LRL_ORDER:
+        at = [next((i for i, ln in enumerate(lines) if s in ln), None) for s in seq]
+        if None in at or at != sorted(at) or len(set(at)) != len(at):
+            bad.append("order " + " → ".join(seq))
+    return not bad, f"{len(LRL_RULES)} formulas, {len(LRL_CONSTANTS)} constants, {len(LRL_ORDER)} orders; wrong or missing: {bad or 'none'}"
+
+
 CHECKS = [
     ("ST-01", "Calculation never reads [view]/[alert] inputs (S-01)", st01_calc_independent_of_view),
     ("ST-02", "No identifiers of removed features (S-02)", st02_no_leftovers),
@@ -315,4 +377,5 @@ CHECKS = [
     ("ST-14", "Event names: Pine f_evName == oracle", st14_event_names_match_oracle),
     ("ST-15", "Phase 1 baseline guard (git diff vs PHASE1_BASELINE_v0.3.2) (S-06)", st15_phase1_baseline_guard),
     ("ST-16", "DEF-L2 dominance (C1): window before the swing bar, strict-beyond boundary", st16_dominance_rule),
+    ("ST-17", "DEF-LRL1…LRL6: approved constants, oracle formulas, ADVANCE before JUDGE", st17_lrl_rules),
 ]
