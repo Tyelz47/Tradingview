@@ -57,7 +57,8 @@ validation/
                         parity (manual.py, --manual manual_observed.txt; manual_observed_template.txt) and
                         bounded Pine-Log parity (capture.py, --capture pine_capture.csv or .txt)
   studies/              analyses before a definition is specified (never change the oracle):
-                        liquidity_significance.py (reads the v0.4.3-dev evidence capture)
+                        liquidity_significance.py (reads the v0.4.3-dev evidence capture);
+                        lrl.py (LRL research, docs/STUDY_LRL.md; both captures merged, charts → docs/study_lrl)
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```

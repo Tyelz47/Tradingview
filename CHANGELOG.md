@@ -1,5 +1,15 @@
 # Changelog
 
+## LRL research study — validation 1.6.0 (2026-10-28, branch `research/lrl`) — no indicator change, for review
+
+**CHANGE.** Research and specification only, at the user's request ("Do NOT implement LRL in IST.pine yet"): `docs/STUDY_LRL.md`. It covers the formal semantics of a diagonal failure-swing LRL, seven candidate definitions with formulas and pseudocode, pros, cons and failure modes, the measurements on real NQ (both evidence captures merged, 1,639 bars) and on a random-walk null, 16 synthetic scenarios, answers to the 15 study questions, a proposed DEF-LRL1…8, a validation plan and open questions.
+* `validation/studies/lrl.py`: the study engine, tables and charts (`docs/study_lrl/lrl-0.svg`, `lrl-2.svg`, `lrl-R.svg`).
+* `validation/tests/test_lrl_study.py`: 31 tests in the new report section "LRL research study". They cover the scenarios, each guard rule (mutation), mirror symmetry, prefix invariance (no lookahead), record invariants, failure swings ≠ C1, 3m/5m, and the frozen EQH untouched.
+
+**Key finding:** C1 dominance rejects every failure swing. 0 of 56 LRL points 2…n are BSL/SSL, and a C1-only source finds no LRL. LRL therefore needs its own (intermediate) pivot source.
+
+**Unchanged:** `src/IST.pine` (ST-08 still forbids LRL identifiers), the oracle, Phase 1, Phase 2 and the tag `PHASE2_BASELINE_v0.4.4-dev`. Nothing is approved, and nothing is merged.
+
 ## Phase 2 FREEZE — IST v0.4.4-dev = `PHASE2_BASELINE_v0.4.4-dev` (2026-10-28) — no indicator change
 
 **Decision (user, 2026-10-28):** freeze Phase 2 with **C1** (DEF-L2 = reaction AND dominance) as the approved liquidity significance definition. Full record: `docs/PHASE2_FREEZE_REPORT.md`.
