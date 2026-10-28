@@ -24,8 +24,10 @@ TYPES = (
     "EQH_TAKEN", "EQL_TAKEN",
     "BSL_CREATED", "SSL_CREATED", "EQH_CREATED", "EQL_CREATED",
     "EQH_DROPPED_MEMORY", "EQL_DROPPED_MEMORY", "BSL_DROPPED_MEMORY", "SSL_DROPPED_MEMORY",
-    "LRL_SWEEP", "LRL_BREAK", "LRL_EXPIRED", "LRL_EXTENDED", "LRL_CONFIRMED", "LRL_DROPPED_MEMORY",
+    "LRL_SWEEP", "LRL_BREAK", "LRL_DRIFT", "LRL_EXPIRED", "LRL_EXTENDED", "LRL_CONFIRMED", "LRL_DROPPED_MEMORY",
 )
+# The terminal LRL classes (docs/LRL.md DEF-LRL5): exactly one per LRL, never relabelled.
+LRL_TERMINAL = ("LRL_DRIFT", "LRL_SWEEP", "LRL_BREAK", "LRL_EXPIRED")
 RANK = {t: i for i, t in enumerate(TYPES)}
 # Types of opt-in oracle modules that src/IST.pine does not implement yet (ST-14 excludes
 # them; empty this set when Pine gains the module).

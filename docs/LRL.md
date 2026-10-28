@@ -5,7 +5,7 @@
   * pivots 3/2;
   * τ = 0.5 × TR average;
   * G = 30 bars;
-  * a crossing of the projected line counts as a take, even when the line descends into price;
+  * a crossing of the projected boundary ends the LRL. **Correction (user, 2026-10-28, before any Pine):** when the boundary moved into price, the end is a separate terminal class, `LRL_DRIFT`, not SWEEP / BREAK (DEF-LRL5);
   * the pivots of a taken LRL are spent;
   * display (later) shows the nearest active LRL per side, and 2-point candidates only in debug.
 * **Reference model and validation only. NOT in Pine.** `src/IST.pine` is unchanged, and the static check ST-08 still forbids LRL identifiers in it.
@@ -35,7 +35,11 @@
   * it is clean: high[j] ≤ y(j) + τ + ε for every X₁ < j ≤ t.
 * **DEF-LRL5 · Lifecycle**, decided at each bar's close in this order:
   1. **Advance**, with the geometry in effect before bar t, every LRL confirmed before t:
-     * **taken** if `high[t] > y(t) + τ + ε`: `LRL_BREAK` if `close[t] > y(t) + τ + ε`, else `LRL_SWEEP`. Once, never relabelled. Its points become **spent**.
+     * **crossed** if `high[t] > boundary_now + ε`, with `boundary_now = y(t) + τ` and `boundary_prev = y(t − 1) + τ`, both on the geometry known before bar t. Then:
+       * **`LRL_DRIFT`** if `high[t] ≤ boundary_prev + ε`: the projection moved into price. Equality with the previous boundary is DRIFT;
+       * otherwise price moved through it: **`LRL_BREAK`** if `close[t] > boundary_now + ε`, else **`LRL_SWEEP`**.
+       * The class is terminal: once, never relabelled. Its points become **spent**, for all three classes.
+       * Low side (bullish LRL), in real prices: boundary_now = y(t) − τ and boundary_prev = y(t − 1) − τ. It is crossed if `low[t] < boundary_now − ε`; DRIFT if `low[t] ≥ boundary_prev − ε`; else BREAK if `close[t] < boundary_now − ε`, else SWEEP.
      * else **expired** if t > Xₙ + 30 + 2 (`LRL_EXPIRED`).
      * else a **touch** if `high[t] ≥ y(t) − τ − ε` (a counter, no event).
      * 2-point candidates are dropped silently when crossed (same test), expired (same bound) or holding a spent pivot.
@@ -64,21 +68,23 @@
 |---|---|---|---|
 | `LRL_CONFIRMED` | X₃ + 2 | P₃ (the 3rd point) | points, τ, slope per bar |
 | `LRL_EXTENDED` (repeats) | Xₙ + 2 | Pₙ (the new point) | points, τ, slope per bar |
-| `LRL_SWEEP` / `LRL_BREAK` | the taking bar | y + τ on that bar (the level traded through) | points, close |
+| `LRL_DRIFT` / `LRL_SWEEP` / `LRL_BREAK` | the crossing bar | boundary_now = y + τ on that bar | points, close, previous boundary |
 | `LRL_EXPIRED` | Xₙ + 33 | y + τ on that bar | points, close |
 | `LRL_DROPPED_MEMORY` | the confirmation that overflowed memory | Pₙ | ended or active record |
 
 * `dir`: **+1** = the high side (bearish LRL), **−1** = the low side (bullish LRL), as for BSL / SSL.
 * `sid`: the time of X₁. `origin_bar`: X₁. Prices are real prices (the low side converted back from the mirrored series).
-* All are once per LRL, except `LRL_EXTENDED`. In-bar canonical order: SWEEP, BREAK, EXPIRED, EXTENDED, CONFIRMED, DROPPED, after every Phase 1 / 2 type, whose ranks are unchanged.
+* All are once per LRL, except `LRL_EXTENDED`. **Exactly one terminal event per LRL:** `LRL_DRIFT`, `LRL_SWEEP`, `LRL_BREAK` or `LRL_EXPIRED` (`events.LRL_TERMINAL`).
+* In-bar canonical order: SWEEP, BREAK, DRIFT, EXPIRED, EXTENDED, CONFIRMED, DROPPED, after every Phase 1 / 2 type, whose ranks are unchanged.
+* **Names for the future Pine `f_evName`:** exactly these seven: `LRL_CONFIRMED`, `LRL_EXTENDED`, `LRL_SWEEP`, `LRL_BREAK`, `LRL_DRIFT`, `LRL_EXPIRED`, `LRL_DROPPED_MEMORY`. Until Pine emits them they are `events.ORACLE_ONLY`, which ST-14 excludes. Empty that set in the same change that adds them to Pine.
 
 **Record state** (`IstModel.state()["lrl"]`):
 * the id, side, points and τ;
 * the confirmation bar and the extension bars;
 * touches;
-* the status: ACTIVE, SWEEP, BREAK or EXPIRED;
+* the status: ACTIVE, DRIFT, SWEEP, BREAK or EXPIRED;
 * the end bar and end level;
-* counters per side: pivots, candidates seeded, confirmed, extended, taken, expired, dropped.
+* counters per side: pivots, candidates seeded, confirmed, extended, drift, sweep, break, expired, dropped.
 
 ## 3 · Non-repaint guarantees
 
@@ -89,21 +95,24 @@
 * The drawn polyline joins fixed, confirmed pivots. Like a BSL line drawn from its swing bar, it shows confirmed facts, not a claim that the line existed earlier.
 * All of this is tested (§4).
 
-## 4 · Validation (oracle `validation/models/lrl.py`, validation 1.7.0)
+## 4 · Validation (oracle `validation/models/lrl.py`, validation 1.8.0)
 
 | what | where | proves |
 |---|---|---|
-| INV-LRL-01 … 09, checked after every bar, each with a negative test | `validation/invariants.py`, `tests/test_invariants.py` | the items below |
+| INV-LRL-01 … 10, checked after every bar, each with a negative test | `validation/invariants.py`, `tests/test_invariants.py` | the items below |
 | | | 01 one LRL per pivot |
 | | | 02 points are DEF-LRL1 pivots with valid failure steps |
 | | | 03 τ, chord, diagonal |
 | | | 04 clean until now / the take / the expiry |
-| | | 05 take level and class |
+| | | 05 the crossing level and class (DRIFT / SWEEP / BREAK) |
 | | | 06 confirmation, extension and expiry bars |
 | | | 07 frozen facts |
 | | | 08 events ↔ records |
 | | | 09 memory |
-| the approved study engine reproduced exactly | `tests/test_lrl.py` | identical events on 17 scenarios, the NQ captures (27 LRLs: 15 high, 12 low) and three random walks |
+| | | 10 exactly one terminal class, never relabelled |
+| the approved study engine reproduced exactly | `tests/test_lrl.py` | identical events (study spec `APPROVED` = LRL-R + DRIFT) on 17 scenarios, the NQ captures (27 LRLs: 15 high, 12 low) and three random walks. DRIFT only relabels crossings: bars, sides and anchors are identical to the reviewed study |
+| terminal classification | `tests/test_lrl.py` | 1–6 bearish / bullish DRIFT, SWEEP, BREAK · 7 equality at the previous boundary (DRIFT), one tick beyond (SWEEP), at the boundary (a touch, then an extension) · 8 steep one-bar projection · 9 extension just before a drift (new geometry from the next bar) · 10 drift spends pivots, expiry does not · 11 never relabelled |
+| NQ terminations | `tests/test_lrl.py` | 27 LRLs: **8 DRIFT · 9 SWEEP · 10 BREAK · 0 EXPIRED** (high 5 · 3 · 7 · 0, low 3 · 6 · 3 · 0) |
 | event fields | `tests/test_lrl.py` | id, origin, dir, prices of every event type |
 | DEF-LRL8 | `tests/test_lrl.py`, `fuzz/test_lrl_properties.py` | Phase 1 / 2 events and state identical with LRL on (NQ, walks, generated cases) |
 | opt-in | `tests/test_lrl.py` | default runs and serialised settings unchanged |

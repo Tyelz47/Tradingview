@@ -7,8 +7,10 @@ mirrored series (high ↔ −low, close ↔ −close): "side coordinates" below.
 
 Per bar t (Confirmed mode: every bar is closed), per side:
   1. advance, with the geometry in effect BEFORE t, every LRL confirmed before t: a high
-     strictly beyond line + τ takes it (SWEEP / BREAK at this close), else it expires once
-     no further point can arrive, else a high within τ of the line is a touch; 2-point
+     strictly beyond the boundary y(t) + τ ends it. If that high is not beyond the PREVIOUS
+     bar's boundary y(t − 1) + τ, the line moved into price: DRIFT; otherwise price moved
+     through it: BREAK if the close is beyond y(t) + τ, else SWEEP. Else it expires once no
+     further point can arrive, else a high within τ of the line is a touch. 2-point
      candidates that are crossed, expired or hold a spent pivot are dropped silently;
   2. judge the swing bar X = t − right (DEF-LRL1). A new pivot extends one LRL, else
      confirms one candidate (its 3rd point), else seeds new candidates.
@@ -24,7 +26,7 @@ from validation.models.events import EventLog
 from validation.models.fvg import sma, true_range
 from validation.models.types import Candle, LrlSettings
 
-SWEEP, BREAK, EXPIRED = "SWEEP", "BREAK", "EXPIRED"
+SWEEP, BREAK, DRIFT, EXPIRED = "SWEEP", "BREAK", "DRIFT", "EXPIRED"
 
 
 @dataclass
@@ -37,9 +39,9 @@ class Lrl:
     born: int = -1              # confirmation bar (3rd point known)
     ext: list = field(default_factory=list)   # bars where the 4th, 5th, … point joined
     touches: int = 0
-    end: str | None = None      # SWEEP · BREAK · EXPIRED
+    end: str | None = None      # DRIFT · SWEEP · BREAK · EXPIRED (terminal, never relabelled)
     end_bar: int | None = None
-    end_level: float | None = None    # line + τ on the end bar
+    end_level: float | None = None    # the boundary y + τ on the end bar
     end_close: float | None = None
 
     @property
@@ -65,9 +67,9 @@ class Side:
         self.cands: list[Lrl] = []
         self.piv: list[tuple] = []          # recent pivots (X, P), X within `gap` of the newest
         self.members: set = set()           # points of active LRLs
-        self.spent: set = set()             # points of taken LRLs: never used again
-        self.pivots = self.seeded = self.confirmed = self.extended = 0
-        self.taken = self.expired = self.dropped = 0
+        self.spent: set = set()             # points of crossed LRLs (DRIFT / SWEEP / BREAK): never used again
+        self.pivots = self.seeded = self.confirmed = self.extended = self.dropped = 0
+        self.ends = {DRIFT: 0, SWEEP: 0, BREAK: 0, EXPIRED: 0}
         self.last_drop: dict | None = None  # {"active": bool, "ended_available": bool}
 
     @property
@@ -118,7 +120,8 @@ class LrlEngine:
                 continue
             lv = r.y(t) + r.tau
             if hi[t] > lv + eps:
-                self._end(side, r, t, BREAK if side.cl[t] > lv + eps else SWEEP, lv)
+                kind = DRIFT if hi[t] <= r.y(t - 1) + r.tau + eps else BREAK if side.cl[t] > lv + eps else SWEEP
+                self._end(side, r, t, kind, lv)
             elif t > r.xs[-1] + s.gap + s.right:
                 self._end(side, r, t, EXPIRED, lv)
             elif hi[t] >= r.y(t) - r.tau - eps:
@@ -131,13 +134,12 @@ class LrlEngine:
         side.live.remove(r)
         side.hist.append(r)
         side.members.difference_update(r.xs)
-        if kind == EXPIRED:
-            side.expired += 1
-        else:
-            side.taken += 1
+        side.ends[kind] += 1
+        if kind != EXPIRED:
             side.spent.update(r.xs)
+        prev = f" · previous boundary {side.sign * (r.y(t - 1) + r.tau):.4f}" if kind != EXPIRED else ""
         self.log.emit(f"LRL_{kind}", side.sign, r.id, r.xs[0], side.sign * level,
-                      f"{len(r.xs)} points · close {self.candles[t].close}")
+                      f"{len(r.xs)} points · close {self.candles[t].close}{prev}")
 
     def fits(self, side: Side, xs: list, ps: list, tau: float, t: int) -> bool:
         """DEF-LRL3 (last pair) and DEF-LRL4 (whole list) at bar t."""
@@ -227,5 +229,5 @@ class LrlEngine:
                     "end_level": None if r.end_level is None else g * r.end_level}
         return {"records": [rec(side, r) for side in self.sides() for r in sorted(side.records(), key=lambda r: r.id)],
                 "counters": {side.name: {"pivots": side.pivots, "candidates": side.seeded, "confirmed": side.confirmed,
-                                         "extended": side.extended, "taken": side.taken, "expired": side.expired,
+                                         "extended": side.extended, **{k.lower(): n for k, n in side.ends.items()},
                                          "dropped": side.dropped} for side in self.sides()}}

@@ -1,5 +1,47 @@
 # Changelog
 
+## LRL correction — terminal class `LRL_DRIFT` · validation 1.8.0 (2026-10-28, branch `lrl/oracle`) — no indicator change
+
+**Decision (user, 2026-10-28, before any Pine):** a crossing caused by the projected boundary moving into otherwise stationary price is not a SWEEP / BREAK. It is the separate terminal event `LRL_DRIFT`.
+
+**CHANGE** (DEF-LRL5, `docs/LRL.md`):
+* With boundary_now = y(t) + τ and boundary_prev = y(t − 1) + τ, both on the geometry known before bar t, an LRL is crossed when `high[t] > boundary_now + ε`. Then:
+  * **DRIFT** if `high[t] ≤ boundary_prev + ε`;
+  * else **BREAK** if `close[t] > boundary_now + ε`;
+  * else **SWEEP**.
+* The bullish side mirrors this with y − τ and low / close.
+* DRIFT is terminal, never relabelled, and spends its pivots like SWEEP / BREAK. EXPIRED, DROPPED_MEMORY, the spent pivots of a memory-dropped active LRL, and ADVANCE-before-JUDGE are unchanged.
+* **Oracle:** `LRL_DRIFT` event and record status; per-side counters drift · sweep · break · expired (replacing "taken").
+* **Events:** `events.LRL_TERMINAL`. The seven LRL names for the future Pine `f_evName` are listed in `docs/LRL.md`. They are `ORACLE_ONLY`, so ST-14 excludes them until Pine has them.
+* **Invariants:**
+  * INV-LRL-05 now classifies DRIFT / SWEEP / BREAK.
+  * New **INV-LRL-10**: exactly one terminal class out of DRIFT / SWEEP / BREAK / EXPIRED, never relabelled, and no terminal facts on an active LRL. It has a negative test (a SWEEP appended after a DRIFT).
+* **Study:** `Spec.drift` and the spec `APPROVED` (LRL-R + DRIFT), which the oracle now matches. The reviewed study numbers (`RECOMMENDED`) are unchanged.
+
+**Effect:** it relabels crossings only. Confirmations, extensions, spent pivots and every bar are identical (tested on NQ and three walks).
+* NQ captures, 27 LRLs: **8 DRIFT · 9 SWEEP · 10 BREAK · 0 EXPIRED**. Before, it was 17 sweeps · 10 breaks.
+
+**TEST:** 11 explicit synthetic cases in `tests/test_lrl.py`:
+1. bearish drift;
+2. bearish sweep;
+3. bearish break;
+4. bullish drift;
+5. bullish sweep;
+6. bullish break;
+7. equality at the previous boundary (exact boundaries with τ = 1.0), plus one tick beyond, plus exactly at the boundary;
+8. steep one-bar projection (DRIFT / SWEEP / BREAK);
+9. extension immediately before a drift: the new geometry is used from the next bar, and the drift bar differs from the old geometry's;
+10. drift consumes pivots, expiry does not;
+11. a terminal event is never relabelled.
+
+Also: drift only relabels (NQ, walks); NQ termination counts; the event names prepared for Pine.
+
+**Results:**
+* `python -m validation --phase lrl` (quick): **PASS**.
+* FULL: **PASS**, exit 0, 200.6 s, **411 passed, 1 skipped**: LRL detection 52/52, invariant detectors 53/53, every other section unchanged. Regression 5/5 against the frozen baseline.
+
+**Unchanged:** `src/IST.pine`, Phase 1, Phase 2 (byte-identical with LRL on), the frozen tags, the regression baseline and parity.
+
 ## LRL detection — reference model + validation 1.7.0 (2026-10-28, branch `lrl/oracle`) — no indicator change
 
 **Decision (user, 2026-10-28):** "Definition approved. Proceed with the reference model/oracle + validation, but not Pine yet." The approved definition is LRL-R (`docs/STUDY_LRL.md` §H) with the recommended answers of §K.

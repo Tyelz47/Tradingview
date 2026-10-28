@@ -52,6 +52,7 @@ class Spec:
     drop: float = 2.0         # first − latest point > drop × τ: no horizontal line fits within τ (0 = off)
     reuse: bool = False       # True: pivots of a taken LRL may seed a new one (False: they are spent)
     sep: float = 0.0          # pullback between consecutive points ≥ sep × TR avg (separate swings; 0 = off)
+    drift: bool = False       # True: a cross not beyond the previous bar's boundary ends as DRIFT (docs/LRL.md)
 
 
 @dataclass
@@ -64,7 +65,7 @@ class Lrl:
     geometry: str = "chord"
     ext: list = field(default_factory=list)   # bars where a 4th, 5th, … point joined
     touches: int = 0
-    end: str | None = None    # SWEEP · BREAK · EXPIRED (None: active at the data end)
+    end: str | None = None    # SWEEP · BREAK · DRIFT · EXPIRED (None: active at the data end)
     end_bar: int | None = None
 
     def y(self, x: float) -> float:
@@ -157,7 +158,8 @@ def run(cs, spec: Spec, side: str, c1: dict | None = None) -> tuple[list[Lrl], d
                 continue
             lv = r.y(t)
             if hi[t] > lv + r.tau + EPS:
-                r.end, r.end_bar = ("BREAK" if cl[t] > lv + r.tau + EPS else "SWEEP"), t
+                drift = spec.drift and hi[t] <= r.y(t - 1) + r.tau + EPS        # the line moved into price
+                r.end, r.end_bar = ("DRIFT" if drift else "BREAK" if cl[t] > lv + r.tau + EPS else "SWEEP"), t
             elif t > r.pts[-1][0] + spec.gmax + spec.right:
                 r.end, r.end_bar = "EXPIRED", t
             elif hi[t] >= lv - r.tau - EPS:
@@ -232,6 +234,9 @@ SPECS = [
 # 3 / 2 pivot engine, consecutive points separated by a k × TR pullback (Balanced k = 1).
 RECOMMENDED = Spec("LRL-R recommended: chord · pivots 3/2 · separate swings", left=3, right=2, sep=1.0)
 SPECS.append(RECOMMENDED)
+# The approved lifecycle (docs/LRL.md, user correction 2026-10-28): LRL-R + the LRL_DRIFT class.
+# The tables of docs/STUDY_LRL.md were measured with RECOMMENDED (drift counted in sweep / break).
+APPROVED = replace(RECOMMENDED, name="LRL-R approved: + LRL_DRIFT", drift=True)
 SOURCES = [
     Spec("all DEF-L1 pivots 5/3 (any significance)"),
     Spec("C1 significant only (BSL/SSL)", anchor="c1", points="c1"),

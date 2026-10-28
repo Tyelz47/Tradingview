@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from validation import stats
 from validation.models.eq import BREAK, SWEEP
-from validation.models.events import ONCE, RANK
+from validation.models.events import LRL_TERMINAL, ONCE, RANK
 from validation.models.sessions import in_window
 
 
@@ -94,8 +94,9 @@ LRL_LINE = _inv("INV-LRL-03", "LRL", "≥ 3 points; τ = max(EQ tolerance, tol_k
                                      "point within τ of the chord; first − latest > drop_k × τ")
 LRL_CLEAN = _inv("INV-LRL-04", "LRL", "no high beyond line + τ from the first point to the current bar (active), the "
                                       "bar before the take (taken) or the expiry bar (expired)")
-LRL_TAKE = _inv("INV-LRL-05", "LRL", "a taken LRL: the taking high is strictly beyond line + τ; BREAK iff the close "
-                                     "is too; the recorded level is line + τ")
+LRL_TAKE = _inv("INV-LRL-05", "LRL", "a crossed LRL: the ending high is strictly beyond the boundary y + τ; DRIFT "
+                                     "iff it is not beyond the previous bar's boundary; otherwise BREAK iff the close "
+                                     "is beyond y + τ, else SWEEP; the recorded level is y + τ")
 LRL_TIMING = _inv("INV-LRL-06", "LRL", "confirmed at X3 + right, extended at Xn + right; it ends after its last "
                                        "decision bar and expires on the first bar after Xn + gap + right")
 LRL_FROZEN = _inv("INV-LRL-07", "LRL", "id, τ and confirmation bar never change; points and extensions are "
@@ -104,6 +105,8 @@ LRL_EVENTS = _inv("INV-LRL-08", "LRL", "events and records agree: CONFIRMED on t
                                        "per extension, one terminal event on the end bar, prices as specified")
 LRL_MEM = _inv("INV-LRL-09", "LRL", "records per side ≤ memory, candidates ≤ candidate memory; an active record "
                                     "is dropped only when no ended one exists")
+LRL_TERM = _inv("INV-LRL-10", "LRL", "an LRL ends at most once, with exactly one of LRL_DRIFT / LRL_SWEEP / LRL_BREAK / "
+                                     "LRL_EXPIRED, never relabelled; an active LRL has no terminal facts")
 
 LIQ_FACTS = ("taken_bar", "take_ext", "take_close", "take_gap", "cls")
 
@@ -138,6 +141,7 @@ class Monitor:
         self.liq_made = {1: lq.bsl.levels, -1: lq.ssl.levels} if lq is not None else {1: 0, -1: 0}
         self.eq_snap: dict = {}
         self.lrl_snap: dict = {}
+        self.lrl_ended: set = set()             # (dir, id) with a terminal event, for INV-LRL-10
         self.tol = model.settings.liq.tol_ticks * model.settings.tick
         self.eps = model.settings.eps
 
@@ -496,13 +500,19 @@ class Monitor:
             if len(pts) != len(set(pts)):
                 self._fail(LRL_UNIQUE, f"{side.name}: a pivot is a point of two LRLs")
             mine = [x for x in evs if x.dir == side.sign]
+            for x in mine:
+                if x.type in LRL_TERMINAL:
+                    if (side.sign, x.sid) in self.lrl_ended:
+                        self._fail(LRL_TERM, f"{side.name} LRL {x.sid}: {x.type} after it had already ended")
+                    self.lrl_ended.add((side.sign, x.sid))
             touched = {x.sid for x in mine}
             for r in (recs if full else [r for r in recs if r.end is None or r.id in touched]):
                 self._lrl_record(e, side, r, bar)
             if not final:                         # this bar's events were compared by check()
                 self._lrl_events(side, mine, recs, bar)
         stats.peak("lrl.records_per_side", max(len(side.records()) for side in e.sides()))
-        for k in (LRL_UNIQUE, LRL_POINTS, LRL_LINE, LRL_CLEAN, LRL_TAKE, LRL_TIMING, LRL_FROZEN, LRL_EVENTS, LRL_MEM):
+        for k in (LRL_UNIQUE, LRL_POINTS, LRL_LINE, LRL_CLEAN, LRL_TAKE, LRL_TIMING, LRL_FROZEN, LRL_EVENTS, LRL_MEM,
+                  LRL_TERM):
             stats.INV_CHECKS[k] += 1
 
     def _lrl_record(self, e, side, r, bar):
@@ -520,6 +530,10 @@ class Monitor:
         if len(r.xs) < 3 or r.tau != e.tau(r.xs[0]) or not r.ps[0] - r.ps[-1] > s.drop_k * r.tau + eps \
                 or any(abs(p - r.y(x)) > r.tau + eps for x, p in zip(r.xs, r.ps)):
             self._fail(LRL_LINE, f"{tag}: {len(r.xs)} points, τ {r.tau} vs {e.tau(r.xs[0])}, off the chord or too flat")
+        ended, active = r.end is not None, any(x is r for x in side.live)
+        if (ended and f"LRL_{r.end}" not in LRL_TERMINAL) or {ended, r.end_bar is not None, r.end_level is not None,
+                                                               not active} != {ended}:
+            self._fail(LRL_TERM, f"{tag}: end {r.end!r} bar {r.end_bar} level {r.end_level}, active {active}")
         limit = r.xs[-1] + s.gap + s.right
         if r.born != r.xs[2] + s.right or r.ext != [x + s.right for x in r.xs[3:]] or (
                 r.end is None and bar > limit) or (r.end == "EXPIRED" and r.end_bar != limit + 1) or (
@@ -529,10 +543,13 @@ class Monitor:
         bad = next((j for j in range(r.xs[0] + 1, last + 1) if hi[j] > r.y(j) + r.tau + eps), None)
         if bad is not None:
             self._fail(LRL_CLEAN, f"{tag}: bar {bad} traded beyond line + τ ({hi[bad]} > {r.y(bad) + r.tau})")
-        if r.end in ("SWEEP", "BREAK"):
-            lv = r.y(r.end_bar) + r.tau
-            if not hi[r.end_bar] > lv + eps or (r.end == "BREAK") != (side.cl[r.end_bar] > lv + eps) or r.end_level != lv:
-                self._fail(LRL_TAKE, f"{tag}: {r.end} on bar {r.end_bar} at level {r.end_level} vs line + τ {lv}")
+        if r.end in ("DRIFT", "SWEEP", "BREAK"):
+            k = r.end_bar
+            lv, prev = r.y(k) + r.tau, r.y(k - 1) + r.tau
+            kind = "DRIFT" if hi[k] <= prev + eps else "BREAK" if side.cl[k] > lv + eps else "SWEEP"
+            if not hi[k] > lv + eps or r.end != kind or r.end_level != lv:
+                self._fail(LRL_TAKE, f"{tag}: {r.end} on bar {k} (should be {kind}): high {hi[k]}, close {side.cl[k]}, "
+                                     f"level {r.end_level} vs y + τ {lv}, previous boundary {prev}")
         now = (r.tau, r.born, tuple(r.xs), tuple(r.ps), tuple(r.ext), r.end, r.end_bar, r.end_level)
         old = self.lrl_snap.get((side.sign, r.id))
         if old is not None:

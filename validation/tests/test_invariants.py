@@ -430,6 +430,14 @@ def lrl09():
     mon.check()
 
 
+def lrl10():
+    m, mon = lrl_case("strong trend, collinear highs")                # ends with LRL_DRIFT on bar 107
+    r = m.lrl.high.hist[0]
+    assert r.end == "DRIFT"
+    m.log.events.append(ev_now(m, "LRL_SWEEP", 1, r.id, 1.0))      # relabelled later as a SWEEP
+    mon.check()
+
+
 CASES = {
     "INV-EV-01": ev01, "INV-EV-02": ev02, "INV-EV-03": ev03, "INV-EV-04": ev04, "INV-EV-05": ev05,
     "INV-FVG-01": fvg01, "INV-FVG-02": fvg02, "INV-FVG-03": fvg03, "INV-FVG-04": fvg04, "INV-FVG-05": fvg05,
@@ -442,7 +450,7 @@ CASES = {
     "INV-EQ-11": eq11, "INV-EQ-12": eq12,
     "INV-SES-01": ses01, "INV-SES-02": ses02, "INV-LVL-01": lvl01,
     "INV-LRL-01": lrl01, "INV-LRL-02": lrl02, "INV-LRL-03": lrl03, "INV-LRL-04": lrl04, "INV-LRL-05": lrl05,
-    "INV-LRL-06": lrl06, "INV-LRL-07": lrl07, "INV-LRL-08": lrl08, "INV-LRL-09": lrl09,
+    "INV-LRL-06": lrl06, "INV-LRL-07": lrl07, "INV-LRL-08": lrl08, "INV-LRL-09": lrl09, "INV-LRL-10": lrl10,
 }
 
 
