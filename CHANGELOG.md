@@ -1,5 +1,82 @@
 # Changelog
 
+## v0.6.0-dev — HTF Fair Value Gaps (Module B) · neutral grey LRL · Phase 1 FVG display OFF (2026-10-29, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.10.0
+
+**Decisions (user, 2026-10-29):** the straight LRL renderer and the HTF FVG design are approved, with final decisions D1–D10 (`docs/HTF_FVG.md`):
+* the LRL is drawn thin and neutral grey (no strong magenta / cyan);
+* the user-facing FVGs are the HTF ones: 15m, 30m, 1H, 4H, 1D and 1W;
+* Phase 1 `Show FVGs` defaults to OFF (D9, display only).
+
+**CHANGE** (`src/IST.pine`):
+* **LRL** (L6 only): `LRL_BEAR_COL` / `LRL_BULL_COL` = `#9598A1`. DEF-LRL1…6, state and events unchanged.
+* **Phase 1 view default (D9):**
+  * `fvgShow` true → false: one Phase 1 *view* line.
+  * It is recorded as a reviewed deviation in `validation/baselines/PHASE1_DEVIATIONS.md` and in the ST-15 manifest.
+  * Module A's calculation, lifecycle, events and alerts are unchanged.
+* **HTF FVG, Module B (DEF-B0…B6), additive:**
+  * **L1:** six `request.security(…, f_htfPack(), lookahead_on)` calls, one per timeframe. `f_htfPack()` reads every series at `[1]` or older:
+    * the DEF-A1 / A2 zone on candles [3] · [2] · [1] with the Phase 1 inputs and that timeframe's own TR average (D4);
+    * the HTF-side seed engine (DEF-B2);
+    * the last completed HTF bar.
+  * A timeframe at or below the chart's is inactive and never requests a lower timeframe.
+  * **L3:** `HtfTf` / `HtfZone`, unique method names (`feedHtf`, `stepHtf`, `seedHtf`, `milestonesHtf`, `trimHtf`). On each chart bar and timeframe:
+    * seed point;
+    * on a new completed HTF bar: invalidate by the own-timeframe close (D5), then create;
+    * milestones from the known bar (D2, no retroactive touches for seeds).
+  * Memory: 20 records per timeframe (closed first).
+  * **L5:** `HTF_FVG_CREATED · SEEDED · FIRST_TOUCH · CE_TOUCH · FULL_FILL · INVALIDATED · DROPPED_MEMORY` (kinds 25–31). `Event.tf` (a new field, default "") carries the timeframe, and the audit text starts with `tf=15m`. BULL / BEAR in the text. No HTF alerts.
+  * **L6:**
+    * per timeframe, the nearest open zone above and below price (D6, ≤ 12 boxes);
+    * drawn 1W first, 15m last; no merging or hiding (D1);
+    * neutral grey with opacity tiers (D7);
+    * the box from HTF candle 1 (D8);
+    * the text `15m Fair Value Gap` … `1W Fair Value Gap` bottom-right, tiny grey; `15m FVG` is a Developer option (D10).
+  * **Inputs:**
+    * group HTF FAIR VALUE GAPS: Show HTF FVGs ON, 15m / 30m / 1H / 4H / 1D / 1W ON, Show timeframe labels ON, all [view];
+    * Developer: Compact HTF labels.
+  * **L7:**
+    * debug rows 42–44 (engine, registries, drawn);
+    * Parity capture: `htf=1|htftfs|htfmem|htfseeds|htfseedmem` on CAPTURE;
+    * `HTFSTATE` / `HTFREC` snapshot after the first captured bar;
+    * `HTFBAR` per completed HTF candle;
+    * `HO=` per BAR.
+
+**Validation 1.10.0:**
+* oracle `models/htf_fvg.py` (opt-in module "htf"; `restore()` and an external HTF feed for parity);
+* `Event.tf` in the event identity;
+* INV-HTF-01…08 with negative tests;
+* `tests/test_htf_fvg.py` (timing, D2, D5, D8, seeds, memory, identity, session alignment incl. DST, other modules identical, prefix invariance);
+* `fuzz/test_htf_properties.py` (invariants, mirror, translation, no lookahead, **reload consistency**, other modules untouched, long walks);
+* ST-03 extended (8 requests, `f_htfPack` reads nothing newer than [1]);
+* new ST-19 (constants, 19 timing / definition lines, order);
+* `tests/test_htf_pine.py` (18 mutations caught, renderer rules, settings target);
+* bounded parity `_compare_htf`, covering:
+  * (a) HTF candles vs the oracle's aggregation;
+  * (b)+(c) the registry restored and replayed;
+* `tests/test_parity_htf.py`;
+* report section HTF and `--phase htf`.
+
+**RISKS (TradingView only, not verifiable here):**
+* a `var matrix` and string building inside `request.security`, and the tuple of 13 values;
+* `str.tonumber` parsing of the seeds;
+* boxes whose `bar_time` origin precedes the first loaded bar (seeded 1D / 1W zones);
+* thin zones may clip their text;
+* load time with six HTF contexts;
+* the 4H / 1D / 1W alignment (checked by parity (a)).
+
+**Fixed during development (validation only):**
+* INV-EV-05 now keys structures by (family, dir, id, timeframe). The EQ-cluster registration still added 3-element keys, so two `min3` liquidity long walks failed: `EQ*_DROPPED_MEMORY … refers to no known structure`. The key is aligned; no model change.
+* The HTF monitor checks timing and geometry once per record, when it first appears; INV-HTF-08 freezes those facts afterwards. Before, it recomputed them for every record on every bar, quadratic in a walk: FULL took 905 s.
+* Negative tests INV-HTF-01 / 02 corrupt a newly seen record. The same corruption on a known record is caught by INV-HTF-08 (its own test).
+
+**TEST:**
+* QUICK: run during development.
+* FULL: **PASS**, exit 0, 292.7 s, **536 passed, 1 skipped**:
+  * static 19/19 (ST-03: 8 requests, nothing newer than [1]; ST-19: 19 rules · 3 constants · 2 orders; ST-15: 12 reviewed Phase 1 lines, the 12th = `fvgShow`);
+  * every Phase 1 / Phase 2 section unchanged; regression 5/5;
+  * LRL 81/81; HTF 46/46; invariant detectors 62/62; long walks 13/13.
+* TradingView: HTF-L00…L14 pending (`docs/TESTS_HTF.md`). Also pending: LRL-L02 (one straight line) and the historical-drawing retest.
+
 ## v0.5.3-dev — LRL drawn as ONE straight line (2026-10-29, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.9.3
 
 **Decision (user, 2026-10-29, from the reference screenshots):** an LRL is drawn as ONE clean straight diagonal, not a polyline that bends at every failure swing. This is a renderer change: DEF-LRL1…6, the oracle, state, events and ids are unchanged.

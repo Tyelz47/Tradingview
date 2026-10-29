@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 LEVEL_KINDS = {"PDH": 0, "PDL": 1, "PWH": 2, "PWL": 3, "DO": 4, "MO": 5}
 
 # Canonical in-bar order: roughly Pine's engine order (levels, sessions, FVG, liquidity, LRL).
-# LRL types come last so the ranks of every earlier type are unchanged.
+# LRL, then HTF FVG types come last so the ranks of every earlier type are unchanged.
 TYPES = (
     "LEVEL_SET",
     "SESSION_END", "SESSION_START",
@@ -25,6 +25,8 @@ TYPES = (
     "BSL_CREATED", "SSL_CREATED", "EQH_CREATED", "EQL_CREATED",
     "EQH_DROPPED_MEMORY", "EQL_DROPPED_MEMORY", "BSL_DROPPED_MEMORY", "SSL_DROPPED_MEMORY",
     "LRL_SWEEP", "LRL_BREAK", "LRL_DRIFT", "LRL_EXPIRED", "LRL_EXTENDED", "LRL_CONFIRMED", "LRL_DROPPED_MEMORY",
+    "HTF_FVG_INVALIDATED", "HTF_FVG_SEEDED", "HTF_FVG_CREATED", "HTF_FVG_DROPPED_MEMORY",
+    "HTF_FVG_FIRST_TOUCH", "HTF_FVG_CE_TOUCH", "HTF_FVG_FULL_FILL",
 )
 # The terminal LRL classes (docs/LRL.md DEF-LRL5): exactly one per LRL, never relabelled.
 LRL_TERMINAL = ("LRL_DRIFT", "LRL_SWEEP", "LRL_BREAK", "LRL_EXPIRED")
@@ -45,13 +47,15 @@ class Event:
     price: float | None
     origin_bar: int
     meta: str = ""      # Pine `reason` text (informative, not compared by default)
+    tf: str = ""        # HTF FVG only: the zone's timeframe ("15", "60", "D", …), part of its identity
 
     def key(self) -> tuple:
-        return (self.bar, RANK[self.type], self.dir, self.sid)
+        return (self.bar, RANK[self.type], self.dir, self.sid, self.tf)
 
     def ident(self) -> tuple:
         """Identity used to match an event across versions."""
-        return (self.type, self.dir, self.sid) if self.type in ONCE else (self.type, self.dir, self.sid, self.bar)
+        tf = (self.tf,) if self.tf else ()
+        return (self.type, self.dir, self.sid, *tf) if self.type in ONCE else (self.type, self.dir, self.sid, self.bar, *tf)
 
     @property
     def family(self) -> str:
@@ -66,7 +70,7 @@ class Event:
     @classmethod
     def from_dict(cls, d: dict) -> "Event":
         return cls(**{k: d[k] for k in ("bar", "time", "type", "dir", "sid", "price", "origin_bar")},
-                   meta=d.get("meta", ""))
+                   meta=d.get("meta", ""), tf=d.get("tf", ""))
 
 
 def canonical(events) -> list[Event]:
@@ -84,8 +88,8 @@ class EventLog:
     def at(self, bar: int, time: int) -> None:
         self.bar, self.time = bar, time
 
-    def emit(self, type_: str, dir_: int, sid: int, origin_bar: int, price, meta: str = "") -> Event:
-        e = Event(self.bar, self.time, type_, dir_, sid, None if price is None else float(price), origin_bar, meta)
+    def emit(self, type_: str, dir_: int, sid: int, origin_bar: int, price, meta: str = "", tf: str = "") -> Event:
+        e = Event(self.bar, self.time, type_, dir_, sid, None if price is None else float(price), origin_bar, meta, tf)
         self.events.append(e)
         return e
 

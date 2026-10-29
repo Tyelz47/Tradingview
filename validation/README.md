@@ -44,8 +44,10 @@ validation/
     levels.py           DEF-G2…G6 chart-side logic (day boundary = labelled ASSUMPTION)
     lrl.py              docs/LRL.md DEF-LRL1…LRL8: opt-in module "lrl" (not in default runs; the Parity
                         capture turns it on when the CAPTURE line says lrl=1). Pine: v0.5.0-dev, ST-17
+    htf_fvg.py          docs/HTF_FVG.md DEF-B0…B6: opt-in module "htf" (6 timeframes, seeds, own-timeframe
+                        invalidation; restore() + an external HTF feed for the Parity capture). Pine: v0.6.0-dev, ST-03, ST-19
     ist.py              all modules in the Pine engine order → events + state
-  invariants.py         53 named invariants (10 LRL, checked only when the module runs) + the per-bar Monitor
+  invariants.py         61 named invariants (10 LRL, 8 HTF, checked only when the module runs) + the per-bar Monitor
   static_checks.py      text checks of src/IST.pine
   regression.py         corpus, baseline snapshot, diff/classify, legacy models from git
   candles.py            builders, random walks, TradingView CSV loader, mirror/shift
@@ -95,7 +97,7 @@ python validation/validation_agent.py --mode deep
 ```
 
 **Options:**
-* `--phase 1|2|lrl|all` runs one phase (or LRL detection) plus the shared checks.
+* `--phase 1|2|lrl|htf|all` runs one phase (or LRL detection, or HTF FVG) plus the shared checks.
 * `--seed N` sets the Hypothesis seed. Walks and the regression corpus are fixed.
 * `--report PATH` writes the report elsewhere.
 * `--verbose` prints every test.

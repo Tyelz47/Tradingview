@@ -107,6 +107,23 @@ LRL_MEM = _inv("INV-LRL-09", "LRL", "records per side ≤ memory, candidates ≤
                                     "is dropped only when no ended one exists")
 LRL_TERM = _inv("INV-LRL-10", "LRL", "an LRL ends at most once, with exactly one of LRL_DRIFT / LRL_SWEEP / LRL_BREAK / "
                                      "LRL_EXPIRED, never relabelled; an active LRL has no terminal facts")
+# ── HTF FVG (docs/HTF_FVG.md DEF-B; checked only when the opt-in module runs) ──
+HTF_TIMING = _inv("INV-HTF-01", "HTF", "a zone is never known during its own candle-3 HTF bar: a created zone on the "
+                                       "first chart bar after that bar, a seeded one on the seed point")
+HTF_GEOM = _inv("INV-HTF-02", "HTF", "top > bottom; a created zone is the DEF-A1 / DEF-A2 gap of its three completed HTF "
+                                     "bars (Phase 1 thresholds), candle 1 = the box origin")
+HTF_MILE = _inv("INV-HTF-03", "HTF", "milestones from the known bar on, never after invalidation, touch ≤ CE ≤ full, "
+                                     "each on the FIRST chart bar whose wick reaches it, never missed")
+HTF_INVAL = _inv("INV-HTF-04", "HTF", "invalidation only by a completed own-timeframe bar after candle 3 that closed "
+                                      "beyond the far edge, on the chart bar where that bar completed, never missed")
+HTF_ID = _inv("INV-HTF-05", "HTF", "one record per (timeframe, direction, candle-3 time); records never shared across "
+                                   "timeframes")
+HTF_MEM = _inv("INV-HTF-06", "HTF", "records per timeframe ≤ memory; an open, unfilled record is dropped only when no "
+                                    "filled or invalidated one exists")
+HTF_EVENTS = _inv("INV-HTF-07", "HTF", "events and records agree: CREATED / SEEDED on the known bar, each milestone and "
+                                       "INVALIDATED on its bar at its price, the event's timeframe = the record's")
+HTF_FROZEN = _inv("INV-HTF-08", "HTF", "identity, geometry, known bar and seed facts never change; a milestone once "
+                                       "stamped never changes")
 
 LIQ_FACTS = ("taken_bar", "take_ext", "take_close", "take_gap", "cls")
 
@@ -134,7 +151,7 @@ class Monitor:
         self.shadow: list = []                  # our own copy of the log, for INV-EV-02
         self.seen: set = set()
         self.dropped: set = set()
-        self.known: set = set()                 # (family, dir, sid) that exist
+        self.known: set = set()                 # (family, dir, sid, tf) that exist (tf: HTF FVG only, else "")
         self.fvg_snap: dict = {}
         self.liq_snap: dict = {}
         lq = getattr(model, "liq", None)        # CREATED events per side so far, for INV-LIQ-12
@@ -166,6 +183,8 @@ class Monitor:
             self._levels(bar, new)
         if getattr(m, "lrl", None) is not None:
             self._lrl(bar, new, full)
+        if getattr(m, "hfvg", None) is not None:
+            self._htf(bar, c, new)
         self.n_events = len(m.events)
         self.last_event = m.events[-1] if m.events else None
 
@@ -198,14 +217,14 @@ class Monitor:
                 self._fail(EV_BAR, f"{e.type} stamped bar {e.bar}/{e.time}, emitted on bar {bar}/{c.time}")
             if e.type not in RANK or e.dir not in (-1, 0, 1):
                 self._fail(EV_KNOWN, f"unknown event {e.type} dir {e.dir}")
-            fam = (e.type.split("_")[0], e.dir, e.sid)
+            fam = (e.type.split("_")[0], e.dir, e.sid, e.tf)
             if e.type in ONCE:
                 if e.ident() in self.seen:
                     self._fail(EV_ONCE, f"{e.type} dir {e.dir} id {e.sid} fired twice")
                 self.seen.add(e.ident())
             if fam in self.dropped:
                 self._fail(EV_AFTER_DROP, f"{e.type} id {e.sid} after its DROPPED_MEMORY")
-            if e.type.endswith("_CREATED") or e.type in ("SESSION_START", "LRL_CONFIRMED"):
+            if e.type.endswith("_CREATED") or e.type in ("SESSION_START", "LRL_CONFIRMED", "HTF_FVG_SEEDED"):
                 self.known.add(fam)
             elif e.type != "LEVEL_SET" and fam not in self.known:
                 self._fail(EV_KNOWN, f"{e.type} id {e.sid} refers to no known structure")
@@ -405,7 +424,7 @@ class Monitor:
                 ident = (cl.id, cl.ref, cl.origin_bar, cl.bar)
                 old = self.eq_snap.get(id(cl))
                 if old is None:
-                    self.known.add((side.eq_name, sg, cl.id))
+                    self.known.add((side.eq_name, sg, cl.id, ""))       # the INV-EV-05 key: family, dir, id, timeframe
                     seg = range(cl.first_confirm_bar + 1, bar + 1)
                     if any(sg * ((cs[j].high if sg > 0 else cs[j].low) - cl.bound) > 0 for j in seg):
                         self._fail(EQ_INTACT, f"{side.eq_name} {cl.id}: price traded beyond {cl.bound} before it formed")
@@ -573,6 +592,91 @@ class Monitor:
                 want.append((f"LRL_{r.end}", r.id, g * r.end_level, r.xs[0]))
         if got != sorted(want) or gone & {r.id for r in recs}:
             self._fail(LRL_EVENTS, f"{side.name}: events {got} vs records {sorted(want)}, dropped {sorted(gone)}")
+
+    # ── HTF FVG (docs/HTF_FVG.md) ──
+    def _htf(self, bar, c, new):
+        from validation.models.fvg import qualifies, raw_gap, required
+        from validation.models.htf_fvg import bucket
+        e, s = self.m.hfvg, self.m.hfvg.s
+        cs = self.m.candles
+        snap = getattr(self, "htf_snap", None)
+        if snap is None:
+            snap = self.htf_snap = {}
+        for side in e.sides:
+            tag = side.name
+            ids = [(r.dir, r.id) for r in side.recs]
+            if len(ids) != len(set(ids)) or any(r.tf != side.tf for r in side.recs):
+                self._fail(HTF_ID, f"{tag}: duplicate (dir, id) or a record of another timeframe")
+            if len(side.recs) > s.memory or (side.last_drop and side.last_drop["open"] and side.last_drop["done_available"]):
+                self._fail(HTF_MEM, f"{tag}: {len(side.recs)} records > {s.memory}, or an open record dropped first")
+            done = side.bars[-1] if side.bars and snap.get((side.tf, "nbars")) != len(side.bars) else None
+            for r in side.recs:
+                k = (side.tf, r.dir, r.id)
+                old = snap.get(k)
+                kb = r.known_bar
+                # Timing and geometry are checked once, when the record first appears: INV-HTF-08
+                # then guarantees that those facts never change (linear, not quadratic, in the walk).
+                if old is None and not r.top > r.bottom:
+                    self._fail(HTF_GEOM, f"{tag} {r.id}: top {r.top} ≤ bottom {r.bottom}")
+                if old is None and e.external is None and kb < len(cs):
+                    b_known = bucket(cs[kb].time, side.tf, s.timezone, s.session_hour)
+                    first = r.seeded or (kb > 0 and bucket(cs[kb - 1].time, side.tf, s.timezone, s.session_hour) == r.id)
+                    if not b_known > r.id or not first:
+                        self._fail(HTF_TIMING, f"{tag} {r.id}: known on bar {kb} (bucket {b_known}), seeded {r.seeded}")
+                if old is None and not r.seeded and e.external is None:
+                    c3 = next((b for b in reversed(side.bars) if b.time == r.id), None)
+                    j = side.bars.index(c3) if c3 else -1
+                    c1 = side.bars[j - 2] if j >= 2 else None
+                    geo = raw_gap(c1.candle, c3.candle) if c1 else None
+                    if geo is None or geo != (r.dir, r.top, r.bottom) or c1.time != r.c1_time or not qualifies(
+                            r.top - r.bottom, *required(e.fvg, e.tick, c1.tra, c1.rng), e.eps):
+                        self._fail(HTF_GEOM, f"{tag} {r.id}: not the DEF-A1 / A2 gap of its HTF bars")
+                stamps = [x for x in (r.touch_bar, r.ce_bar, r.full_bar) if x is not None]
+                if any(x < kb for x in stamps) or (r.inv_bar is not None and any(x > r.inv_bar for x in stamps)) or (
+                        r.touch_bar is not None and r.ce_bar is not None and r.ce_bar < r.touch_bar) or (
+                        r.ce_bar is not None and r.full_bar is not None and r.full_bar < r.ce_bar):
+                    self._fail(HTF_MILE, f"{tag} {r.id}: touch {r.touch_bar} CE {r.ce_bar} full {r.full_bar} "
+                                         f"known {kb} inv {r.inv_bar}")
+                if r.inv_bar is None or r.inv_bar == bar:
+                    reach = c.low if r.dir > 0 else c.high
+                    hit = (lambda p: reach <= p) if r.dir > 0 else (lambda p: reach >= p)
+                    near, far = (r.top, r.bottom) if r.dir > 0 else (r.bottom, r.top)
+                    if r.inv_bar is None and kb <= bar and (
+                            (r.touch_bar is None and not r.pre_touch and hit(near)) or
+                            (r.ce_bar is None and not r.pre_ce and hit(r.mid)) or (r.full_bar is None and hit(far))):
+                        self._fail(HTF_MILE, f"{tag} {r.id}: bar {bar} reached the zone but a milestone is missing")
+                if done is not None and side.started and kb < bar and done.time > r.id:
+                    beyond = done.close < r.bottom if r.dir > 0 else done.close > r.top
+                    if beyond and (r.inv_bar is None or r.inv_bar > bar):
+                        self._fail(HTF_INVAL, f"{tag} {r.id}: the {side.name} bar {done.time} closed beyond, not invalidated")
+                if r.inv_bar is not None and r.inv_close is not None and not (
+                        (r.dir > 0 and r.inv_close < r.bottom) or (r.dir < 0 and r.inv_close > r.top)):
+                    self._fail(HTF_INVAL, f"{tag} {r.id}: invalidated by close {r.inv_close}, not beyond the far edge")
+                now = (r.c1_time, r.top, r.bottom, r.known_bar, r.seeded, r.pre_touch, r.pre_ce,
+                       r.touch_bar, r.ce_bar, r.full_bar, r.inv_bar)
+                if old is not None and (old[:7] != now[:7] or any(a is not None and a != b for a, b in zip(old[7:], now[7:]))):
+                    self._fail(HTF_FROZEN, f"{tag} {r.id}: {old} → {now}")
+                snap[k] = now
+            snap[(side.tf, "nbars")] = len(side.bars)
+            # events of this bar ↔ records
+            mine = sorted((x.type, x.dir, x.sid, x.price) for x in new if x.type.startswith("HTF_") and x.tf == side.tf
+                          and x.type != "HTF_FVG_DROPPED_MEMORY")
+            want = []
+            for r in side.recs:
+                if r.known_bar == bar:
+                    want.append(("HTF_FVG_SEEDED" if r.seeded else "HTF_FVG_CREATED", r.dir, r.id, r.mid))
+                near, far = (r.top, r.bottom) if r.dir > 0 else (r.bottom, r.top)
+                for b_, typ, px in ((r.touch_bar, "HTF_FVG_FIRST_TOUCH", near), (r.ce_bar, "HTF_FVG_CE_TOUCH", r.mid),
+                                    (r.full_bar, "HTF_FVG_FULL_FILL", far), (r.inv_bar, "HTF_FVG_INVALIDATED", r.inv_close)):
+                    if b_ == bar:
+                        want.append((typ, r.dir, r.id, px))
+            gone = {(x.dir, x.sid) for x in new if x.type == "HTF_FVG_DROPPED_MEMORY" and x.tf == side.tf}
+            mine = [x for x in mine if (x[1], x[2]) not in gone]
+            if mine != sorted(want) or any(x.type.startswith("HTF_") and x.tf not in {sd.tf for sd in e.sides}
+                                           for x in new):
+                self._fail(HTF_EVENTS, f"{tag}: events {mine} vs records {sorted(want)}")
+        for k in (HTF_TIMING, HTF_GEOM, HTF_MILE, HTF_INVAL, HTF_ID, HTF_MEM, HTF_EVENTS, HTF_FROZEN):
+            stats.INV_CHECKS[k] += 1
 
 
 def run_checked(candles, settings=None, model=None, sweep_every: int = 1, **kw):

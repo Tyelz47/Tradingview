@@ -39,7 +39,9 @@ KEYS = {"SYMBOL": "text", "TIMEFRAME": "text", "TIMEZONE": "text", "TICK_SIZE": 
         **{k: "int" for k in COUNTS}}
 FAMILIES = ("FVG", "SESSION", "LEVEL", "BSL", "SSL", "EQH", "EQL")
 
-_NAME = r"(?:FVG|SESSION|LEVEL|BSL|SSL|EQH|EQL|LRL)_[A-Z_]*[A-Z]"
+_NAME = r"(?:FVG|SESSION|LEVEL|BSL|SSL|EQH|EQL|LRL|HTF)_[A-Z_]*[A-Z]"
+_TF = re.compile(r"\btf=(15m|30m|1H|4H|1D|1W)\b")      # HTF FVG: the timeframe, first in the audit text
+_TF_CODE = {"15m": "15", "30m": "30", "1H": "60", "4H": "240", "1D": "D", "1W": "W"}
 _ANY_NAME = re.compile(rf"(?<![A-Z_]){_NAME}(?![A-Z_])", re.I)
 # One "Last events" / Pine Logs line (src/IST.pine f_evText). Searched, not anchored: a
 # Pine Logs timestamp or a row label in front of it is ignored.
@@ -130,8 +132,9 @@ def _event(line: str, tz: str, year: int | None) -> dict:
         dir_ = {"BULL": 1, "HIGH": 1, "BEAR": -1, "LOW": -1}.get((m["side"] or "").upper(), 0)
     px = m["px"]
     price = None if px is None or not px[-1].isdigit() else float(px.replace(",", ""))
+    tf = _TF.search(line) if name.startswith("HTF_") else None
     return {"time": t, "type": name, "dir": dir_, "sid": sid, "price": price, "has_price": px is not None,
-            "text": re.sub(r"\s+", " ", line.strip())}
+            "tf": _TF_CODE[tf[1]] if tf else "", "text": re.sub(r"\s+", " ", line.strip())}
 
 
 def parse(text: str) -> dict:
@@ -221,7 +224,7 @@ def pine_text(e, tz: str, tick: float = 0.25) -> str:
     """An oracle event as IST prints it in Pine Logs (f_evText with the full date)."""
     fam = e.type.split("_")[0]
     side = "" if fam in ("BSL", "SSL", "EQH", "EQL") or not e.dir else \
-        (" BULL" if e.dir > 0 else " BEAR") if fam == "FVG" else (" HIGH" if e.dir > 0 else " LOW")
+        (" BULL" if e.dir > 0 else " BEAR") if fam in ("FVG", "HTF") else (" HIGH" if e.dir > 0 else " LOW")
     ident = "" if e.type == "LEVEL_SET" else f" id={_fmt(e.sid, tz)}"
     px = "—" if e.price is None else pine_px(e.price, tick)
     return f"{_fmt(e.time, tz)}  {e.type}{side}{ident} px={px}" + (f" · {e.meta}" if e.meta else "")
@@ -383,6 +386,9 @@ def compare(man: dict, preset: str | None = None, base: Path = Path(".")) -> dic
                 once[k2] = o["time"]
             if o["type"] == "LEVEL_SET":
                 add("events", NOBS, f"{txt}: request.security values and the previous-day definition are not modelled")
+                continue
+            if o["type"].startswith("HTF_"):
+                add("events", NOBS, f"{txt}: HTF FVG events are compared by the bounded Pine-Log capture only")
                 continue
             if m is None:
                 continue

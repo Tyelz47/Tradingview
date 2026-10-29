@@ -21,8 +21,8 @@ CALC_SECTIONS = ("L1 · MARKET DATA", "L2 · DETECTION", "L5 · EVENT BUS", "L3 
 RENDER_SECTIONS = ("L6 · RENDERER (functions", "L6 · RENDERER (run)")
 DRAWING_TYPES = {"line", "box", "label", "linefill", "table", "polyline"}
 STATE_CALLS = re.compile(r"\.(step|register|take|takeEq|cluster|trigger|advance|dropCluster|pushExtreme|markFinal|supersede|"
-                         r"advanceLrl|judge|grow|promote|seed|finish|trim)\(|"
-                         r"\b(f_emit|f_roll|f_sesNew|f_sesStep|f_sesExtend|f_sesFinalize|f_sesSupersede|f_fvgStep)\(")
+                         r"advanceLrl|judge|grow|promote|seed|finish|trim|feedHtf|stepHtf|seedHtf|trimHtf|milestonesHtf)\(|"
+                         r"\b(f_emit|f_emitHtf|f_roll|f_sesNew|f_sesStep|f_sesExtend|f_sesFinalize|f_sesSupersede|f_fvgStep)\(")
 
 
 @lru_cache(maxsize=1)
@@ -121,10 +121,35 @@ def st02_no_leftovers():
     return not bad, f"removed identifiers still in code: {bad or 'none'}"
 
 
-def st03_request_security_no_leak():
-    calls = [code(ln) for ln in source() if "request.security(" in code(ln)]
-    ok = len(calls) == 2 and all("[high[1], low[1]]" in c and "lookahead = barmerge.lookahead_on" in c for c in calls)
-    return ok, f"{len(calls)} request.security calls, all `expr[1]` + lookahead_on: {ok}"
+def _body(name: str, src=None) -> list[str]:
+    """The code lines of a top-level function's body."""
+    lines = src if src is not None else source()
+    i = next(k for k, ln in enumerate(lines) if re.match(rf"^{name}\(", ln))
+    out = []
+    for ln in lines[i + 1:]:
+        if ln and not ln[0].isspace():
+            break
+        out.append(code(ln))
+    return out
+
+
+def st03_request_security_no_leak(src: str | None = None):
+    """PDH/PDL and PWH/PWL: `[high[1], low[1]]` (DEF-G2). HTF FVG (DEF-B0): one request per
+    timeframe 15m … 1W, the expression f_htfPack(), which reads every price / time series at
+    [1] or older (no bare series, no [0], ta.tr only shifted). All lookahead_on."""
+    lines = src.splitlines() if src is not None else source()
+    calls = [code(ln) for ln in lines if "request.security(" in code(ln)]
+    period = [c for c in calls if "[high[1], low[1]]" in c]
+    htf = [c for c in calls if ", f_htfPack()," in c]
+    tfs = sorted(m[1] for ln in lines if ", f_htfPack()," in code(ln) and (m := re.search(r'f_htfReq\("(\w+)"\)', ln)))
+    body = "\n".join(_body("f_htfPack", lines))
+    leaks = (re.findall(r"\b(?:open|high|low|close|time|time_close|volume|hl2|hlc3|ohlc4)\b(?!\[)", body)
+             + re.findall(r"\[\s*0\s*\]", body) + re.findall(r"ta\.tr\([^)]*\)(?!\[)", body))
+    ok = (len(calls) == 8 and len(period) == 2 and len(htf) == 6 and tfs == sorted(("15", "30", "60", "240", "D", "W"))
+          and all("lookahead = barmerge.lookahead_on" in c for c in calls) and not leaks)
+    return ok, (f"{len(calls)} request.security calls: {len(period)} period levels `[high[1], low[1]]`, {len(htf)} HTF "
+                f"f_htfPack() ({', '.join(tfs) or 'none'}), all lookahead_on: "
+                f"{all('lookahead = barmerge.lookahead_on' in c for c in calls)}; reads newer than [1] in f_htfPack: {leaks or 'none'}")
 
 
 def st04_plots_data_window_only():
@@ -366,6 +391,59 @@ def st17_lrl_rules(src: str | None = None):
     return not bad, f"{len(LRL_RULES)} formulas, {len(LRL_CONSTANTS)} constants, {len(LRL_ORDER)} orders; wrong or missing: {bad or 'none'}"
 
 
+# DEF-B0…B6 as they must read in Pine (validation/models/htf_fvg.py). Each rule must match
+# exactly one code line (comments and strings ignored).
+HTF_RULES = {
+    "TR average at [1], own timeframe": r"^\s+float\s+tra\s+=\s+ta\.sma\(ta\.tr\(true\)\[1\], fvgLen\)\s*$",
+    "avg range at [1], own timeframe": r"^\s+float\s+rng\s+=\s+ta\.sma\(high\[1\] - low\[1\], fvgLen\)\s*$",
+    "bull: candle 3 low above candle 1 high": r"^\s+bool\s+up\s+=\s+low\[1\] > high\[3\]\s*$",
+    "bear: candle 3 high below candle 1 low": r"^\s+bool\s+dn\s+=\s+high\[1\] < low\[3\]\s*$",
+    "TR threshold at candle 1": r"^\s+float\s+traQ\s+=\s+fvgMinTra > 0 \? fvgMinTra \* tra\[2\] : 0\.0\s*$",
+    "range threshold at candle 1": r"^\s+float\s+rngQ\s+=\s+fvgMinRng > 0 \? fvgMinRng \* rng\[2\] : 0\.0\s*$",
+    "Phase 1 qualification (D4)": r"^\s+bool\s+ok\s+=\s+not na\(gap\) and gap >= fvgMinTicks \* syminfo\.mintick - EPS "
+                                  r"and gap >= traQ and gap >= rngQ\s*$",
+    "seed engine: bars after candle 3": r"^\s+if zs\.get\(i, 4\) < time\[1\]\s*$",
+    "seed engine: fully filled or closed beyond": r"^\s+if bull \? \(low\[1\] <= zs\.get\(i, 2\) or close\[1\] < zs\.get\(i, 2\)\) "
+                                                  r": \(high\[1\] >= zs\.get\(i, 1\) or close\[1\] > zs\.get\(i, 1\)\)\s*$",
+    "never a lower timeframe": r"^\s+timeframe\.in_seconds\(tf\) > timeframe\.in_seconds\(\) \? tf : timeframe\.period\s*$",
+    "completion: a new completed HTF bar": r"^\s+else if s\.bT != s\.lastT\s*$",
+    "invalidation: own-timeframe close after candle 3 (D5)":
+        r"^\s+if na\(r\.invBar\) and s\.bT > r\.id and \(r\.dir > 0 \? s\.bC < r\.bottom : s\.bC > r\.top\)\s*$",
+    "known on this chart bar, box origin candle 1 (D8)":
+        r"^\s+HtfZone z = HtfZone\.new\(s\.zDir, s\.bT, s\.zC1, s\.zTop, s\.zBot, \(s\.zTop \+ s\.zBot\) / 2, bar_index, time\)\s*$",
+    "milestones on the chart bar's wick": r"^\s+float\s+reach\s+=\s+r\.dir > 0 \? low : high\s*$",
+    "no retroactive touch (seeds)": r"^\s+if na\(r\.touchBar\) and not r\.preTouch and \(r\.dir > 0 \? reach <= near : reach >= near\)\s*$",
+    "no retroactive CE (seeds)": r"^\s+if na\(r\.ceBar\) and not r\.preCe and \(r\.dir > 0 \? reach <= r\.mid : reach >= r\.mid\)\s*$",
+    "full fill": r"^\s+if na\(r\.fullBar\) and \(r\.dir > 0 \? reach <= far : reach >= far\)\s*$",
+    "memory: closed records first": r"^\s+if not na\(r\.invBar\) or not na\(r\.fullBar\)\s*$",
+    "renderer: only open, unfilled zones": r"^\s+if na\(r\.invBar\) and na\(r\.fullBar\)\s*$",
+}
+# Code lines that must appear in this order: the LRL engine, then every HTF timeframe; per
+# completed HTF bar: invalidate, then create, then milestones (also on the seed bar).
+HTF_ORDER = (("lrlLo.judge(", "s.stepHtf()"),
+             ("s.seedHtf()", "f_emitHtf(EV_HTF_INVAL", "f_emitHtf(EV_HTF_CREATED", "s.milestonesHtf()"))
+HTF_CONSTANTS = {"HTF_MEM": "memory", "HTF_SEEDS": "seeds", "HTF_SEED_MEM": "seed_memory"}
+
+
+def st19_htf_rules(src: str | None = None):
+    """DEF-B0…B6 in IST.pine: the approved constants (= HtfSettings), every timing and
+    definition line of the oracle, and the per-bar order."""
+    from validation.models.types import HtfSettings
+    lines = [code(ln) for ln in (src.splitlines() if src is not None else source())]
+    text = "\n".join(lines)
+    bad = [name for name, rx in HTF_RULES.items() if len(re.findall(rx, text, re.M)) != 1]
+    want = HtfSettings()
+    for name, field in HTF_CONSTANTS.items():
+        m = re.findall(rf"^{name}\s*=\s*([\d.]+)\s*$", text, re.M)
+        if len(m) != 1 or float(m[0]) != float(getattr(want, field)):
+            bad.append(f"{name} = {m or 'missing'} (oracle {getattr(want, field)})")
+    for seq in HTF_ORDER:
+        at = [next((i for i, ln in enumerate(lines) if s in ln), None) for s in seq]
+        if None in at or at != sorted(at) or len(set(at)) != len(at):
+            bad.append("order " + " → ".join(seq))
+    return not bad, f"{len(HTF_RULES)} rules, {len(HTF_CONSTANTS)} constants, {len(HTF_ORDER)} orders; wrong or missing: {bad or 'none'}"
+
+
 def st18_no_overloaded_functions(src: str | None = None):
     """Pine forbids global variables inside an overloaded user function or method (CE10182:
     'Cannot use global variable … in the local scope of overloaded function'). Every
@@ -379,7 +457,8 @@ def st18_no_overloaded_functions(src: str | None = None):
 CHECKS = [
     ("ST-01", "Calculation never reads [view]/[alert] inputs (S-01)", st01_calc_independent_of_view),
     ("ST-02", "No identifiers of removed features (S-02)", st02_no_leftovers),
-    ("ST-03", "request.security: exactly 2, both expr[1] + lookahead_on (S-03, DEF-G2)", st03_request_security_no_leak),
+    ("ST-03", "request.security: 2 period levels + 6 HTF, all [1]-only + lookahead_on (S-03, DEF-G2, DEF-B0)",
+     st03_request_security_no_leak),
     ("ST-04", "Debug plots are Data-Window-only (S-04)", st04_plots_data_window_only),
     ("ST-05", "One FVG creation path, shared gapPass, confirmed bars (S-05)", st05_fvg_rule_single_path),
     ("ST-06", "Renderer never writes logical state (S-08)", st06_renderer_never_writes_state),
@@ -395,4 +474,5 @@ CHECKS = [
     ("ST-16", "DEF-L2 dominance (C1): window before the swing bar, strict-beyond boundary", st16_dominance_rule),
     ("ST-17", "DEF-LRL1…LRL6: approved constants, oracle formulas, ADVANCE before JUDGE", st17_lrl_rules),
     ("ST-18", "No overloaded user function or method names (Pine CE10182)", st18_no_overloaded_functions),
+    ("ST-19", "DEF-B0…B6 HTF FVG: approved constants, timing and definition lines, per-bar order", st19_htf_rules),
 ]

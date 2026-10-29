@@ -126,6 +126,19 @@ class LrlSettings:
 
 
 @dataclass(frozen=True)
+class HtfSettings:
+    """docs/HTF_FVG.md DEF-B (approved 2026-10-29). The FVG definition and thresholds are the
+    Phase 1 ones (FvgSettings, D4); these are the module's own constants."""
+    tfs: tuple = ("15", "30", "60", "240", "D", "W")
+    memory: int = 20            # DEF-B6 records per timeframe
+    seeds: int = 3              # DEF-B2 open zones per direction recovered from before the chart history
+    seed_memory: int = 20       # open zones per direction the HTF-side seed engine keeps
+    timezone: str = "America/New_York"
+    session_hour: int = 18      # CME session start: 4H / 1D / 1W buckets (to verify against TradingView)
+    chart_sec: int = 60         # chart timeframe: only timeframes above it are active
+
+
+@dataclass(frozen=True)
 class SessionSettings:
     """DEF-F1…F6. Windows are `HHMM-HHMM` in `timezone`, every weekday."""
     timezone: str = "America/New_York"
@@ -165,7 +178,7 @@ class ViewSettings:
 MODULES = ("levels", "sessions", "fvg", "liq")
 # Opt-in modules: not in the default run (src/IST.pine has no LRL yet; baselines and parity
 # compare the default modules only).
-KNOWN_MODULES = MODULES + ("lrl",)
+KNOWN_MODULES = MODULES + ("lrl", "htf")
 
 
 @dataclass(frozen=True)
@@ -177,6 +190,7 @@ class Settings:
     levels: LevelSettings = field(default_factory=LevelSettings)
     view: ViewSettings = field(default_factory=ViewSettings)
     lrl: LrlSettings = field(default_factory=LrlSettings)
+    htf: HtfSettings = field(default_factory=HtfSettings)
     modules: tuple = MODULES
 
     @property
@@ -192,8 +206,11 @@ class Settings:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        if "lrl" not in self.modules:
-            del d["lrl"]                 # opt-in module: absent cases keep their pre-LRL definition (regression)
+        for opt in ("lrl", "htf"):
+            if opt not in self.modules:
+                del d[opt]               # opt-in module: absent cases keep their earlier definition (regression)
+        if "htf" in d:
+            d["htf"]["tfs"] = list(self.htf.tfs)
         d["modules"] = list(self.modules)
         d["sessions"]["windows"] = [list(w) for w in self.sessions.windows]
         return d
@@ -202,7 +219,7 @@ class Settings:
     def from_dict(cls, d: dict | None) -> "Settings":
         d = dict(d or {})
         sub = {"fvg": FvgSettings, "liq": LiqSettings, "sessions": SessionSettings,
-               "levels": LevelSettings, "view": ViewSettings, "lrl": LrlSettings}
+               "levels": LevelSettings, "view": ViewSettings, "lrl": LrlSettings, "htf": HtfSettings}
         kw = {}
         for name, typ in sub.items():
             if name in d:
@@ -212,6 +229,8 @@ class Settings:
                     part = {"left": left, "right": right, "k": k, "dom": w, **part}
                 elif name == "liq" and {"left", "right", "k"} & set(part):
                     part = {"dom": 0, **part}            # explicit numbers = the Custom preset: no dominance
+                if name == "htf" and "tfs" in part:
+                    part["tfs"] = tuple(part["tfs"])
                 if name == "sessions" and "windows" in part:
                     part["windows"] = tuple(tuple(w) for w in part["windows"])
                 known = {f.name for f in fields(typ)}

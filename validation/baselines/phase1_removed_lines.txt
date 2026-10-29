@@ -9,3 +9,4 @@ f_evName(int k) =>
             string k = str.tostring(e.kind) + ":" + str.tostring(e.sid)
 var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 22, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
     f_dbgRow(21, "Last events", f_lastEvents(6))
+fvgShow     = input.bool(true, "Show FVGs", group = G_FVGV, display = display.none)

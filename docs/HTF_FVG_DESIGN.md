@@ -1,6 +1,8 @@
 # HTF Fair Value Gaps · technical design (for approval)
 
-**Status: DESIGN ONLY, nothing implemented.**
+**Status: APPROVED by the user on 2026-10-29 with the decisions D1–D10 (recorded in `docs/HTF_FVG.md`, the definition now in force; implemented in IST v0.6.0-dev).** This page is kept as the design history: where it differs from `docs/HTF_FVG.md` (D1 option D not implemented, D7 neutral grey, the box border tiers, D9 recorded), `docs/HTF_FVG.md` wins.
+
+**Original status: DESIGN ONLY, nothing implemented.**
 * No change to `src/IST.pine`, the oracle, Phase 1, Phase 2 or LRL.
 * It develops ARCHITECTURE Appendix A, **DEF-B** ("DEF-A evaluated inside the HTF request with offset [1]; de-duplicated by HTF c3 time; lifecycle on chart bars").
 * The user's reference screenshots (2026-10-29) are the visual target: a clean rectangular zone, its timeframe written small at the bottom right, only important HTF zones, minimal clutter.

@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.5.3-dev · LRL (diagonal liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.6.0-dev · LRL + HTF fair value gaps development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -10,6 +10,8 @@
 //                  LRL: diagonal failure-swing liquidity, detection only
 //                  (DEF-LRL1…LRL8 → docs/LRL.md). Phase 2 frozen baseline =
 //                  v0.4.4-dev (tag PHASE2_BASELINE_v0.4.4-dev); LRL is additive.
+//                  HTF FVG: fair value gaps of the 15m / 30m / 1H / 4H / 1D / 1W
+//                  candles (DEF-B0…B6 → docs/HTF_FVG.md); additive, Module B.
 //  Layers          L1 market data / time   L2 detection   L3 state management
 //                  L4 context / filtering  L5 event bus   L6 renderer
 //                  L7 alerts / diagnostics
@@ -80,6 +82,7 @@ G_LIQC = "LIQUIDITY · CALCULATION"
 G_LIQV = "LIQUIDITY · DISPLAY"
 G_EQ   = "EQH / EQL"
 G_LRL  = "LRL · DIAGONAL LIQUIDITY"
+G_HTF  = "HTF FAIR VALUE GAPS"
 
 TT_CONF = "[calc] ON: every state change is evaluated once, at bar close. Realtime output is identical to the historical chart after reload.\nOFF (live): wick milestones update intrabar. Creation and invalidation still wait for the close."
 TT_MIN  = "[view] Hides secondary visuals: CE lines, FVG labels, faded FVGs, session boxes and midpoints, taken liquidity levels and liquidity labels."
@@ -104,6 +107,7 @@ TT_LRL  = "[calc] LRL = a diagonal line through three or more successive failure
 TT_LRLS = "[view] The nearest active LRL per side: one thin straight line from its first to its latest failure swing (the intermediate swings lie within τ of it), the same line dashed to the right while it is active, and a small LRL label. When a later swing extends the LRL, the line is redrawn first → new latest from that bar on."
 TT_LRLH = "[view] Also draw ended LRLs (the last 10 per side), faded; the projection ends on the bar where the LRL ended."
 TT_LRLM = "[view] Where an ended LRL finished: D drift (the high crossed the projected boundary but not the boundary projected on the previous bar) · S sweep · B break (closed beyond the boundary) · E expired. Needs Show historical LRL."
+TT_HTF  = "[view] Fair value gaps of the 15m, 30m, 1H, 4H, 1D and 1W candles (docs/HTF_FVG.md). Every timeframe above the chart timeframe is always computed; these switches only show or hide. Per timeframe: the nearest open zone above and below price. A zone exists from the first chart bar after its third HTF candle closed (no repaint); its box starts at its first HTF candle. Phase 1 FVG definition and thresholds; invalidated only by a close of its own timeframe; no longer drawn once fully filled."
 
 confirmedOnly = input.bool(true, "Confirmed only", tooltip = TT_CONF, group = G_GEN, display = display.none)
 minimalMode   = input.bool(false, "Minimal mode", tooltip = TT_MIN, group = G_GEN, display = display.none)
@@ -116,7 +120,7 @@ fvgMinRng   = input.float(0.0, "Min size · × avg range", minval = 0, step = 0.
 fvgLen      = input.int(14, "TR-average / avg-range length", minval = 2, tooltip = "[calc] Window length (bars) of both references.", group = G_FVGC, display = display.none)
 fvgMemory   = input.int(50, "Engine memory · records per direction", minval = 10, maxval = 200, tooltip = TT_MEM, group = G_FVGC, display = display.none)
 
-fvgShow     = input.bool(true, "Show FVGs", group = G_FVGV, display = display.none)
+fvgShow     = input.bool(false, "Show FVGs", tooltip = "[view] Chart-timeframe FVGs (Phase 1 engine). OFF by default since v0.6.0-dev: the user-facing zones are the HTF FVGs. Calculation, lifecycle, events and alerts are unchanged either way.", group = G_FVGV, display = display.none)
 fvgBullCol  = input.color(color.new(#089981, 80), "Bullish", inline = "fc", group = G_FVGV, display = display.none)
 fvgBearCol  = input.color(color.new(#F23645, 80), "Bearish", inline = "fc", group = G_FVGV, display = display.none)
 fvgMitRule  = input.enum(MitRule.fullFill, "Mitigation policy", tooltip = TT_MIT, group = G_FVGV, display = display.none)
@@ -197,6 +201,15 @@ lrlShow  = input.bool(true, "Show LRL", tooltip = TT_LRLS, group = G_LRL, displa
 lrlHist  = input.bool(false, "Show historical LRL", tooltip = TT_LRLH, group = G_LRL, display = display.none)
 lrlMarks = input.bool(false, "Show lifecycle markers (D · S · B · E)", tooltip = TT_LRLM, group = G_LRL, display = display.none)
 
+htfShow   = input.bool(true, "Show HTF FVGs", tooltip = TT_HTF, group = G_HTF, display = display.none)
+htfOn15   = input.bool(true, "15m", inline = "h1", group = G_HTF, display = display.none)
+htfOn30   = input.bool(true, "30m", inline = "h1", group = G_HTF, display = display.none)
+htfOn60   = input.bool(true, "1H", inline = "h1", group = G_HTF, display = display.none)
+htfOn240  = input.bool(true, "4H", inline = "h2", group = G_HTF, display = display.none)
+htfOnD    = input.bool(true, "1D", inline = "h2", group = G_HTF, display = display.none)
+htfOnW    = input.bool(true, "1W", inline = "h2", group = G_HTF, display = display.none)
+htfLabels = input.bool(true, "Show timeframe labels", tooltip = "[view] The timeframe written in the bottom-right corner of every HTF zone: \"15m Fair Value Gap\" … \"1W Fair Value Gap\".", group = G_HTF, display = display.none)
+
 alTiming  = input.enum(AlertTiming.barClose, "Timing", tooltip = TT_ALT, group = G_ALR, display = display.none)
 alBullNew = input.bool(true, "FVG created · bull", inline = "a1", group = G_ALR, display = display.none)
 alBearNew = input.bool(true, "bear", inline = "a1", group = G_ALR, display = display.none)
@@ -218,6 +231,7 @@ capOn      = input.bool(false, "Parity capture → Pine Logs", tooltip = "[view]
 capN       = input.int(300, "Capture last N closed bars", minval = 50, maxval = 2000, group = G_DBG, display = display.none)
 dbgLrlIns  = input.int(0, "Inspect LRL (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
 dbgLrlCand = input.bool(false, "Draw LRL candidates (2 points, debug only)", tooltip = "[view] Debug mode only: dotted segments for the internal 2-point candidates. A candidate is never an LRL: it has no event and is not drawn otherwise.", group = G_DBG, display = display.none)
+htfCompact = input.bool(false, "Compact HTF labels (15m FVG)", tooltip = "[view] \"15m FVG\" instead of \"15m Fair Value Gap\". The timeframe is always written.", group = G_DBG, display = display.none)
 
 // ════ CONSTANTS ════════════════════════════════════════════════════════════════
 
@@ -281,8 +295,22 @@ EV_LRL_DRIFT     = 22
 EV_LRL_EXPIRED   = 23
 EV_LRL_DROPPED   = 24
 LRL_VIS_HIST = 10                      // [view] ended LRLs drawn per side (Show historical LRL)
-LRL_BEAR_COL = #E040FB                 // [view] high side (bearish LRL)
-LRL_BULL_COL = #26C6DA                 // [view] low side (bullish LRL)
+LRL_BEAR_COL = #9598A1                 // [view] high side (bearish LRL): neutral grey (user, 2026-10-29)
+LRL_BULL_COL = #9598A1                 // [view] low side (bullish LRL): the same grey; bull/bear colours may become a Style option
+// HTF FVG (DEF-B0…B6 → docs/HTF_FVG.md, approved 2026-10-29): fixed numbers, not inputs. The FVG
+// definition and thresholds are the Phase 1 ones (D4), evaluated on each timeframe's own candles.
+HTF_MEM      = 20                      // DEF-B6 records per timeframe (both directions)
+HTF_SEEDS    = 3                       // DEF-B2 open zones per direction taken from the HTF context (D3)
+HTF_SEED_MEM = 20                      // DEF-B2 open zones per direction the HTF-side engine holds
+EV_HTF_CREATED = 25                    // HTF FVG: dir +1 bull / −1 bear · sid = candle-3 open time · Event.tf = timeframe
+EV_HTF_SEEDED  = 26
+EV_HTF_TOUCH   = 27
+EV_HTF_CE      = 28
+EV_HTF_FULL    = 29
+EV_HTF_INVAL   = 30
+EV_HTF_DROPPED = 31
+HTF_COL      = #9598A1                 // [view] neutral grey (D7): the timeframe hierarchy is opacity only
+HTF_TXT_COL  = color.new(#787B86, 30)  // [view] the timeframe label (box text)
 
 f_lineStyle(LnStyle s) =>
     switch s
@@ -340,6 +368,7 @@ type Event
     int    eventTime
     float  price
     string reason       // short rule code for audit
+    string tf = ""      // HTF FVG: the zone's timeframe ("15" … "W"), part of its identity; "" otherwise
 
 // L3 · horizontal reference level (period levels and session high/low).
 type RefLevel
@@ -509,6 +538,53 @@ type LrlSide
     int          nExpired = 0
     int          dropped = 0
 
+// L3 · one HTF fair value gap (DEF-B). Identity = timeframe + direction + candle-3 open time:
+// records of different timeframes are never merged. Milestones are chart bars.
+type HtfZone
+    int    dir          // +1 bull · −1 bear
+    int    id           // HTF candle-3 open time
+    int    c1           // HTF candle-1 open time: the box origin (D8)
+    float  top
+    float  bottom
+    float  mid
+    int    knownBar     // the chart bar where it became known: its lifecycle starts here (D2)
+    int    knownTime
+    bool   seeded = false
+    bool   preTouch = false     // seeded: touched / CE before the chart history, at HTF resolution (no event)
+    bool   preCe = false
+    int    touchBar
+    int    ceBar
+    int    fullBar
+    int    invBar
+    float  invClose
+
+// L3 · one HTF timeframe: its registry and counters, plus the L1 hand-off of this bar
+// (the last completed HTF bar and the zone it completed, from the timeframe's request).
+type HtfTf
+    string        tf            // request timeframe: "15" … "W"
+    string        name          // "15m" … "1W"
+    bool          active        // above the chart timeframe: always computed, whatever is displayed
+    array<HtfZone> recs         // the registry, in registration order (both directions)
+    int           bT            // L1, every bar: the last completed HTF bar (open time) …
+    float         bO
+    float         bH
+    float         bL
+    float         bC
+    float         bTra
+    float         bRng
+    int           zDir          // … and the DEF-B1 zone whose candle 3 it is (na: none)
+    float         zTop
+    float         zBot
+    int           zC1
+    string        seeds         // the HTF-side open zones (DEF-B2): "dir,top,bottom,c1,c3,ext;…"
+    string        bars3         // the last 3 completed HTF bars (parity snapshot)
+    bool          started = false
+    int           lastT         // the last completed HTF bar processed
+    int           doneBar       // the chart bar where it completed
+    int           created = 0
+    int           seeded = 0
+    int           dropped = 0
+
 // ════ STATE ════════════════════════════════════════════════════════════════════
 
 // L3 · logical state
@@ -544,6 +620,16 @@ var LrlSide lrlLo = LrlSide.new(sign = -1, live = array.new<Lrl>(), hist = array
 var array<line>     lrlLns   = array.new<line>()
 var array<label>    lrlLbls  = array.new<label>()
 var array<int>      lrlCnt   = array.new<int>(4, 0)      // drawn: active high side, active low side, ended, candidates
+// L3 · HTF FVG (DEF-B0…B6): one registry per timeframe, 15m → 1W
+var HtfTf h15  = HtfTf.new(tf = "15", name = "15m", active = timeframe.in_seconds("15") > timeframe.in_seconds(), recs = array.new<HtfZone>())
+var HtfTf h30  = HtfTf.new(tf = "30", name = "30m", active = timeframe.in_seconds("30") > timeframe.in_seconds(), recs = array.new<HtfZone>())
+var HtfTf h60  = HtfTf.new(tf = "60", name = "1H", active = timeframe.in_seconds("60") > timeframe.in_seconds(), recs = array.new<HtfZone>())
+var HtfTf h240 = HtfTf.new(tf = "240", name = "4H", active = timeframe.in_seconds("240") > timeframe.in_seconds(), recs = array.new<HtfZone>())
+var HtfTf hD   = HtfTf.new(tf = "D", name = "1D", active = timeframe.in_seconds("D") > timeframe.in_seconds(), recs = array.new<HtfZone>())
+var HtfTf hW   = HtfTf.new(tf = "W", name = "1W", active = timeframe.in_seconds("W") > timeframe.in_seconds(), recs = array.new<HtfZone>())
+var array<HtfTf> htfTfs = array.from(h15, h30, h60, h240, hD, hW)
+// L6 · HTF view, rebuilt on the last bar (dropping these never touches logical state)
+var array<box>      htfBoxes = array.new<box>()
 // L1 · chart-side period trackers: anchors + source validation (DEF-G6)
 var float dHi     = na
 var int   dHiT    = na
@@ -621,6 +707,102 @@ bool   atMidnight = hour(time, sesTz) == 0 and dayofmonth(time, sesTz) != dayofm
 // the current HTF bar. Without [1] this would leak the future.
 [pdH, pdL] = request.security(syminfo.tickerid, D_TF, [high[1], low[1]], lookahead = barmerge.lookahead_on)
 [pwH, pwL] = request.security(syminfo.tickerid, W_TF, [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+// DEF-B0 · HTF FVG data, evaluated INSIDE each timeframe's request (Module B, docs/HTF_FVG.md).
+// Every series is read at [1] or older: candle 3 = [1], the last completed HTF bar; candle 1
+// = [3]. The result is final for the whole next HTF bar, so lookahead_on only aligns it to
+// that bar's start, as for PDH / PDL (DEF-G2): the unfinished HTF candle is never read. It
+// also runs the HTF-side seed engine (DEF-B2): the zones still open as of bar [1].
+f_htfPack() =>
+    var matrix<float> zs = matrix.new<float>(0, 6)   // seed engine, oldest first: dir, top, bottom, c1, c3, deepest penetration after candle 3
+    float tra  = ta.sma(ta.tr(true)[1], fvgLen)      // DEF-A2 references at bar [1], own timeframe
+    float rng  = ta.sma(high[1] - low[1], fvgLen)
+    // DEF-B1 = DEF-A1 / DEF-A2 on candles [3] · [2] · [1], thresholds at candle 1 (tra[2] = at bar [3])
+    bool  up   = low[1] > high[3]
+    bool  dn   = high[1] < low[3]
+    float gap  = up ? low[1] - high[3] : dn ? low[3] - high[1] : na
+    float traQ = fvgMinTra > 0 ? fvgMinTra * tra[2] : 0.0
+    float rngQ = fvgMinRng > 0 ? fvgMinRng * rng[2] : 0.0
+    bool  ok   = not na(gap) and gap >= fvgMinTicks * syminfo.mintick - EPS and gap >= traQ and gap >= rngQ
+    int   dir  = ok ? (up ? 1 : -1) : na
+    float top  = ok ? (up ? low[1] : low[3]) : na
+    float bot  = ok ? (up ? high[3] : high[1]) : na
+    // Seed engine on bar [1]: the deepest penetration after candle 3; a zone fully filled or
+    // closed beyond is no longer open. Then the zone completed by [1], HTF_SEED_MEM per direction.
+    if zs.rows() > 0
+        for i = zs.rows() - 1 to 0
+            if zs.get(i, 4) < time[1]
+                bool  bull = zs.get(i, 0) > 0
+                float e    = zs.get(i, 5)
+                zs.set(i, 5, bull ? (na(e) ? low[1] : math.min(e, low[1])) : (na(e) ? high[1] : math.max(e, high[1])))
+                if bull ? (low[1] <= zs.get(i, 2) or close[1] < zs.get(i, 2)) : (high[1] >= zs.get(i, 1) or close[1] > zs.get(i, 1))
+                    zs.remove_row(i)
+    if ok
+        zs.add_row(zs.rows(), array.from(float(dir), top, bot, float(time[3]), float(time[1]), float(na)))
+        int cnt = 0
+        int old = -1
+        for i = 0 to zs.rows() - 1
+            if zs.get(i, 0) == dir
+                cnt += 1
+                old := old < 0 ? i : old
+        if cnt > HTF_SEED_MEM
+            zs.remove_row(old)
+    // The newest HTF_SEEDS open zones per direction, oldest first: "dir,top,bottom,c1,c3,ext;…"
+    string sd = ""
+    int    nz = zs.rows()
+    if nz > 0
+        for d in array.from(1.0, -1.0)
+            int skip = -HTF_SEEDS
+            for i = 0 to nz - 1
+                skip += zs.get(i, 0) == d ? 1 : 0
+            for i = 0 to nz - 1
+                if zs.get(i, 0) == d
+                    if skip > 0
+                        skip -= 1
+                    else
+                        float e = zs.get(i, 5)
+                        sd += str.tostring(d) + "," + str.tostring(zs.get(i, 1), "#.########") + "," + str.tostring(zs.get(i, 2), "#.########") + "," + str.tostring(zs.get(i, 3), "#") + "," + str.tostring(zs.get(i, 4), "#") + "," + (na(e) ? "na" : str.tostring(e, "#.########")) + ";"
+    // The last three completed bars "time:O:H:L:C:TR average:avg range", oldest first (parity snapshot).
+    string b3 = ""
+    for j = 3 to 1
+        float tj = tra[j - 1]
+        float rj = rng[j - 1]
+        b3 += (j < 3 ? ";" : "") + str.tostring(time[j]) + ":" + str.tostring(open[j], "#.########") + ":" + str.tostring(high[j], "#.########") + ":" + str.tostring(low[j], "#.########") + ":" + str.tostring(close[j], "#.########") + ":" + (na(tj) ? "na" : str.tostring(tj, "#.########")) + ":" + (na(rj) ? "na" : str.tostring(rj, "#.########"))
+    [time[1], open[1], high[1], low[1], close[1], tra, rng, dir, top, bot, time[3], sd, b3]
+
+// A timeframe at or below the chart's is inactive: its request reads the chart timeframe
+// instead (never a lower timeframe) and is ignored.
+f_htfReq(string tf) =>
+    timeframe.in_seconds(tf) > timeframe.in_seconds() ? tf : timeframe.period
+
+method feedHtf(HtfTf s, int t, float o, float h, float l, float c, float tra, float rng, int d, float top, float bot, int c1, string sd, string b3) =>
+    s.bT    := t
+    s.bO    := o
+    s.bH    := h
+    s.bL    := l
+    s.bC    := c
+    s.bTra  := tra
+    s.bRng  := rng
+    s.zDir  := d
+    s.zTop  := top
+    s.zBot  := bot
+    s.zC1   := c1
+    s.seeds := sd
+    s.bars3 := b3
+    s
+
+[x15t, x15o, x15h, x15l, x15c, x15tra, x15rng, x15d, x15top, x15bot, x15c1, x15sd, x15b3] = request.security(syminfo.tickerid, f_htfReq("15"), f_htfPack(), lookahead = barmerge.lookahead_on)
+[x30t, x30o, x30h, x30l, x30c, x30tra, x30rng, x30d, x30top, x30bot, x30c1, x30sd, x30b3] = request.security(syminfo.tickerid, f_htfReq("30"), f_htfPack(), lookahead = barmerge.lookahead_on)
+[x60t, x60o, x60h, x60l, x60c, x60tra, x60rng, x60d, x60top, x60bot, x60c1, x60sd, x60b3] = request.security(syminfo.tickerid, f_htfReq("60"), f_htfPack(), lookahead = barmerge.lookahead_on)
+[x4t, x4o, x4h, x4l, x4c, x4tra, x4rng, x4d, x4top, x4bot, x4c1, x4sd, x4b3] = request.security(syminfo.tickerid, f_htfReq("240"), f_htfPack(), lookahead = barmerge.lookahead_on)
+[xDt, xDo, xDh, xDl, xDc, xDtra, xDrng, xDd, xDtop, xDbot, xDc1, xDsd, xDb3] = request.security(syminfo.tickerid, f_htfReq("D"), f_htfPack(), lookahead = barmerge.lookahead_on)
+[xWt, xWo, xWh, xWl, xWc, xWtra, xWrng, xWd, xWtop, xWbot, xWc1, xWsd, xWb3] = request.security(syminfo.tickerid, f_htfReq("W"), f_htfPack(), lookahead = barmerge.lookahead_on)
+h15.feedHtf(x15t, x15o, x15h, x15l, x15c, x15tra, x15rng, x15d, x15top, x15bot, x15c1, x15sd, x15b3)
+h30.feedHtf(x30t, x30o, x30h, x30l, x30c, x30tra, x30rng, x30d, x30top, x30bot, x30c1, x30sd, x30b3)
+h60.feedHtf(x60t, x60o, x60h, x60l, x60c, x60tra, x60rng, x60d, x60top, x60bot, x60c1, x60sd, x60b3)
+h240.feedHtf(x4t, x4o, x4h, x4l, x4c, x4tra, x4rng, x4d, x4top, x4bot, x4c1, x4sd, x4b3)
+hD.feedHtf(xDt, xDo, xDh, xDl, xDc, xDtra, xDrng, xDd, xDtop, xDbot, xDc1, xDsd, xDb3)
+hW.feedHtf(xWt, xWo, xWh, xWl, xWc, xWtra, xWrng, xWd, xWtop, xWbot, xWc1, xWsd, xWb3)
 
 // DEF-F1: membership by bar open time, all weekdays (futures open Sunday evening).
 bool inS1 = not na(time(timeframe.period, s1Ss + ":1234567", sesTz)) and sesTfOk
@@ -740,10 +922,18 @@ f_evName(int k, int dir) =>
         EV_LRL_DRIFT     => "LRL_DRIFT"
         EV_LRL_EXPIRED   => "LRL_EXPIRED"
         EV_LRL_DROPPED   => "LRL_DROPPED_MEMORY"
+        EV_HTF_CREATED => "HTF_FVG_CREATED"
+        EV_HTF_SEEDED  => "HTF_FVG_SEEDED"
+        EV_HTF_TOUCH   => "HTF_FVG_FIRST_TOUCH"
+        EV_HTF_CE      => "HTF_FVG_CE_TOUCH"
+        EV_HTF_FULL    => "HTF_FVG_FULL_FILL"
+        EV_HTF_INVAL   => "HTF_FVG_INVALIDATED"
+        EV_HTF_DROPPED => "HTF_FVG_DROPPED_MEMORY"
         => "UNKNOWN"
 
 f_evText(Event e) =>
     bool   isFvg = e.kind <= EV_FVG_DROPPED
+    isFvg := isFvg or e.kind >= EV_HTF_CREATED                              // HTF FVG: BULL / BEAR too
     bool   isLiq = e.kind >= EV_LIQ_CREATED and e.kind <= EV_EQ_DROPPED   // LRL names carry no side: HIGH / LOW is added
     string d     = isLiq ? "" : e.dir > 0 ? (isFvg ? " BULL" : " HIGH") : e.dir < 0 ? (isFvg ? " BEAR" : " LOW") : ""
     string id    = e.kind == EV_LEVEL_SET ? "" : " id=" + f_tid(e.sid)
@@ -1333,6 +1523,96 @@ method judge(LrlSide s, bool piv, int X, int XT, float P) =>
         s.spent := keepS
     s
 
+// ── HTF fair value gaps (DEF-B0…B6 → docs/HTF_FVG.md; reference model validation/models/htf_fvg.py) ──
+// Events carry the timeframe: in Event.tf (identity) and first in the audit text.
+f_emitHtf(int kind, HtfTf s, HtfZone r, float price, string reason) =>
+    Event e = f_emit(kind, r.dir, r.id, r.knownBar, price, "tf=" + s.name + (reason == "" ? "" : " · " + reason))
+    e.tf := s.tf
+    e
+
+// DEF-B6: at most HTF_MEM records per timeframe; the oldest fully filled or invalidated record
+// goes first, else the oldest one. Each removal is logged.
+method trimHtf(HtfTf s) =>
+    if s.recs.size() > HTF_MEM
+        int victim = -1
+        for [i, r] in s.recs
+            if not na(r.invBar) or not na(r.fullBar)
+                victim := i
+                break
+        HtfZone old = s.recs.remove(math.max(victim, 0))
+        s.dropped := s.dropped + 1
+        f_emitHtf(EV_HTF_DROPPED, s, old, old.mid, victim < 0 ? "open record · tracking stopped" : "closed record")
+    s
+
+// DEF-B2: on the seed point, the HTF-side open zones (the newest HTF_SEEDS per direction).
+// A touch or CE before the chart history is known at HTF resolution only: kept as state,
+// never as an event (no retroactive milestones).
+method seedHtf(HtfTf s) =>
+    for item in str.split(s.seeds, ";")
+        array<string> f = str.split(item, ",")
+        if f.size() == 6
+            int     d   = int(str.tonumber(f.get(0)))
+            float   top = str.tonumber(f.get(1))
+            float   bot = str.tonumber(f.get(2))
+            float   ext = str.tonumber(f.get(5))
+            HtfZone z   = HtfZone.new(d, int(str.tonumber(f.get(4))), int(str.tonumber(f.get(3))), top, bot, (top + bot) / 2, bar_index, time, seeded = true)
+            if not na(ext)
+                z.preTouch := d > 0 ? ext <= top : ext >= bot
+                z.preCe    := d > 0 ? ext <= z.mid : ext >= z.mid
+            s.recs.push(z)
+            s.seeded := s.seeded + 1
+            f_emitHtf(EV_HTF_SEEDED, s, z, z.mid, "bottom=" + f_x(bot) + " · top=" + f_x(top) + " · c1=" + str.tostring(z.c1) + " · ext=" + f_x(ext))
+            s.trimHtf()
+    s
+
+// DEF-B3: first touch, CE and full fill on this chart bar's wick, each stamped once, for
+// every zone not invalidated, from the bar it became known (D2).
+method milestonesHtf(HtfTf s) =>
+    for r in s.recs
+        if na(r.invBar)
+            float reach = r.dir > 0 ? low : high
+            float near  = r.dir > 0 ? r.top : r.bottom
+            float far   = r.dir > 0 ? r.bottom : r.top
+            if na(r.touchBar) and not r.preTouch and (r.dir > 0 ? reach <= near : reach >= near)
+                r.touchBar := bar_index
+                f_emitHtf(EV_HTF_TOUCH, s, r, near, "")
+            if na(r.ceBar) and not r.preCe and (r.dir > 0 ? reach <= r.mid : reach >= r.mid)
+                r.ceBar := bar_index
+                f_emitHtf(EV_HTF_CE, s, r, r.mid, "")
+            if na(r.fullBar) and (r.dir > 0 ? reach <= far : reach >= far)
+                r.fullBar := bar_index
+                f_emitHtf(EV_HTF_FULL, s, r, far, "")
+    s
+
+// DEF-B per chart bar and timeframe, in this order (oracle HtfEngine.step):
+//   0. SEED on the first bar where a completed HTF bar exists; nothing completes on it;
+//   1. a newly completed HTF bar (its open time changed): INVALIDATE the zones it CLOSED
+//      beyond (own-timeframe close, DEF-B4: a chart close never invalidates), then CREATE
+//      the zone whose candle 3 it is (DEF-B1);
+//   2. MILESTONES on this bar, including a zone created or seeded on it (DEF-B3).
+method stepHtf(HtfTf s) =>
+    if s.active and not na(s.bT)
+        if not s.started
+            s.started := true
+            s.lastT   := s.bT
+            s.seedHtf()
+        else if s.bT != s.lastT
+            s.lastT   := s.bT
+            s.doneBar := bar_index
+            for r in s.recs
+                if na(r.invBar) and s.bT > r.id and (r.dir > 0 ? s.bC < r.bottom : s.bC > r.top)
+                    r.invBar   := bar_index
+                    r.invClose := s.bC
+                    f_emitHtf(EV_HTF_INVAL, s, r, s.bC, "close=" + f_x(s.bC))
+            if not na(s.zDir)
+                HtfZone z = HtfZone.new(s.zDir, s.bT, s.zC1, s.zTop, s.zBot, (s.zTop + s.zBot) / 2, bar_index, time)
+                s.recs.push(z)
+                s.created := s.created + 1
+                f_emitHtf(EV_HTF_CREATED, s, z, z.mid, "bottom=" + f_x(z.bottom) + " · top=" + f_x(z.top) + " · c1=" + str.tostring(z.c1))
+                s.trimHtf()
+        s.milestonesHtf()
+    s
+
 // ════ L6 · RENDERER (functions: read state, write drawing handles only) ═════════
 
 int rightT = time + rightOffset * TF_MS   // where "extends to now" ends
@@ -1711,6 +1991,49 @@ f_lrlCandDraw(LrlSide s) =>
         lrlCnt.set(3, lrlCnt.get(3) + 1)
     true
 
+// ── HTF fair value gaps (DEF-B5, D6–D10). Pure reads of L3; the only writes are to the
+//    renderer's own pool. Per timeframe: the nearest open zone (not fully filled, not
+//    invalidated) above and below price. Neutral grey; the hierarchy is opacity only
+//    (15m / 30m light · 1H / 4H medium · 1D / 1W strongest); the timeframe is written in
+//    the bottom-right corner; the box starts at HTF candle 1 (D8). ──
+f_htfOn(string tf) =>
+    switch tf
+        "15"  => htfOn15
+        "30"  => htfOn30
+        "60"  => htfOn60
+        "240" => htfOn240
+        "D"   => htfOnD
+        => htfOnW
+
+f_htfBox(HtfTf s, HtfZone r) =>
+    int    tier = s.tf == "15" or s.tf == "30" ? 0 : s.tf == "60" or s.tf == "240" ? 1 : 2
+    string txt  = htfLabels ? s.name + (htfCompact ? " FVG" : " Fair Value Gap") : ""
+    htfBoxes.push(box.new(r.c1, r.top, rightT, r.bottom, xloc = xloc.bar_time, bgcolor = color.new(HTF_COL, 94 - 3 * tier), border_color = color.new(HTF_COL, 85 - 15 * tier), border_width = 1, text = txt, text_size = size.tiny, text_color = HTF_TXT_COL, text_halign = text.align_right, text_valign = text.align_bottom))
+    true
+
+// Above / below by the zone's midpoint; distance from the close to its near edge (0 inside).
+// Ties: the newest zone.
+f_htfRender(HtfTf s) =>
+    HtfZone up = na
+    HtfZone dn = na
+    float   du = na
+    float   dd = na
+    for r in s.recs
+        if na(r.invBar) and na(r.fullBar)
+            bool  above = r.mid > close
+            float dist  = math.max(0.0, above ? r.bottom - close : close - r.top)
+            if above and (na(du) or dist <= du)
+                du := dist
+                up := r
+            else if not above and (na(dd) or dist <= dd)
+                dd := dist
+                dn := r
+    if not na(up)
+        f_htfBox(s, up)
+    if not na(dn)
+        f_htfBox(s, dn)
+    true
+
 // ════ ENGINE RUN · L1 → L2/L4 → L3 → L5 (fixed order) ══════════════════════════
 
 barEv.clear()
@@ -1847,6 +2170,12 @@ if engineTick
         lrlHi.judge(lrlPivH, lrlX, lrlXT, lrlPxH)
         lrlLo.judge(lrlPivL, lrlX, lrlXT, -lrlPxL)
 
+    // ── HTF FVG (DEF-B0…B6). Runs last and reads no Phase 1 / Phase 2 / LRL state: its own
+    //    requests and this bar's wicks only. Every timeframe above the chart is computed,
+    //    whatever is displayed; 15m → 1W. ──
+    for s in htfTfs
+        s.stepHtf()
+
 // ════ L6 · RENDERER (run) ══════════════════════════════════════════════════════
 
 // Levels: superseded instances freeze and join the capped visual history.
@@ -1941,6 +2270,19 @@ if barstate.islast
         f_lrlCandDraw(lrlHi)
         f_lrlCandDraw(lrlLo)
 
+// HTF FVG (DEF-B5): rebuilt from state on the last bar, like liquidity and LRL. Drawn 1W
+// first, 15m last, so a nested lower-timeframe zone stays visible over its parent (D1:
+// zones overlap freely; nothing is merged or hidden).
+if barstate.islast
+    for x in htfBoxes
+        box.delete(x)
+    htfBoxes.clear()
+    if htfShow
+        for i = htfTfs.size() - 1 to 0
+            HtfTf s = htfTfs.get(i)
+            if s.active and f_htfOn(s.tf)
+                f_htfRender(s)
+
 // ════ L7 · ALERTS ══════════════════════════════════════════════════════════════
 // Alert toggles filter delivery only; every event is logged regardless.
 
@@ -1988,7 +2330,7 @@ if barstate.isrealtime and barEv.size() > 0
 
 // ════ L7 · DIAGNOSTICS (one table, no drawing objects) ═════════════════════════
 
-var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 42, bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
+var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 45,bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
 var table warnTbl = table.new(position.top_right, 1, 2)
 var int   dbgFirstT = time    // first loaded bar: where a replay of the history must start
 
@@ -2188,6 +2530,43 @@ f_lrlBar(LrlSide s) =>
         out += (out == "" ? "" : ";") + str.tostring(r.id) + ":" + f_cap(s.sign * (r.yAt(bar_index) + r.tau)) + ":" + f_cap(s.sign * (r.yAt(bar_index - 1) + r.tau))
     out
 
+f_capBool(bool b) =>
+    b ? "1" : "0"
+
+f_capInt(int x) =>
+    na(x) ? "na" : str.tostring(x)
+
+f_htfList() =>
+    string out = ""
+    for s in htfTfs
+        if s.active
+            out += (out == "" ? "" : ",") + s.tf
+    out
+
+// HTF per bar, for parity: open (not invalidated) records per active timeframe, "15:3,30:2,…".
+f_htfOpen() =>
+    string out = ""
+    for s in htfTfs
+        if s.active
+            int n = 0
+            for r in s.recs
+                n += na(r.invBar) ? 1 : 0
+            out += (out == "" ? "" : ",") + s.tf + ":" + str.tostring(n)
+    out
+
+// HTF debug: per active timeframe, one line of registry state.
+f_htfState() =>
+    string out = ""
+    for s in htfTfs
+        if s.active
+            int op = 0
+            int sh = 0
+            for r in s.recs
+                op += na(r.invBar) ? 1 : 0
+                sh += na(r.invBar) and na(r.fullBar) ? 1 : 0
+            out += (out == "" ? "" : "\n") + s.name + ": open " + str.tostring(op) + " (unfilled " + str.tostring(sh) + ") · records " + str.tostring(s.recs.size()) + "/" + str.tostring(HTF_MEM) + " · created " + str.tostring(s.created) + " · seeded " + str.tostring(s.seeded) + " · dropped " + str.tostring(s.dropped) + " · last HTF bar " + f_mt(s.lastT)
+    out == "" ? "no timeframe above the chart's" : out
+
 // Warm-up = the dependency graph of the compared values: an FVG verdict at t needs
 // fvgLen true ranges ending at t − 2 (plus the close before them); a swing verdict at
 // t = X + R needs, before X, the TR average (LIQ_TRA_LEN), the left window and the
@@ -2200,10 +2579,20 @@ var int capDone = 0
 bool capBar   = capOn and barstate.isconfirmed and bar_index > last_bar_index - capTotal and capDone < capTotal
 if capBar
     if capDone == 0
-        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+        // HTF snapshot after this first captured bar: per active timeframe the last completed
+        // HTF bars and the whole registry, which the oracle restores and replays (§10 (c)).
+        for s in htfTfs
+            if s.active
+                log.info("HTFSTATE|tf=" + s.tf + "|last=" + f_capInt(s.lastT) + "|bars=" + (na(s.bars3) ? "" : s.bars3))
+                for r in s.recs
+                    log.info("HTFREC|tf=" + s.tf + "|dir=" + str.tostring(r.dir) + "|id=" + str.tostring(r.id) + "|c1=" + str.tostring(r.c1) + "|top=" + f_cap(r.top) + "|bottom=" + f_cap(r.bottom) + "|known=" + str.tostring(r.knownBar) + "|kt=" + str.tostring(r.knownTime) + "|seeded=" + f_capBool(r.seeded) + "|pt=" + f_capBool(r.preTouch) + "|pc=" + f_capBool(r.preCe) + "|touch=" + f_capInt(r.touchBar) + "|ce=" + f_capInt(r.ceBar) + "|full=" + f_capInt(r.fullBar) + "|inv=" + f_capInt(r.invBar) + "|invc=" + f_cap(r.invClose))
     capDone += 1
+    for s in htfTfs
+        if s.active and s.doneBar == bar_index
+            log.info("HTFBAR|tf=" + s.tf + "|i=" + str.tostring(bar_index) + "|t=" + str.tostring(s.bT) + "|O=" + f_cap(s.bO) + "|H=" + f_cap(s.bH) + "|L=" + f_cap(s.bL) + "|C=" + f_cap(s.bC) + "|tra=" + f_cap(s.bTra) + "|rng=" + f_cap(s.bRng))
     int fv = bullCand ? 2 : rawBull ? 1 : bearCand ? -2 : rawBear ? -1 : 0
-    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : ""))
+    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : "") + "|HO=" + f_htfOpen())
 if barstate.isconfirmed and (capOn ? capBar : dbgOn)
     for e in barEv
         log.info(str.format_time(e.eventTime, "yyyy-MM-dd HH:mm", sesTz) + "  " + f_evText(e))
@@ -2279,7 +2668,11 @@ if dbgOn and barstate.islast
         f_dbgRow(38, "LRL inspect #" + str.tostring(dbgLrlIns), (lsg > 0 ? "▼ bearish (highs)" : "▲ bullish (lows)") + " · id " + f_tid(lq.id) + " · " + f_lrlEndName(lq.endKind) + " · " + str.tostring(lq.xs.size()) + " points · τ " + f_x(lq.tau))
         f_dbgRow(39, "anchor → latest pivot", f_mt(lq.ts.first()) + " @ " + f_px(lsg * lq.ps.first()) + " → " + f_mt(lq.ts.last()) + " @ " + f_px(lsg * lq.ps.last()) + " · confirmed " + f_mt(lq.bornTime) + " · extensions " + str.tostring(lq.ext.size()) + " · touches " + str.tostring(lq.touches))
         f_dbgRow(40, "projected boundary now · previous", lact ? "bar " + str.tostring(bar_index) + ": " + f_x(lsg * (lq.yAt(bar_index) + lq.tau)) + " · " + f_x(lsg * (lq.yAt(bar_index - 1) + lq.tau)) : f_lrlEndName(lq.endKind) + " " + f_mt(lq.endTime) + ": " + f_x(lsg * lq.endNow) + " · " + f_x(lsg * lq.endPrev))
-    f_dbgRow(41, "LRL drawn", "active ▼ " + str.tostring(lrlCnt.get(0)) + " · ▲ " + str.tostring(lrlCnt.get(1)) + " · ended " + str.tostring(lrlCnt.get(2)) + " · candidates " + str.tostring(lrlCnt.get(3)) + " · LRL lines " + str.tostring(lrlLns.size()) + " · labels " + str.tostring(lrlLbls.size()))
+    // ── HTF FVG (v0.6.0-dev) ──
+    f_dbgRow(42, "HTF FVG engine", "15m · 30m · 1H · 4H · 1D · 1W, those above the chart timeframe, always computed · Phase 1 definition: gap ≥ max(" + str.tostring(fvgMinTicks) + " ticks, " + str.tostring(fvgMinTra) + " × TR(" + str.tostring(fvgLen) + "), " + str.tostring(fvgMinRng) + " × avg range) of that timeframe · known on the first chart bar after candle 3 closed · invalidation: own-timeframe close · memory " + str.tostring(HTF_MEM) + "/tf · seeds " + str.tostring(HTF_SEEDS) + "/direction")
+    f_dbgRow(43, "HTF registries", f_htfState())
+    f_dbgRow(44, "HTF drawn", str.tostring(htfBoxes.size()) + " boxes (nearest open above + below per shown timeframe, ≤ 12)")
+    f_dbgRow(41, "LRL drawn","active ▼ " + str.tostring(lrlCnt.get(0)) + " · ▲ " + str.tostring(lrlCnt.get(1)) + " · ended " + str.tostring(lrlCnt.get(2)) + " · candidates " + str.tostring(lrlCnt.get(3)) + " · LRL lines " + str.tostring(lrlLns.size()) + " · labels " + str.tostring(lrlLbls.size()))
 
 // Normal-mode warnings: non-standard candles, and objects nearing the hard limit
 // (TradingView would otherwise delete the oldest drawings silently).

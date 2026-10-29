@@ -1,10 +1,11 @@
 """The whole reference model: one bar at a time, modules in the Pine engine order
 (levels → sessions → FVG → liquidity, src/IST.pine "ENGINE RUN"), then the opt-in LRL
-engine (docs/LRL.md; not in Pine yet). Confirmed mode: every candle is a closed bar."""
+and HTF FVG engines (docs/LRL.md, docs/HTF_FVG.md). Confirmed mode: every candle is a closed bar."""
 from __future__ import annotations
 
 from validation.models.events import Event, EventLog, canonical
 from validation.models.fvg import FvgEngine
+from validation.models.htf_fvg import HtfEngine
 from validation.models.levels import LevelEngine
 from validation.models.liquidity import LiquidityEngine
 from validation.models.lrl import LrlEngine
@@ -13,7 +14,8 @@ from validation.models.types import Candle, Settings
 
 
 class IstModel:
-    def __init__(self, settings: Settings | None = None, htf=None, incremental_liq: bool = False):
+    def __init__(self, settings: Settings | None = None, htf=None, incremental_liq: bool = False, htf_pre=None,
+                 htf_external=None):
         self.settings = s = settings or Settings()
         self.log = EventLog()
         self.candles: list[Candle] = []
@@ -22,6 +24,7 @@ class IstModel:
         self.fvg = FvgEngine(s.fvg, s.tick, self.log) if "fvg" in s.modules else None
         self.liq = LiquidityEngine(s.liq, s.tick, self.log, incremental=incremental_liq) if "liq" in s.modules else None
         self.lrl = LrlEngine(s.lrl, s.liq.tol_ticks, s.tick, self.log) if "lrl" in s.modules else None
+        self.hfvg = HtfEngine(s.htf, s.fvg, s.tick, self.log, htf_pre, htf_external) if "htf" in s.modules else None
 
     @property
     def bar(self) -> int:
@@ -36,7 +39,7 @@ class IstModel:
         self.candles.append(c)
         self.log.at(bar, c.time)
         n = len(self.log.events)
-        for engine in (self.levels, self.sessions, self.fvg, self.liq, self.lrl):
+        for engine in (self.levels, self.sessions, self.fvg, self.liq, self.lrl, self.hfvg):
             if engine is not None:
                 engine.step(bar, c)
         return self.log.events[n:]
@@ -62,6 +65,8 @@ class IstModel:
             out["ref_levels"] = self.levels.state()
         if self.lrl is not None:
             out["lrl"] = self.lrl.state()
+        if self.hfvg is not None:
+            out["htf"] = self.hfvg.state()
         return out
 
 

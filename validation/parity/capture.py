@@ -19,15 +19,16 @@ from datetime import datetime
 from pathlib import Path
 
 from validation import VALIDATION_DIR
+from validation.models.events import LRL_TERMINAL, EventLog
+from validation.models.htf_fvg import NAMES, HtfBar, HtfEngine, HtfFvg
 from validation.models.ist import IstModel
-from validation.models.events import LRL_TERMINAL
-from validation.models.types import MODULES, PRESETS, Candle, LrlSettings, Settings
+from validation.models.types import MODULES, PRESETS, Candle, HtfSettings, LrlSettings, Settings
 from validation.parity import oracle_series
 from validation.parity.manual import DIFF, MATCH, NOBS, _ANY_NAME, _event, _fmt, _same_px, _tf_seconds, pine_text
 
 PARITY_DIR = VALIDATION_DIR / "parity"
 TOL = 1e-6                     # Pine prints these values with 8 decimals
-SECTIONS = ("settings", "bars", "events", "lrl")
+SECTIONS = ("settings", "bars", "events", "lrl", "htf")
 # CAPTURE key → (LrlSettings field, type): the frozen LRL constants Pine ran with (v0.5.0-dev+).
 LRL_HEAD = {"lrlleft": ("left", int), "lrlright": ("right", int), "lrltol": ("tol_k", float), "lrlgap": ("gap", int),
             "lrlsep": ("sep_k", float), "lrldrop": ("drop_k", float), "lrltra": ("tra_len", int),
@@ -44,7 +45,7 @@ LABELS = {"fvg_verdict": "FVG verdict", "fvg_required": "FVG required gap", "bsl
           "bsl_dominance": "dominance reference high", "ssl_dominance": "dominance reference low"}
 HEAD = ("tick", "tz", "confirmed", "liq", "preset", "left", "right", "k", "eqtol", "eqmin", "liqmem",
         "fvgticks", "fvgtra", "fvgrng", "fvglen", "fvgmem", "ses", "bars", "warmup")
-_TOKEN = re.compile(r"\b(CAPTURE|BAR|END)\|(.*)$")
+_TOKEN = re.compile(r"\b(CAPTURE|BAR|END|HTFSTATE|HTFREC|HTFBAR)\|(.*)$")
 _CSV_ROW = re.compile(r'^\s*\d{4}-\d\d-\d\d[^,"|]*,"')   # a `date,"message"` row without its header
 
 
@@ -87,7 +88,35 @@ def _bar(parts: list[str], tick: float | None) -> dict:
     if bad:
         raise ValueError(f"wrong OHLC: {'; '.join(bad)}")
     return {"i": int(kv["i"]), "time": t, "candle": c,
-            "vals": {s: _num(k, kv[k]) for k, s in FIELDS.items() if k in kv}, "lrl": _lrl_fields(kv)}
+            "vals": {s: _num(k, kv[k]) for k, s in FIELDS.items() if k in kv}, "lrl": _lrl_fields(kv),
+            "htf_open": {tf: int(n) for tf, _, n in (x.partition(":") for x in kv["HO"].split(",") if x)}
+            if "HO" in kv else None}
+
+
+def _htf_line(kind: str, parts: list[str]) -> dict:
+    """HTFSTATE (per timeframe, after the first captured bar: the last completed HTF bar and the
+    three last HTF candles), HTFREC (one record of that registry) or HTFBAR (an HTF candle that
+    completed on bar i). Bar fields are Pine bar indices."""
+    kv = _pairs(parts)
+    num = lambda k: _num(k, kv[k])
+    opt = lambda k: None if kv[k] == "na" else int(kv[k])
+    if kind == "HTFSTATE":
+        bars = []
+        for item in filter(None, kv["bars"].split(";")):
+            p = item.split(":")
+            if len(p) != 7:
+                raise ValueError(f"bars: expected time:O:H:L:C:tra:rng, got {item!r}")
+            bars.append(HtfBar(int(p[0]), *(float(v) for v in p[1:5]), _num("tra", p[5]), _num("rng", p[6])))
+        return {"tf": kv["tf"], "last": opt("last"), "bars": bars}
+    if kind == "HTFREC":
+        return {"tf": kv["tf"], "dir": int(kv["dir"]), "id": int(kv["id"]), "c1": int(kv["c1"]), "top": num("top"),
+                "bottom": num("bottom"), "known": int(kv["known"]), "kt": int(kv["kt"]), "seeded": kv["seeded"] == "1",
+                "pt": kv["pt"] == "1", "pc": kv["pc"] == "1", "touch": opt("touch"), "ce": opt("ce"), "full": opt("full"),
+                "inv": opt("inv"), "invc": num("invc")}
+    if None in (num("O"), num("H"), num("L"), num("C")):
+        raise ValueError("wrong OHLC: na")
+    return {"tf": kv["tf"], "i": int(kv["i"]), "bar": HtfBar(int(kv["t"]), num("O"), num("H"), num("L"), num("C"),
+                                                              num("tra"), num("rng"))}
 
 
 def _lrl_fields(kv: dict) -> dict | None:
@@ -199,11 +228,14 @@ def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
     except ValueError as e:
         return None, [f"line {n0}: CAPTURE: {e}"]
     bars, raw_events, end, ignored, errors = [], [], None, 0, []
+    htf = {"HTFSTATE": [], "HTFREC": [], "HTFBAR": []}
     for n, line in lines[1:]:
         m = _TOKEN.search(line)
         try:
             if m and m[1] == "BAR":
                 bars.append({**_bar([p.strip() for p in m[2].split("|")], tick), "line": n})
+            elif m and m[1] in htf:
+                htf[m[1]].append(_htf_line(m[1], [p.strip() for p in m[2].split("|") if p.strip()]))
             elif m and m[1] == "END":
                 end = int(_pairs([m[2]])["bars"])
             elif not m and _ANY_NAME.search(line):
@@ -240,7 +272,7 @@ def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
                       f"(bars {head['bars']} + warm-up {head['warmup']})")
     if errors:
         return None, errors
-    return {"head": head, "bars": bars, "events": events, "end": end, "ignored": ignored}, []
+    return {"head": head, "bars": bars, "events": events, "end": end, "ignored": ignored, "htf": htf}, []
 
 
 def parse(text: str) -> dict:
@@ -371,10 +403,10 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     t0, t_end = bars[0]["time"], bars[-1]["time"]
     t_fvg = bars[w_fvg]["time"] if len(bars) > w_fvg else None
     t_swing = bars[w_swing]["time"] if len(bars) > w_swing else None
-    is_lrl = lambda e: e["type"].startswith("LRL_")           # compared in their own section (_compare_lrl)
+    own_section = lambda typ: typ.startswith(("LRL_", "HTF_"))  # compared in _compare_lrl / _compare_htf
     oracle = [{"time": e.time, "type": e.type, "dir": e.dir, "sid": e.sid, "price": e.price, "e": e} for e in m.events
-              if not e.type.startswith("LRL_")]
-    pine_events = [e for e in cap["events"] if not is_lrl(e)]
+              if not own_section(e.type)]
+    pine_events = [e for e in cap["events"] if not own_section(e["type"])]
     fam = lambda e: e["type"].split("_")[0]
     drops = {}
     for e in oracle + pine_events:
@@ -432,10 +464,11 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     for why, n in nobs.most_common():
         add("events", NOBS, f"{n} Pine events not compared: {why}")
     lrl = _compare_lrl(cap, m, want, s, add, fmt) if lrl_on else None
+    htf = _compare_htf(cap, s, add, fmt) if h.get("htf") == "1" else None
     sym = re.search(r'"symbol"\s*:\s*"([^"]+)"', h.get("sym", ""))       # extended tickerid: a JSON object
     cnt = Counter(c["status"] for c in checks)
     return {"status": "COMPARED", "mode": "BOUNDED PINE-LOG BAR-BY-BAR PARITY", "checks": checks, "counts": cnt,
-            "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars), "lrl": lrl,
+            "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars), "lrl": lrl, "htf": htf,
             "compared_bars": max(0, len(bars) - max(w_fvg, w_liq)), "warmup": max(w_fvg, w_liq),
             "series": sum(1 for k in FIELDS.values() if compared[k]),
             "matched_events": sum(matched.values()), "window": f"{fmt(t0)} → {fmt(t_end)}",
@@ -578,6 +611,119 @@ def _compare_lrl(cap: dict, m: IstModel, want: dict, s: Settings, add, fmt) -> d
             "lookback": ls.lookback, "not_observable": len(nobs), "ends": {"pine": ends(pine), "oracle": ends(oracle)}}
 
 
+def _compare_htf(cap: dict, s: Settings, add, fmt) -> dict:
+    """HTF FVG in the captured window (docs/HTF_FVG.md §10).
+
+    (a) Every HTF candle Pine completed inside the window against the oracle's own aggregation
+        of the captured bars: open time (4H / 1D / 1W from the 18:00 session), OHLC, and the
+        chart bar where it completed.
+    (b)+(c) The registry Pine held after the first captured bar (HTFSTATE / HTFREC) is restored
+        and replayed on the captured bars, fed Pine's own completed HTF candles: every HTF_FVG
+        event (creation recomputed from those candles and their TR averages, milestones,
+        invalidation, memory drops) and, per bar, the open records per timeframe.
+
+    NOT OBSERVABLE: HTF candles that started before the window; the first captured bar's events
+    (the snapshot already holds them)."""
+    h, bars, raw = cap["head"], cap["bars"], cap["htf"]
+    approved = HtfSettings()
+    for k, f in (("htfmem", "memory"), ("htfseeds", "seeds"), ("htfseedmem", "seed_memory")):
+        add("settings", MATCH if h.get(k) == str(getattr(approved, f)) else DIFF,
+            f"HTF {f}: Pine {h.get(k, 'missing')} · approved {getattr(approved, f)}")
+    hs = HtfSettings(tfs=tuple(t for t in h.get("htftfs", "").split(",") if t))
+    i0, t0, t_end = bars[0]["i"], bars[0]["time"], bars[-1]["time"]
+    candles = [b["candle"] for b in bars]
+    rel = lambda i: None if i is None else i - i0
+
+    # (a) HTF candles: the oracle aggregates the captured bars itself
+    agg, own = HtfEngine(hs, s.fvg, s.tick, EventLog()), {}
+    for t, c in enumerate(candles):
+        for side in agg.sides:
+            done = agg._aggregate(side, c)
+            if done is not None and done.time >= t0:
+                own[(side.tf, t)] = done
+    candles_ok, nobs = Counter(), Counter()
+    for x in sorted(raw["HTFBAR"], key=lambda x: (x["i"], x["tf"])):
+        tf, t, b = x["tf"], x["i"] - i0, x["bar"]
+        if b.time < t0:
+            nobs["HTF candles that started before the window"] += 1
+            continue
+        o = own.pop((tf, t), None)
+        if o is None:
+            add("htf", DIFF, f"{NAMES[tf]} candle {fmt(b.time)}: Pine completed it on {fmt(bars[t]['time'])} "
+                             f"(i={x['i']}); the oracle's aggregation does not")
+        elif o.time != b.time or any(abs(getattr(o, k) - getattr(b, k)) > TOL for k in ("open", "high", "low", "close")):
+            add("htf", DIFF, f"{NAMES[tf]} candle on {fmt(bars[t]['time'])}: Pine {fmt(b.time)} O {b.open:g} H {b.high:g} "
+                             f"L {b.low:g} C {b.close:g} · oracle {fmt(o.time)} O {o.open:g} H {o.high:g} L {o.low:g} C {o.close:g}")
+        else:
+            candles_ok[tf] += 1
+    for (tf, t), o in sorted(own.items(), key=lambda kv: kv[0][1]):
+        add("htf", DIFF, f"{NAMES[tf]} candle {fmt(o.time)}: the oracle completes it on {fmt(bars[t]['time'])}; "
+                         f"Pine logged no HTFBAR")
+
+    # (b) + (c) restore the registry after bar 0, replay with Pine's completed HTF candles
+    feed = {}
+    for x in raw["HTFBAR"]:
+        if x["i"] > i0:
+            feed.setdefault(x["i"] - i0, {})[x["tf"]] = x["bar"]
+    m = IstModel(Settings(modules=("htf",), tick=s.tick, fvg=s.fvg, htf=hs), htf_external=feed)
+    m.step(candles[0])
+    state = {x["tf"]: x for x in raw["HTFSTATE"]}
+    for side in m.hfvg.sides:
+        st = state.get(side.tf)
+        if st is None:
+            add("htf", DIFF, f"{NAMES[side.tf]}: no HTFSTATE snapshot line")
+            continue
+        if st["last"] is None:                     # no completed HTF bar yet: Pine and the replay both start empty
+            continue
+        recs = [HtfFvg(side.tf, r["dir"], r["id"], r["c1"], r["top"], r["bottom"], rel(r["known"]), r["kt"], r["seeded"],
+                       r["pt"], r["pc"], rel(r["touch"]), rel(r["ce"]), rel(r["full"]), rel(r["inv"]), r["invc"])
+                for r in raw["HTFREC"] if r["tf"] == side.tf]
+        m.hfvg.restore(side.tf, st["last"], st["bars"], recs)
+    open_ok, open_diff = 0, 0
+    for t, c in enumerate(candles[1:], 1):
+        m.step(c)
+        want = {side.tf: sum(r.inv_bar is None for r in side.recs) for side in m.hfvg.sides}
+        got = bars[t]["htf_open"]
+        if got is None:
+            continue
+        if got == want:
+            open_ok += 1
+        else:
+            open_diff += 1
+            add("htf", DIFF, f"{fmt(bars[t]['time'])} (i={bars[t]['i']}) open HTF records: Pine {got} · oracle {want}")
+
+    oracle = {(e.type, e.dir, e.sid, e.tf, e.time): e for e in m.events}
+    matched = Counter()
+    for o in (e for e in cap["events"] if e["type"].startswith("HTF_")):
+        if o["time"] is None or not t0 < o["time"] <= t_end:
+            nobs["events of the first captured bar (in the snapshot) or outside the window"] += 1
+            continue
+        e = oracle.pop((o["type"], o["dir"], o["sid"], o["tf"], o["time"]), None)
+        if e is None:
+            add("htf", DIFF, f"line {o['line']}: {o['text']}: not in the oracle (an extra Pine event, or logged twice)")
+            continue
+        bad = [f"price Pine {o['price']} · oracle {e.price}"] if o["has_price"] and not _same_px(o["price"], e.price, s.tick) else []
+        got, exp = _kv(o["text"]), {k.strip(): v.strip() for k, _, v in (p.partition("=") for p in e.meta.split(" · ")) if v}
+        bad += [f"{k} Pine {got.get(k)} · oracle {exp[k]}" for k in ("bottom", "top", "c1", "close", "ext") if k in exp and got.get(k) != exp[k]]
+        if bad:
+            add("htf", DIFF, f"line {o['line']}: {o['text']}: {'; '.join(bad)}")
+        else:
+            matched[o["type"]] += 1
+    for e in sorted(oracle.values(), key=lambda e: e.time):
+        add("htf", DIFF, f"missing in Pine: {pine_text(e, cap['head']['tz'], s.tick)} (oracle)")
+    for tf in hs.tfs:
+        if candles_ok[tf]:
+            add("htf", MATCH, f"{NAMES[tf]} candles completed in the window: {candles_ok[tf]} (time, OHLC, completion bar)")
+    if open_ok and not open_diff:
+        add("htf", MATCH, f"open HTF records per timeframe: {open_ok} bars")
+    for typ, n in sorted(matched.items()):
+        add("htf", MATCH, f"{typ}: {n}")
+    for why, n in nobs.most_common():
+        add("htf", NOBS, f"{n} not compared: {why}")
+    return {"candles": sum(candles_ok.values()), "events": sum(matched.values()), "open_bars": open_ok,
+            "not_observable": sum(nobs.values())}
+
+
 def latest_capture() -> Path | None:
     """The most recently saved validation/parity/pine_capture*.csv / .txt, or pine-logs-*.csv
     (the name TradingView gives the file it saves; it may also append .csv to yours)."""
@@ -598,10 +744,11 @@ def run(path=None, preset: str | None = None) -> dict:
 
 def verdict(r: dict) -> str:
     c = r["counts"]
-    lrl = r.get("lrl")
+    lrl, htf = r.get("lrl"), r.get("htf")
     tally = (f"{r['compared_bars']} bars × {r['series']} series and {r['matched_events']} events compared"
              + (f" + LRL: {lrl['events']} events, {lrl['boundaries']} boundaries, {lrl['cand_bars']} candidate counts"
                 if lrl else "")
+             + (f" + HTF: {htf['candles']} candles, {htf['events']} events, {htf['open_bars']} bar registries" if htf else "")
              + f"; {c[MATCH]} MATCH · {c[DIFF]} DIFFERENCE · {c[NOBS]} NOT OBSERVABLE")
     return f"BOUNDED PINE-LOG BAR-BY-BAR PARITY: {'FAIL' if r['differences'] else 'PASS'} — {tally}"
 

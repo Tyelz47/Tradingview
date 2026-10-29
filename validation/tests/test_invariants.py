@@ -438,6 +438,84 @@ def lrl10():
     mon.check()
 
 
+# ── HTF FVG (opt-in module, docs/HTF_FVG.md) ──
+def htf_case():
+    """The merged NQ captures with the HTF module, stepped and checked (15m and 30m zones form,
+    are touched, filled and invalidated)."""
+    from validation.studies.lrl import nq_candles
+    m = IstModel(Settings(modules=("htf",)))
+    mon = Monitor(m)
+    for c in nq_candles():
+        m.step(c)
+        mon.check()
+    return m, mon, m.hfvg.sides[0]                    # the 15m side
+
+
+def _first_seen(mon, side, r):
+    """Timing and geometry are checked when a record first appears (INV-HTF-08 freezes them
+    afterwards): forget the monitor's snapshot of r so the corruption is a new record's."""
+    mon.htf_snap.pop((side.tf, r.dir, r.id))
+    return r
+
+
+def htf01():
+    m, mon, side = htf_case()
+    _first_seen(mon, side, next(r for r in side.recs if not r.seeded)).known_bar -= 1
+    mon.check()
+
+
+def htf02():
+    m, mon, side = htf_case()
+    _first_seen(mon, side, side.recs[0]).top += 0.25
+    mon.check()
+
+
+def htf08_geometry_change():
+    """The same corruption on a record the monitor already knows: INV-HTF-08 (frozen facts)."""
+    m, mon, side = htf_case()
+    side.recs[0].top += 0.25
+    mon.check()
+
+
+def htf03():
+    m, mon, side = htf_case()
+    r = next(r for r in side.recs if r.ce_bar is not None)
+    r.ce_bar = r.known_bar - 1
+    mon.check()
+
+
+def htf04():
+    m, mon, side = htf_case()
+    r = next(r for r in side.recs if r.inv_bar is not None)
+    r.inv_close = r.top + 10 if r.dir > 0 else r.bottom - 10
+    mon.check()
+
+
+def htf05():
+    m, mon, side = htf_case()
+    side.recs.append(replace(side.recs[0]))
+    mon.check()
+
+
+def htf06():
+    m, mon, side = htf_case()
+    m.hfvg.s = replace(m.hfvg.s, memory=0)
+    mon.check()
+
+
+def htf07():
+    m, mon, side = htf_case()
+    r = next(r for r in side.recs if r.touch_bar is None and r.inv_bar is None)
+    m.log.events.append(replace(ev_now(m, "HTF_FVG_FIRST_TOUCH", r.dir, r.id, r.top), tf=side.tf))
+    mon.check()
+
+
+def htf08():
+    m, mon, side = htf_case()
+    next(r for r in side.recs if not r.seeded).pre_touch = True
+    mon.check()
+
+
 CASES = {
     "INV-EV-01": ev01, "INV-EV-02": ev02, "INV-EV-03": ev03, "INV-EV-04": ev04, "INV-EV-05": ev05,
     "INV-FVG-01": fvg01, "INV-FVG-02": fvg02, "INV-FVG-03": fvg03, "INV-FVG-04": fvg04, "INV-FVG-05": fvg05,
@@ -451,11 +529,19 @@ CASES = {
     "INV-SES-01": ses01, "INV-SES-02": ses02, "INV-LVL-01": lvl01,
     "INV-LRL-01": lrl01, "INV-LRL-02": lrl02, "INV-LRL-03": lrl03, "INV-LRL-04": lrl04, "INV-LRL-05": lrl05,
     "INV-LRL-06": lrl06, "INV-LRL-07": lrl07, "INV-LRL-08": lrl08, "INV-LRL-09": lrl09, "INV-LRL-10": lrl10,
+    "INV-HTF-01": htf01, "INV-HTF-02": htf02, "INV-HTF-03": htf03, "INV-HTF-04": htf04, "INV-HTF-05": htf05,
+    "INV-HTF-06": htf06, "INV-HTF-07": htf07, "INV-HTF-08": htf08,
 }
 
 
 def test_every_invariant_has_a_negative_test():
     assert set(CASES) == set(REGISTRY), set(REGISTRY) ^ set(CASES)
+
+
+def test_htf_geometry_change_on_a_known_record_is_frozen_violation():
+    with pytest.raises(InvariantViolation) as err:
+        htf08_geometry_change()
+    assert err.value.inv_id == "INV-HTF-08", str(err.value)
 
 
 @pytest.mark.parametrize("inv_id", sorted(CASES))
