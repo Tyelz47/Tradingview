@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.5.2-dev · LRL (diagonal liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.5.3-dev · LRL (diagonal liquidity) development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -101,7 +101,7 @@ TT_LTKN = "[view] Taken levels: a faded dotted line ending at the bar that took 
 TT_EQT  = "[calc] Swings of the same side whose prices differ by at most this many ticks are 'equal'. 0 = identical prices only."
 TT_EQM  = "[calc] Swings needed before a cluster counts as EQH/EQL and EQH/EQL_CREATED is logged."
 TT_LRL  = "[calc] LRL = a diagonal line through three or more successive failure swings: descending swing highs (bearish LRL, buy stops above) or ascending swing lows (bullish LRL). Fixed definition, no tuning inputs (docs/LRL.md): pivots left 3 · right 2 · consecutive points at most 30 bars apart, each beyond the EQ tolerance from the previous one and separated by a pullback ≥ 1.0 × TR average · tolerance τ = max(EQ tolerance, 0.5 × TR average at the first point) · the line through the first and the latest point, every point within τ of it, no high above it + τ, total drop > 2τ. Two points are only an internal candidate. Decided at bar close. OFF: nothing is computed; Phase 1 and Phase 2 output is the same either way."
-TT_LRLS = "[view] The nearest active LRL per side: a thin line through its confirmed pivots (decided segments never move), a dashed projection along the line while it is active, and a small LRL label."
+TT_LRLS = "[view] The nearest active LRL per side: one thin straight line from its first to its latest failure swing (the intermediate swings lie within τ of it), the same line dashed to the right while it is active, and a small LRL label. When a later swing extends the LRL, the line is redrawn first → new latest from that bar on."
 TT_LRLH = "[view] Also draw ended LRLs (the last 10 per side), faded; the projection ends on the bar where the LRL ended."
 TT_LRLM = "[view] Where an ended LRL finished: D drift (the high crossed the projected boundary but not the boundary projected on the previous bar) · S sweep · B break (closed beyond the boundary) · E expired. Needs Show historical LRL."
 
@@ -541,7 +541,6 @@ var LiqSide sslS = LiqSide.new(isBsl = false, live = array.new<Liq>(), hist = ar
 var LrlSide lrlHi = LrlSide.new(sign = 1, live = array.new<Lrl>(), hist = array.new<Lrl>(), cands = array.new<Lrl>(), pivX = array.new<int>(), pivT = array.new<int>(), pivP = array.new<float>(), members = array.new<int>(), spent = array.new<int>())
 var LrlSide lrlLo = LrlSide.new(sign = -1, live = array.new<Lrl>(), hist = array.new<Lrl>(), cands = array.new<Lrl>(), pivX = array.new<int>(), pivT = array.new<int>(), pivP = array.new<float>(), members = array.new<int>(), spent = array.new<int>())
 // L6 · LRL view, rebuilt on the last bar (dropping these never touches logical state)
-var array<polyline> lrlPolys = array.new<polyline>()
 var array<line>     lrlLns   = array.new<line>()
 var array<label>    lrlLbls  = array.new<label>()
 var array<int>      lrlCnt   = array.new<int>(4, 0)      // drawn: active high side, active low side, ended, candidates
@@ -1658,8 +1657,9 @@ f_drawEq(LiqSide s, int slot) =>
     shown
 
 // ── LRL (DEF-LRL7). Pure reads of L3; the only writes are to the renderer's own pool.
-//    The polyline joins confirmed pivots, so a decided segment never moves; the dashed
-//    projection follows the chord that is in state. No horizontal LRL is ever drawn. ──
+//    One straight line: the chord in state (first → latest point), then the same line
+//    dashed while active. After an extension it is drawn first → new latest from that bar
+//    on (logical history keeps each chord's bar). No horizontal LRL is ever drawn. ──
 f_lrlEndName(int k) =>
     k == LRL_DRIFT ? "DRIFT" : k == LRL_SWEEP ? "SWEEP" : k == LRL_BREAK ? "BREAK" : k == LRL_EXPIRED ? "EXPIRED" : "ACTIVE"
 
@@ -1667,14 +1667,15 @@ f_lrlDraw(LrlSide s, Lrl r) =>
     bool  active = r.endKind == 0
     color base   = s.sign > 0 ? LRL_BEAR_COL : LRL_BULL_COL
     color col    = active ? base : color.new(base, T_HIST)
+    int   x0     = r.xs.first()
     int   x1     = r.xs.last()
     // Active: to the current bar and on to the right, never past the last bar it can be active.
     int   x2     = active ? math.max(bar_index, math.min(bar_index + rightOffset, x1 + LRL_GAP + LRL_R)) : r.endBar
-    array<chart.point> pts = array.new<chart.point>()
-    for i = 0 to r.xs.size() - 1
-        pts.push(chart.point.from_index(r.xs.get(i), s.sign * r.ps.get(i)))
-    lrlPolys.push(polyline.new(pts, xloc = xloc.bar_index, line_color = col, line_width = 1))
-    lrlLns.push(line.new(x1, s.sign * r.yAt(x1), x2, s.sign * r.yAt(x2), xloc = xloc.bar_index, color = col, style = line.style_dashed, width = 1))
+    // ONE straight line: the chord in state, first → latest point, solid; the projection is
+    // the same function y, dashed and fainter, so there is no kink where it starts. The
+    // intermediate points validate the line; they are not drawn as vertices.
+    lrlLns.push(line.new(x0, s.sign * r.yAt(x0), x1, s.sign * r.yAt(x1), xloc = xloc.bar_index, color = col, style = line.style_solid, width = 1))
+    lrlLns.push(line.new(x1, s.sign * r.yAt(x1), x2, s.sign * r.yAt(x2), xloc = xloc.bar_index, color = color.new(base, active ? 40 : 75), style = line.style_dashed, width = 1))
     string tip = (s.sign > 0 ? "LRL ▼ bearish · descending highs" : "LRL ▲ bullish · ascending lows") + " · " + str.tostring(r.xs.size()) + " points · τ " + f_x(r.tau) + "\nfirst " + f_tid(r.ts.first()) + " · latest " + f_tid(r.ts.last()) + " · confirmed " + f_tid(r.bornTime) + "\n" + f_lrlEndName(r.endKind) + (active ? "" : " " + f_tid(r.endTime))
     lrlLbls.push(label.new(x1, s.sign * r.ps.last(), "LRL", xloc = xloc.bar_index, style = s.sign > 0 ? label.style_label_down : label.style_label_up, color = CLR_NONE, textcolor = col, size = size.tiny, tooltip = tip))
     if lrlMarks and not active
@@ -1922,17 +1923,14 @@ if barstate.islast
         f_drawTaken(bslS, 4)
         f_drawTaken(sslS, 5)
 
-// LRL (DEF-LRL7): rebuilt from state on the last bar, like liquidity. The points are
-// confirmed pivots, so a drawn segment never moves; only the active projection follows
-// the current bar. Visibility never reaches L3.
+// LRL (DEF-LRL7): rebuilt from state on the last bar, like liquidity: one straight chord
+// per LRL plus its dashed projection on the same line; the projection follows the current
+// bar. Visibility never reaches L3.
 if barstate.islast
-    for x in lrlPolys
-        polyline.delete(x)
     for x in lrlLns
         line.delete(x)
     for x in lrlLbls
         label.delete(x)
-    lrlPolys.clear()
     lrlLns.clear()
     lrlLbls.clear()
     lrlCnt.fill(0)
@@ -2281,7 +2279,7 @@ if dbgOn and barstate.islast
         f_dbgRow(38, "LRL inspect #" + str.tostring(dbgLrlIns), (lsg > 0 ? "▼ bearish (highs)" : "▲ bullish (lows)") + " · id " + f_tid(lq.id) + " · " + f_lrlEndName(lq.endKind) + " · " + str.tostring(lq.xs.size()) + " points · τ " + f_x(lq.tau))
         f_dbgRow(39, "anchor → latest pivot", f_mt(lq.ts.first()) + " @ " + f_px(lsg * lq.ps.first()) + " → " + f_mt(lq.ts.last()) + " @ " + f_px(lsg * lq.ps.last()) + " · confirmed " + f_mt(lq.bornTime) + " · extensions " + str.tostring(lq.ext.size()) + " · touches " + str.tostring(lq.touches))
         f_dbgRow(40, "projected boundary now · previous", lact ? "bar " + str.tostring(bar_index) + ": " + f_x(lsg * (lq.yAt(bar_index) + lq.tau)) + " · " + f_x(lsg * (lq.yAt(bar_index - 1) + lq.tau)) : f_lrlEndName(lq.endKind) + " " + f_mt(lq.endTime) + ": " + f_x(lsg * lq.endNow) + " · " + f_x(lsg * lq.endPrev))
-    f_dbgRow(41, "LRL drawn", "active ▼ " + str.tostring(lrlCnt.get(0)) + " · ▲ " + str.tostring(lrlCnt.get(1)) + " · ended " + str.tostring(lrlCnt.get(2)) + " · candidates " + str.tostring(lrlCnt.get(3)) + " · polylines " + str.tostring(polyline.all.size()))
+    f_dbgRow(41, "LRL drawn", "active ▼ " + str.tostring(lrlCnt.get(0)) + " · ▲ " + str.tostring(lrlCnt.get(1)) + " · ended " + str.tostring(lrlCnt.get(2)) + " · candidates " + str.tostring(lrlCnt.get(3)) + " · LRL lines " + str.tostring(lrlLns.size()) + " · labels " + str.tostring(lrlLbls.size()))
 
 // Normal-mode warnings: non-standard candles, and objects nearing the hard limit
 // (TradingView would otherwise delete the oldest drawings silently).

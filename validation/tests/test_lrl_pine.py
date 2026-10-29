@@ -78,6 +78,19 @@ def test_no_overloaded_names_ce10182():
     assert "method advance(Fvg z) =>" in SRC                       # the frozen FVG method is untouched
 
 
+def test_renderer_draws_one_straight_line():
+    """DEF-LRL7 (user, 2026-10-29): ONE straight solid line first → latest point (the chord in
+    state) and the projection on the same function y, dashed: no polyline through the
+    intermediate pivots, so no visible kink anywhere."""
+    import re
+    draw = SRC[SRC.index("f_lrlDraw(LrlSide s, Lrl r) =>"):SRC.index("f_lrlRender(LrlSide s, int slot) =>")]
+    assert "polyline" not in SRC and "chart.point" not in SRC
+    chord = re.findall(r"line\.new\(x0, s\.sign \* r\.yAt\(x0\), x1, s\.sign \* r\.yAt\(x1\), .*style = line\.style_solid", draw)
+    proj = re.findall(r"line\.new\(x1, s\.sign \* r\.yAt\(x1\), x2, s\.sign \* r\.yAt\(x2\), .*style = line\.style_dashed", draw)
+    assert len(chord) == 1 and len(proj) == 1
+    assert "int   x0     = r.xs.first()" in draw and "int   x1     = r.xs.last()" in draw
+
+
 def test_lrl_never_reads_phase1_or_phase2_state():
     """DEF-LRL8 in Pine: the LRL engine methods and its engine-run block mention no FVG,
     session, reference-level, BSL/SSL or EQ state (only bars, its own TR average, EQ_TOL

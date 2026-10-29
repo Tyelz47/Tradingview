@@ -8,7 +8,7 @@
   * a crossing of the projected boundary ends the LRL. **Correction (user, 2026-10-28, before any Pine):** when the boundary moved into price, the end is a separate terminal class, `LRL_DRIFT`, not SWEEP / BREAK (DEF-LRL5);
   * the pivots of a taken LRL are spent;
   * display shows the nearest active LRL per side, and 2-point candidates only in debug.
-* **Implemented in Pine: IST v0.5.2-dev (EXPERIMENTAL, NOT frozen; v0.5.0-dev failed to compile, CE10182; v0.5.1-dev compiled but its historical drawings exceeded the `time` buffer).** The Pine implementation (§6) follows the oracle line by line; the static check ST-17 pins its constants and formulas.
+* **Implemented in Pine: IST v0.5.3-dev (EXPERIMENTAL, NOT frozen; v0.5.3-dev draws one straight line; v0.5.0-dev failed to compile, CE10182; v0.5.1-dev compiled but its historical drawings exceeded the `time` buffer).** The Pine implementation (§6) follows the oracle line by line; the static check ST-17 pins its constants and formulas.
   * TradingView testing is pending (`docs/TESTS_LRL.md`).
   * LRL is frozen only after a real TradingView Pine ↔ oracle parity with 0 DIFFERENCE (LRL-L11).
 * The frozen baselines `PHASE1_BASELINE_v0.3.2` and `PHASE2_BASELINE_v0.4.4-dev` are untouched.
@@ -53,8 +53,10 @@
 * **DEF-LRL6 · Identity and memory.**
   * id = the time of X₁. It is unique per side: a point belongs to at most one LRL, and spent pivots never return.
   * 25 candidates per side, and **50 LRL records** per side. Beyond 50, the record that ended first is dropped; if none ended, the oldest active one is dropped and its points become spent. Each drop emits `LRL_DROPPED_MEMORY`.
-* **DEF-LRL7 · Display** (renderer, L6; Pine v0.5.2-dev, §6):
-  * a polyline through the member pivots (fixed points: segments never move) and a dashed projection from the latest point along y while active, ending at the take or expiry bar;
+* **DEF-LRL7 · Display** (renderer, L6; Pine v0.5.3-dev, §6). **Changed by the user on 2026-10-29: one straight line, not a polyline.**
+  * ONE straight solid line from the first to the latest point: the chord y in state. The intermediate points lie within τ of it; they validate the line and are not drawn as vertices.
+  * While active, the same line y continues to the right, dashed and fainter. There is no kink where it starts, and it ends at the take or expiry bar.
+  * When a 4th, 5th, … point extends the LRL, the line is drawn first → new latest from that bar on (state and events as in DEF-LRL5);
   * label "LRL";
   * by default the nearest active LRL per side, with ended LRLs behind a history toggle.
   * Visibility never changes state.
@@ -94,7 +96,10 @@
 * The confirmation bar is the third point's confirmation bar, never earlier.
 * Events are append-only and points are append-only.
 * A new chord applies from the bar after the extension. Past take decisions are never re-evaluated.
-* The drawn polyline joins fixed, confirmed pivots. Like a BSL line drawn from its swing bar, it shows confirmed facts, not a claim that the line existed earlier.
+* The drawn line is the chord in state: first → latest confirmed point. It is drawn from the confirmation bar on, never before.
+  * Like a BSL line drawn from its swing bar, it shows confirmed facts, not a claim that the line existed earlier.
+  * When an extension moves the chord, the drawing shows the new chord from that bar on. That is the user's choice of one straight line over a polyline.
+  * The logical history keeps each chord: `LRL_EXTENDED` on its bar, and every take decided with the chord known before that bar.
 * All of this is tested (§4).
 
 ## 4 · Validation (oracle `validation/models/lrl.py`, validation 1.9.0)
@@ -137,7 +142,7 @@
 4. **Freeze**, only after 1.
 5. **DEF-LRL9 context layer:** a separate study.
 
-## 6 · Pine implementation (IST v0.5.2-dev)
+## 6 · Pine implementation (IST v0.5.3-dev)
 
 **Layers:**
 * **L1:** `lrlTra`, its own SMA(TR, 14), and the 3 / 2 pivot windows. `max_bars_back` 5000 on high and low (the clean-line scan), 5000 on `time` (bar_index drawings are converted through `time`; historical LRL drawings reach up to `LRL_SPAN` bars back), 100 on `lrlTra`. ST-17 pins all of them.
@@ -158,7 +163,11 @@
 Developer group: Inspect LRL (0 = newest), and Draw LRL candidates (debug only, OFF). The definition constants are not inputs.
 
 **Renderer:**
-* For the nearest active LRL per side: a polyline through the confirmed pivots (bar-index geometry), a dashed projection along the chord to the current bar + right extension (never past Xₙ + 32), and an "LRL" label above (bearish) or below (bullish).
+* For the nearest active LRL per side:
+  * ONE straight solid line, first → latest point (`line.new` on `r.yAt` at both ends, bar-index geometry);
+  * the same line dashed and fainter, from the latest point to the current bar + right extension (never past Xₙ + 32);
+  * an "LRL" label above (bearish) or below (bullish).
+  * There are no polylines. A test checks that there is exactly one chord line, one projection on the same function, and no polyline (`tests/test_lrl_pine.py`).
 * Historical: the last 10 ended LRLs per side, faded, the projection ending at the end bar.
 * Markers D / S / B / E: on the end bar's boundary, with both boundaries in the tooltip.
 * Colours: bearish #E040FB, bullish #26C6DA.
@@ -167,7 +176,7 @@ Developer group: Inspect LRL (0 = newest), and Draw LRL candidates (debug only, 
 * row 35: the engine and its constants;
 * rows 36–37 per side: pivots · candidates (seeded) · active · confirmed · extended · DRIFT · SWEEP · BREAK · EXPIRED · memory · dropped;
 * rows 38–40: the inspected LRL (side, id, status, points, τ; anchor → latest pivot, confirmation, extensions, touches; the projected boundary now · on the previous bar, or at its end);
-* row 41: what is drawn, and the polylines.
+* row 41: what is drawn, and the LRL lines and labels.
 
 **Parity capture:**
 * The CAPTURE line adds `lrl=1` and the nine constants.
@@ -184,7 +193,7 @@ Developer group: Inspect LRL (0 = newest), and Draw LRL candidates (debug only, 
 5. **Shared debug output.** "Last events" and the Debug Pine Logs lines now include LRL events.
 
 **Resources:**
-* **Drawings:** ≤ 2 polylines + 2 lines + 2 labels (active). With history: + 20 polylines + 20 lines + 20 labels (+ 20 markers). The polyline limit is 50 by default.
+* **Drawings:** ≤ 4 lines + 2 labels (active). With history: + 40 lines + 20 labels (+ 20 markers). No polylines.
 * **Debug candidates:** ≤ 50 dotted lines.
 * **Memory:** ≤ 50 records + 25 candidates per side.
 * **Per closed bar and side:** O(active + candidates).

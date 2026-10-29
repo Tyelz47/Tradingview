@@ -1,8 +1,8 @@
-# IST · LRL tests — v0.5.2-dev (EXPERIMENTAL)
+# IST · LRL tests — v0.5.3-dev (EXPERIMENTAL)
 
 **Status.** Automated validation: PASS, FULL (totals in `CHANGELOG.md`). TradingView: **LRL-L00 PASS** (v0.5.1-dev, user, 2026-10-29); every other LRL-L test PENDING. They are recorded only from the user's results, never assumed. LRL is frozen only after **LRL-L11** (real Pine ↔ oracle parity) gives **0 DIFFERENCE**.
 
-**Build:** `src/IST.pine` v0.5.2-dev (branch `lrl/pine`).
+**Build:** `src/IST.pine` v0.5.3-dev (branch `lrl/pine`). v0.5.3-dev draws one straight line per LRL (user, 2026-10-29); no polyline.
 
 **History:** v0.5.0-dev LRL-L00 **FAIL** (user, 2026-10-28): CE10182, an overloaded `advance` (FVG + LRL). Fixed in v0.5.1-dev (LRL method renamed `advanceLrl`; ST-18).
 * v0.5.1-dev: LRL-L00 compile **PASS** (user, 2026-10-29).
@@ -23,19 +23,19 @@
 
 ## TradingView procedure (NQ1! 1m unless stated; Confirmed only ON)
 
-Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.5.2-dev, save it, and add it to an NQ1! 1m chart.
+Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.5.3-dev, save it, and add it to an NQ1! 1m chart.
 
 | id | test | how | expected |
 |---|---|---|---|
 | LRL-L00 | compile and runtime | add the indicator; open the Pine Logs and the status line | no compile error, no runtime error ("max_bars_back", loop, memory), chart loads |
 | LRL-L01 | inputs | Settings → group **LRL · DIAGONAL LIQUIDITY** | exactly: Enable LRL engine ✓, Show LRL ✓, Show historical LRL ☐, Show lifecycle markers ☐. In DEVELOPER: Inspect LRL = 0, Draw LRL candidates ☐. No pivot / τ / gap / separation inputs anywhere |
-| LRL-L02 | visual | look at the chart | at most one active LRL per side: a thin diagonal through ≥ 3 pivots (magenta on highs, cyan on lows), a dashed projection from the latest pivot, a small "LRL" label. No horizontal LRL. No 2-point lines |
+| LRL-L02 | visual | look at the chart | at most one active LRL per side: ONE thin straight diagonal from the first to the latest failure swing (magenta on highs, cyan on lows), no bend at intermediate swings, continuing as a fainter dashed line on the same slope, with no kink, while active; a small "LRL" label. No horizontal LRL. No 2-point lines |
 | LRL-L03 | debug state | Debug mode ON; rows 35–41 (bottom right) | row 35 `ON · pivots left 3 · right 2 (no significance test) · τ = max(EQ 4 ticks, 0.5 × TR(14) …) · gap ≤ 30 · pullback ≥ 1 × TR · drop > 2τ · candidates 25 · memory 50/side`. Rows 36–37: counts per side. Rows 38–40: the newest LRL (status, points, τ, anchor → latest, boundary now · previous). Row 41: drawn counts |
-| LRL-L04 | confirmation bar, no early drawing | Bar Replay: step bar by bar up to an LRL's 3rd pivot | nothing appears before the close of the 3rd pivot's bar + 2. Row 39's "confirmed" = that bar. The earlier pivots and segments never move afterwards |
+| LRL-L04 | confirmation bar, no early drawing | Bar Replay: step bar by bar up to an LRL's 3rd pivot | nothing appears before the close of the 3rd pivot's bar + 2. Row 39's "confirmed" = that bar. When a later swing extends it, the straight line is redrawn first → new latest from that bar on |
 | LRL-L05 | extension / ending | Bar Replay through an LRL's life, Show historical + markers ON | a 4th compatible pivot extends it (row 38 points +1; row 40's boundaries move from the next bar). It ends once: D, S, B or E, never relabelled. For a D: the tooltip shows high > boundary but ≤ previous bar's boundary |
 | LRL-L06 | visibility never changes calculation | note rows 36–37; toggle Show LRL, Show historical, markers, candidates | rows 36–37 identical in every combination |
 | LRL-L07 | Phase 1 / Phase 2 unchanged | note rows 2–4 and 22–27; set Enable LRL engine OFF | rows 2–4 and 22–27 identical with LRL ON and OFF; with OFF, row 35 says OFF and no LRL is drawn |
-| LRL-L08 | objects and time | Show historical ON, Draw LRL candidates ON (Debug ON); max bars; also 3m and 5m | no object-limit warning (row 13, row 41 polylines ≤ ~22); no timeout. Note the Pine Profiler time if available |
+| LRL-L08 | objects and time | Show historical ON, Draw LRL candidates ON (Debug ON); max bars; also 3m and 5m | no object-limit warning (row 13, row 41 LRL lines ≤ ~44); no timeout. Note the Pine Profiler time if available |
 | LRL-L09 | timeframes | NQ1! 3m and 5m | runs; fewer LRLs; same behaviour |
 | LRL-L10 | Live mode | Confirmed only OFF, on a live session | LRL changes only at bar close (rows 36–37 and drawings do not change intrabar, except the projection following the current bar) |
 | LRL-L11 | **Pine ↔ oracle parity (freeze criterion)** | Confirmed only ON, Balanced, Debug can stay OFF. DEVELOPER → Parity capture ON, N = **1000**. Wait for `END\|bars=1076` in Pine Logs, save the logs (CSV) into `validation/parity/`, run `python -m validation.parity --capture validation/parity/<file>.csv`. Then capture OFF | the CAPTURE line has `lrl=1 … warmup=76`; **1,076 BAR lines** (1,000 + 76 warm-up). The report has an `LRL` section. **0 DIFFERENCE** over LRL events (type, side, id, bar, price, τ, points, boundaries) and per-bar boundaries / candidate counts, and the Phase 1 / 2 sections still 0 DIFFERENCE. NOT OBSERVABLE (expected, see below) |

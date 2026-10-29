@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.5.3-dev — LRL drawn as ONE straight line (2026-10-29, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.9.3
+
+**Decision (user, 2026-10-29, from the reference screenshots):** an LRL is drawn as ONE clean straight diagonal, not a polyline that bends at every failure swing. This is a renderer change: DEF-LRL1…6, the oracle, state, events and ids are unchanged.
+
+**CHANGE** (`src/IST.pine`, L6 only):
+* `f_lrlDraw` draws the chord in state as one solid line, from the first to the latest point (`line.new` on `r.yAt` at both ends).
+* The projection is the same function y, dashed and fainter (transparency 40; 75 once ended), so there is no kink.
+* The polyline, its pool and its deletes are removed. Debug row 41 shows LRL lines and labels instead of polylines.
+* After an extension, the line is drawn first → new latest from that bar on.
+* The Show LRL tooltip is updated. `max_bars_back(time, 5000)` stays: bar-index lines to far-left anchors still need it.
+
+**Docs:**
+* `docs/LRL.md`: DEF-LRL7 rewritten (user decision), §3 non-repaint wording for a chord redrawn on extension, §6 renderer and resources (no polylines; ≤ 4 lines + 2 labels active).
+* `docs/TESTS_LRL.md`: LRL-L02 / L04 / L08 expectations.
+
+**Validation 1.9.3:** `tests/test_lrl_pine.py::test_renderer_draws_one_straight_line` requires exactly one chord line, one projection on the same function, and no polyline or `chart.point` anywhere.
+
+**Also (design only, nothing implemented):** `docs/HTF_FVG_DESIGN.md`, the HTF Fair Value Gap module (15m · 30m · 1H · 4H · 1D · 1W) for the user's approval. It covers:
+* the architecture beside the frozen Phase 1 engine;
+* data acquisition and non-repainting timing;
+* the lifecycle (DEF-B1…B6), record identity and renderer hierarchy;
+* overlap alternatives A–E, resources, label placement, parity and testing;
+* the effect on Phase 1, Pine limitations, and decisions D1–D10.
+
+**TEST:**
+* QUICK: **PASS**.
+* FULL: **PASS**, exit 0, 270.1 s, **458 passed, 1 skipped**: static 18/18 · LRL 81/81 · every Phase 1 / Phase 2 section unchanged · regression 5/5 · ST-15 the same 11 reviewed Phase 1 lines.
+* TradingView: LRL-L02 (one straight line) and the historical-drawing retest pending.
+
 ## v0.5.2-dev — LRL historical drawings: explicit `time` history buffer (2026-10-29, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.9.2
 
 **TradingView on v0.5.1-dev (user):**
