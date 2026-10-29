@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.5.1-dev · LRL (diagonal liquidity) development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.5.2-dev · LRL (diagonal liquidity) development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -602,6 +602,9 @@ int   lrlXT   = time[LRL_R]
 max_bars_back(high, 5000)
 max_bars_back(low, 5000)
 max_bars_back(lrlTra, 100)
+// Drawings at bar_index coordinates are converted through the `time` series internally:
+// historical LRL drawings (pivots up to LRL_SPAN bars back) need its history too.
+max_bars_back(time, 5000)
 
 // The single gate between "observe" and "change state" (ARCHITECTURE §5).
 bool engineTick = not confirmedOnly or barstate.isconfirmed

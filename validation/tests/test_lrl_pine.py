@@ -39,6 +39,9 @@ MUTATIONS = {
     "no clean-line check": ("if s.hiS(j) > p0 + sl * (j - x0) + tau + EPS", "if false"),
     "chord from the first two points": ("float sl = (pb - p0) / (xb - x0)", "float sl = (ps.get(1) - p0) / (xs.get(1) - x0)"),
     "expiry one bar later": ("else if t > r.xs.last() + LRL_GAP + LRL_R", "else if t > r.xs.last() + LRL_GAP + LRL_R + 1"),
+    "time history buffer removed": ("max_bars_back(time, 5000)\n", ""),
+    "time history buffer too short": ("max_bars_back(time, 5000)", "max_bars_back(time, 1000)"),
+    "high history buffer removed": ("max_bars_back(high, 5000)\n", ""),
     "a significance test on LRL pivots": ("bool  lrlPivH = lrlPxH > lrlHiL[LRL_R + 1] and lrlPxH >= lrlHiR",
                                           "bool  lrlPivH = lrlPxH > lrlHiL[LRL_R + 1] and lrlPxH >= lrlHiR and sigHi"),
 }

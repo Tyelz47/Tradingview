@@ -1,10 +1,13 @@
-# IST · LRL tests — v0.5.1-dev (EXPERIMENTAL)
+# IST · LRL tests — v0.5.2-dev (EXPERIMENTAL)
 
-**Status.** Automated validation: PASS, FULL (totals in `CHANGELOG.md`). TradingView: **all LRL-L tests PENDING**. They are recorded only from the user's results, never assumed. LRL is frozen only after **LRL-L11** (real Pine ↔ oracle parity) gives **0 DIFFERENCE**.
+**Status.** Automated validation: PASS, FULL (totals in `CHANGELOG.md`). TradingView: **LRL-L00 PASS** (v0.5.1-dev, user, 2026-10-29); every other LRL-L test PENDING. They are recorded only from the user's results, never assumed. LRL is frozen only after **LRL-L11** (real Pine ↔ oracle parity) gives **0 DIFFERENCE**.
 
-**Build:** `src/IST.pine` v0.5.1-dev (branch `lrl/pine`).
+**Build:** `src/IST.pine` v0.5.2-dev (branch `lrl/pine`).
 
-**History:** v0.5.0-dev LRL-L00 **FAIL** (user, 2026-10-28): CE10182, an overloaded `advance` (FVG + LRL). Fixed in v0.5.1-dev (LRL method renamed `advanceLrl`; ST-18). LRL-L00 must be re-run. The definition is in `docs/LRL.md`.
+**History:** v0.5.0-dev LRL-L00 **FAIL** (user, 2026-10-28): CE10182, an overloaded `advance` (FVG + LRL). Fixed in v0.5.1-dev (LRL method renamed `advanceLrl`; ST-18).
+* v0.5.1-dev: LRL-L00 compile **PASS** (user, 2026-10-29).
+* v0.5.1-dev runtime with **Show historical LRL ON: FAIL** (user): "Error on bar 11241: The requested historical offset (1231) is beyond the historical buffer's limit (1230)" in `f_lrlDraw` (bar_index polyline). The `time` series' history was too short for historical bar_index drawings.
+* Fixed in v0.5.2-dev: `max_bars_back(time, 5000)`, pinned by ST-17. Retest pending: Show LRL ON + Show historical LRL ON, NQ1! 1m, a long history. The definition is in `docs/LRL.md`.
 
 ## Automated (before TradingView)
 
@@ -20,7 +23,7 @@
 
 ## TradingView procedure (NQ1! 1m unless stated; Confirmed only ON)
 
-Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.5.1-dev, save it, and add it to an NQ1! 1m chart.
+Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.5.2-dev, save it, and add it to an NQ1! 1m chart.
 
 | id | test | how | expected |
 |---|---|---|---|

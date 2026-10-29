@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.5.2-dev — LRL historical drawings: explicit `time` history buffer (2026-10-29, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.9.2
+
+**TradingView on v0.5.1-dev (user):**
+* LRL-L00 compile: **PASS**.
+* Runtime with **Show historical LRL ON: FAIL**: "Error on bar 11241: The requested historical offset (1231) is beyond the historical buffer's limit (1230)". The stack is `f_lrlDraw()` (the historical polyline: `chart.point.from_index` / `polyline.new(…, xloc = xloc.bar_index)`) ← `f_lrlRender()` ← `#main()`.
+
+**ROOT CAUSE** (renderer only, not LRL detection or state):
+* Drawings at `bar_index` coordinates are converted internally through the `time` series.
+* A historical LRL's pivots can be far behind the last bar, and Pine had sized `time`'s history buffer for the offsets it saw (1230 bars).
+
+**CHANGE** (`src/IST.pine`): `max_bars_back(time, 5000)`, a series-specific buffer next to the existing high / low 5000 (the LRL design envelope `LRL_SPAN` = 4,900). The indicator-wide `max_bars_back` is not changed.
+
+**Not changed:** the LRL definition, the oracle, LRL ids / state / lifecycle, chord geometry, bar_index coordinates (no switch to bar_time), the historical drawings (none truncated), Phase 1 / Phase 2.
+
+**Validation 1.9.2:** ST-17 also pins the three LRL history buffers, `max_bars_back(high | low | time, 5000)`. New mutations, each caught: the `time` buffer removed, the `time` buffer shortened to 1000, the high buffer removed.
+
+**TEST:**
+* QUICK: **PASS**.
+* FULL: **PASS**, exit 0, 452.0 s, **457 passed, 1 skipped**:
+  * static 18/18 (ST-17: 33 formulas · 9 constants · 2 orders) · LRL 80/80;
+  * every Phase 1 / Phase 2 section unchanged;
+  * regression 5/5 against the frozen baseline;
+  * ST-15: the same 11 reviewed Phase 1 lines.
+* TradingView retest pending: Show LRL ON + Show historical LRL ON, NQ1! 1m, a long history.
+
 ## v0.5.1-dev — LRL compile fix: no overloaded `advance` (2026-10-28, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.9.1
 
 **TradingView LRL-L00 on v0.5.0-dev: FAIL** (user). The compiler reported CE10182, "Cannot use global variable "barEv" in the local scope of overloaded function "advance()"", on the FVG `method advance(Fvg z)`; 9 problems in total.

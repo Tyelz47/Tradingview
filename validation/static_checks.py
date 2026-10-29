@@ -301,6 +301,12 @@ def st16_dominance_rule(src: str | None = None):
 # line by line. Each rule must match exactly one code line (comments and strings ignored).
 LRL_RULES = {
     "TR average": r"^float\s+lrlTra\s+=\s+ta\.sma\(ta\.tr\(true\), LRL_TRA_LEN\)\s*$",
+    # history buffers: the clean-line scan reads high / low over an LRL's span (LRL_SPAN), and
+    # bar_index drawings (historical LRL polylines) are converted through `time` (v0.5.1-dev
+    # runtime error: "historical offset (1231) is beyond the historical buffer's limit (1230)")
+    "high history 5000": r"^max_bars_back\(high, 5000\)\s*$",
+    "low history 5000": r"^max_bars_back\(low, 5000\)\s*$",
+    "time history 5000 (bar_index drawings)": r"^max_bars_back\(time, 5000\)\s*$",
     "left window high": r"^float\s+lrlHiL\s+=\s+ta\.highest\(high, LRL_L\)\s*$",
     "left window low": r"^float\s+lrlLoL\s+=\s+ta\.lowest\(low, LRL_L\)\s*$",
     "right window high": r"^float\s+lrlHiR\s+=\s+ta\.highest\(high, LRL_R\)\s*$",
