@@ -4,6 +4,7 @@ Hand-labelled cases that the reference model must reproduce exactly. One JSON fi
 per case:
 * `synthetic/` holds small cases built by hand to pin one rule.
 * `nq/` holds real NQ examples labelled from TradingView. It is empty for now.
+* `human/` holds human / reference CISD candidates digitised from the user's screenshots (pixel units). The provenance, the audit and the context / outcome metadata are in `human/README.md`.
 
 Every case also runs with all invariants checked.
 

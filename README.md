@@ -11,6 +11,8 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 | `docs/LRL.md` | LRL detection (diagonal failure-swing liquidity), DEF-LRL1…9 (approved) and its Pine implementation (§6). The research behind it is in `docs/STUDY_LRL.md`. |
 | `docs/HTF_FVG.md` | HTF Fair Value Gaps (15m · 30m · 1H · 4H · 1D · 1W), DEF-B0…B6 (approved 2026-10-29, decisions D1–D10), timing, seeds, reload consistency, parity capture. Design history: `docs/HTF_FVG_DESIGN.md`. |
 | `docs/CISD.md` | CISD (change in state of delivery), DEF-CISD1…9: CISD-R approved 2026-10-30, explicit UNKNOWN start, identity side + origin time, events, record facts, 200-bar display guard (not part of the definition), validation T1–T18, and the Pine implementation (§5: incremental, no leg-length limit, capture). |
+| `docs/AUDIT_CISD_HUMAN.md` | CISD human / reference audit (2026-10-30): the user's screenshots and the reference video against CISD-R. 2 exact matches, 0 mismatches, keep CISD-R; visual differences only. |
+| `docs/IFVG_REQUIREMENTS.md` | IFVG research requirements (no rule decided): observations from the references, the questions for a future study, and an audit of the FVG identity already stored for inversion tracking. |
 | `docs/TESTS_CISD.md` | CISD tests: automated S-CISD, TradingView CISD-L00…L12 (L10 = Pine ↔ oracle parity, L11 = the user's golden cases: the freeze criteria). |
 | `docs/STUDY_CISD.md` | CISD research (A–N): five candidate definitions, real NQ vs random walk, the recommendation CISD-R (approved), decisions D-C1…D-C12. |
 | `docs/TESTS_HTF.md` | HTF FVG tests: automated S-HTF, TradingView HTF-L00…L14 (L12 = Pine ↔ oracle parity, the freeze criterion). |

@@ -1,4 +1,4 @@
-"""Golden dataset: every case in golden/synthetic and golden/nq must reproduce exactly."""
+"""Golden dataset: every case in golden/synthetic, golden/nq and golden/human must reproduce exactly."""
 import pytest
 
 from validation import stats

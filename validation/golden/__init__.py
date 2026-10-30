@@ -18,7 +18,7 @@ FIELDS_EVENT = ("bar", "type", "dir", "price", "sid_bar")
 
 def load_cases() -> list[tuple[Path, dict]]:
     out = []
-    for sub in ("synthetic", "nq"):
+    for sub in ("synthetic", "nq", "human"):
         for p in sorted((GOLDEN_DIR / sub).glob("*.json")):
             out.append((p, json.loads(p.read_text(encoding="utf-8"))))
     return out

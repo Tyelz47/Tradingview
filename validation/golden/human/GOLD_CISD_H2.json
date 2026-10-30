@@ -1,0 +1,113 @@
+{
+ "source": "human-screenshot",
+ "symbol": "unknown (no price axis)",
+ "timeframe_sec": 60,
+ "timezone": "America/New_York",
+ "tick_size": 1.0,
+ "start": "2026-10-30T09:30",
+ "settings": {
+  "modules": [
+   "cisd"
+  ]
+ },
+ "id": "GOLD_CISD_H2",
+ "description": "Human golden candidate H2 (img/H2_bearish_cisd_4h_fvg.png: a trader's bearish CISD inside a 4H FVG, short position). Candles digitised: price = 1000 - pixel row. The trader's CISD line is at the OPEN of the first candle of the up-close series (bar 10, row 183) that made the highest up-close high; the highest high overall (bar 8's wick) is a down-close candle and is not used. Confirmed by the close of bar 12 below the line; the trade is entered at bar 13's open. CISD-R reproduces origin, L and the confirming bar.",
+ "candles": [
+  [
+   750,
+   764,
+   741,
+   745
+  ],
+  [
+   742,
+   754,
+   738,
+   740
+  ],
+  [
+   749,
+   765,
+   743,
+   743
+  ],
+  [
+   747,
+   750,
+   726,
+   750
+  ],
+  [
+   750,
+   756,
+   746,
+   756
+  ],
+  [
+   756,
+   775,
+   756,
+   775
+  ],
+  [
+   778,
+   785,
+   747,
+   753
+  ],
+  [
+   756,
+   929,
+   756,
+   929
+  ],
+  [
+   923,
+   1000,
+   877,
+   897
+  ],
+  [
+   889,
+   947,
+   793,
+   819
+  ],
+  [
+   817,
+   972,
+   801,
+   916
+  ],
+  [
+   916,
+   980,
+   916,
+   957
+  ],
+  [
+   953,
+   958,
+   748,
+   800
+  ],
+  [
+   800,
+   814,
+   667,
+   721
+  ]
+ ],
+ "expected": {
+  "events": [
+   {
+    "bar": 12,
+    "type": "CISD_CONFIRMED",
+    "dir": -1,
+    "price": 817.0,
+    "sid_bar": 10
+   }
+  ],
+  "events_match": "subset"
+ }
+}

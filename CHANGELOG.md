@@ -1,5 +1,36 @@
 # Changelog
 
+## CISD human / reference audit — validation 1.13.1 (2026-10-30, branch `cisd/pine`) — no indicator change, no definition change
+
+**User (2026-10-30):** audit the supplied CISD screenshots, the product reference and the video against CISD-R, without changing it.
+* Classify each example.
+* Report the visual differences separately.
+* Treat outcomes as metadata.
+* Write an IFVG requirements note (research only).
+* Audit FVG identity for inversion tracking.
+* Do not change Pine.
+
+**DELIVERABLE**
+* `docs/AUDIT_CISD_HUMAN.md` (A–G).
+* `docs/IFVG_REQUIREMENTS.md`.
+* `validation/golden/human/`: the 4 screenshots, a README with the classification and the context / outcome metadata, and two golden cases digitised from the screenshots (pixel units).
+
+**RESULT**
+* **H1 (product) and H2 (trader): EXACT MATCH.** Origin candle, L (0 px) and confirming bar (0 bars).
+* **H3, H4 and the two video examples: NOT ENOUGH INFORMATION.** The resolution is too low or the low is out of the frame; they are consistent where readable.
+* **No mismatch.** The human lines reject the last-candle anchor (H1: 117 px and 4 bars off; H2: 99 px off) and, in H2, the any-candle extreme (61 px and 1 bar off).
+* **Video:** the CISD and the IFVG appear by the close of the confirming bar, not while it forms.
+* **Visual differences only:**
+  * the references extend the line 4–8 bars past the confirmation;
+  * they put the label above the line at its right end.
+* **Recommendation: KEEP CISD-R.**
+
+**Validation 1.13.1:** the golden runner also loads `golden/human/` (GOLD_CISD_H1, GOLD_CISD_H2: CISD-R reproduces both, every invariant checked).
+
+**TEST:**
+* QUICK: **PASS**, exit 0, 262.1 s, **746 passed, 1 skipped**; golden 8/8 (2 new); static 20/20; every other section unchanged.
+* `src/IST.pine` unchanged.
+
 ## v0.7.0-dev — CISD in Pine (2026-10-30, branch `cisd/pine`) — EXPERIMENTAL, not frozen · validation 1.13.0
 
 **User (2026-10-30):** the CISD-R oracle is approved; implement CISD in Pine without changing the definition.

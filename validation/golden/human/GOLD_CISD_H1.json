@@ -1,0 +1,191 @@
+{
+ "source": "human-screenshot",
+ "symbol": "unknown (no price axis)",
+ "timeframe_sec": 60,
+ "timezone": "America/New_York",
+ "tick_size": 1.0,
+ "start": "2026-10-30T09:30",
+ "settings": {
+  "modules": [
+   "cisd"
+  ]
+ },
+ "id": "GOLD_CISD_H1",
+ "description": "Human / reference golden candidate H1 (img/H1_product_ifvg_cisd.png, the 'Live IFVG & CISD detection' product image). Candles digitised from the screenshot: price = 1000 - pixel row (1 unit = 1 px; no price axis, so no ticks). The drawn bullish CISD line starts at the OPEN of the first candle of the 4-candle down-close series (bar 18, row 180) and is confirmed by the close of bar 26 above it; bar 24's wick through the line does not confirm; bar 22's lower wick (an up-close candle) undercuts the delivery low and is ignored. CISD-R reproduces origin, L and the confirming bar.",
+ "candles": [
+  [
+   903,
+   960,
+   898,
+   936
+  ],
+  [
+   936,
+   953,
+   929,
+   947
+  ],
+  [
+   946,
+   953,
+   885,
+   890
+  ],
+  [
+   890,
+   898,
+   881,
+   898
+  ],
+  [
+   896,
+   907,
+   884,
+   890
+  ],
+  [
+   892,
+   937,
+   892,
+   937
+  ],
+  [
+   943,
+   946,
+   910,
+   916
+  ],
+  [
+   916,
+   951,
+   907,
+   910
+  ],
+  [
+   910,
+   913,
+   909,
+   913
+  ],
+  [
+   915,
+   921,
+   854,
+   880
+  ],
+  [
+   881,
+   888,
+   881,
+   888
+  ],
+  [
+   892,
+   913,
+   884,
+   885
+  ],
+  [
+   886,
+   888,
+   826,
+   836
+  ],
+  [
+   833,
+   857,
+   816,
+   829
+  ],
+  [
+   834,
+   851,
+   833,
+   834
+  ],
+  [
+   836,
+   848,
+   792,
+   798
+  ],
+  [
+   798,
+   810,
+   787,
+   810
+  ],
+  [
+   811,
+   836,
+   802,
+   822
+  ],
+  [
+   820,
+   821,
+   773,
+   773
+  ],
+  [
+   774,
+   777,
+   733,
+   747
+  ],
+  [
+   745,
+   755,
+   689,
+   699
+  ],
+  [
+   703,
+   708,
+   649,
+   657
+  ],
+  [
+   657,
+   753,
+   633,
+   736
+  ],
+  [
+   741,
+   809,
+   733,
+   806
+  ],
+  [
+   809,
+   836,
+   793,
+   801
+  ],
+  [
+   796,
+   811,
+   757,
+   769
+  ],
+  [
+   773,
+   833,
+   773,
+   832
+  ]
+ ],
+ "expected": {
+  "events": [
+   {
+    "bar": 26,
+    "type": "CISD_CONFIRMED",
+    "dir": 1,
+    "price": 820.0,
+    "sid_bar": 18
+   }
+  ],
+  "events_match": "subset"
+ }
+}
