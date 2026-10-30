@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.7.0-dev · LRL + HTF fair value gaps + CISD development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.7.1-dev · LRL + HTF fair value gaps + CISD development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -247,6 +247,7 @@ dbgCisdIns = input.int(0, "Inspect CISD (0 = current, 1 = previous, …)", minva
 // ════ CONSTANTS ════════════════════════════════════════════════════════════════
 
 CLR_NONE   = color.new(color.black, 100)
+IST_BUILD  = "v0.7.1-dev"                // the build, written into every parity capture (= the header; ST-12)
 TF_MS      = timeframe.in_seconds() * 1000
 EPS        = syminfo.mintick * 0.01    // float tolerance for tick comparisons
 HALF_TICK  = syminfo.mintick * 0.5
@@ -294,6 +295,7 @@ LRL_TRA_LEN  = 14                      // its own TR-average length (like LIQ_TR
 LRL_CANDS    = 25                      // DEF-LRL6 2-point candidates kept per side
 LRL_MEM      = 50                      // DEF-LRL6 LRL records kept per side
 LRL_SPAN     = 4900                    // Pine only: bars one LRL may span (high/low history kept 5000 bars)
+LRL_TRA_BUF  = 100                     // Pine only: closed bars of TR average kept for fits / seed (they read ≤ LRL_GAP + LRL_R back)
 LRL_DRIFT    = 1                       // terminal classes (DEF-LRL5); 0 = active
 LRL_SWEEP    = 2
 LRL_BREAK    = 3
@@ -770,7 +772,7 @@ int   swTime  = time[LIQ_R]
 
 // LRL references (DEF-LRL1, DEF-LRL2): own TR average and pivot windows (left 3 · right 2).
 // A clean-line check reads the highs over an LRL's whole span, so high and low keep
-// 5000 bars of history (LRL_SPAN); the TR average is read at most 2 × LRL_GAP bars back.
+// 5000 bars of history (LRL_SPAN); the TR average is read through lrlTraBuf below.
 float lrlTra  = ta.sma(ta.tr(true), LRL_TRA_LEN)
 float lrlHiL  = ta.highest(high, LRL_L)
 float lrlLoL  = ta.lowest(low, LRL_L)
@@ -780,14 +782,32 @@ int   lrlX    = bar_index - LRL_R    // LRL swing bar X, judged when bar X + 2 c
 int   lrlXT   = time[LRL_R]
 max_bars_back(high, 5000)
 max_bars_back(low, 5000)
-max_bars_back(lrlTra, 100)
 // Drawings at bar_index coordinates are converted through the `time` series internally:
 // historical LRL drawings (pivots up to LRL_SPAN bars back) need its history too.
 max_bars_back(time, 5000)
 
-// CISD (DEF-CISD6): its own TR average, for the confirmation body / TR metadata only (read at [1]:
-// the 14 bars before the confirming bar). The CISD engine reads no other history.
-float cisdTra = ta.sma(ta.tr(true), CISD_TRA_LEN)
+// The TR average of every closed bar, recorded HERE, at global scope (v0.7.1-dev fix). A history
+// read of a user series inside a function or method (lrlTra[n]) reads that call's own history, not
+// the bars: a method that does not run on every bar gets a value from an earlier call (the real
+// capture of 2026-10-30 showed τ taken from the wrong bar). fits / seed read the anchor's value here.
+var array<float> lrlTraBuf = array.new<float>()
+if barstate.isconfirmed
+    lrlTraBuf.push(lrlTra)
+    if lrlTraBuf.size() > LRL_TRA_BUF
+        lrlTraBuf.shift()
+
+// The TR average at closed bar x (within LRL_TRA_BUF bars), or na.
+f_lrlTraAt(int x) =>
+    int   k = bar_index - x
+    float v = na
+    if k >= 0 and k < lrlTraBuf.size()
+        v := lrlTraBuf.get(lrlTraBuf.size() - 1 - k)
+    v
+
+// CISD (DEF-CISD6): its own TR average, for the confirmation body / TR metadata only: the 14 bars
+// before the confirming bar, read here, on every bar (not inside confirmCisd: see lrlTraBuf).
+float cisdTra    = ta.sma(ta.tr(true), CISD_TRA_LEN)
+float cisdTraPrv = cisdTra[1]
 
 // The single gate between "observe" and "change state" (ARCHITECTURE §5).
 bool engineTick = not confirmedOnly or barstate.isconfirmed
@@ -1411,7 +1431,7 @@ method fits(LrlSide s, array<int> xs, array<float> ps, float tau) =>
     float sl = (pb - p0) / (xb - x0)
     bool  ok = xb - xa <= LRL_GAP and pb < pa - EQ_TOL - EPS and bar_index - x0 <= LRL_SPAN
     if ok
-        float tra  = lrlTra[bar_index - xa]
+        float tra  = f_lrlTraAt(xa)
         float pull = s.loS(xa + 1)
         if xb - 1 >= xa + 2
             for j = xa + 2 to xb - 1
@@ -1585,7 +1605,7 @@ method seed(LrlSide s, int X, int XT, float P) =>
         for i = 0 to n - 1
             int xa = s.pivX.get(i)
             if not s.members.includes(xa) and not s.spent.includes(xa) and X - xa <= LRL_GAP
-                float tra = lrlTra[bar_index - xa]
+                float tra = f_lrlTraAt(xa)
                 if not na(tra)
                     float tau = math.max(EQ_TOL, LRL_TOL_K * tra)
                     if s.fits(array.from(xa, X), array.from(s.pivP.get(i), P), tau)
@@ -1819,7 +1839,7 @@ method confirmCisd(CisdBook b, CisdSide s, CisdSide op) =>
         if j >= origin
             leg := s.wLow.get(i)
             break
-    float tr1 = cisdTra[1]
+    float tr1 = cisdTraPrv
     float bk  = na(tr1) or tr1 == 0 ? na : s.sign * (close - open) / tr1
     Cisd r = Cisd.new(s.sign, s.dOrgT.first(), b.state, s.sign * s.dL.first(), origin, eb, s.dTime.first(), s.sign * s.dLow.first(), s.sign * leg, s.known, bar_index, time, close, bk)
     if b.recs.size() > 0
@@ -2903,7 +2923,7 @@ var int capDone = 0
 bool capBar   = capOn and barstate.isconfirmed and bar_index > last_bar_index - capTotal and capDone < capTotal
 if capBar
     if capDone == 0
-        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|cisd=" + (cisdOn ? "1" : "0") + "|cisdmem=" + str.tostring(CISD_MEM) + "|cisdtra=" + str.tostring(CISD_TRA_LEN) + "|cisdguard=" + str.tostring(CISD_GUARD) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+        log.info("CAPTURE|build=" + IST_BUILD + "|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|cisd=" + (cisdOn ? "1" : "0") + "|cisdmem=" + str.tostring(CISD_MEM) + "|cisdtra=" + str.tostring(CISD_TRA_LEN) + "|cisdguard=" + str.tostring(CISD_GUARD) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
         // HTF snapshot after this first captured bar: per active timeframe the last completed
         // HTF bars and the whole registry, which the oracle restores and replays (§10 (c)).
         for s in htfTfs

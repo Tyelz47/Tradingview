@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.7.1-dev — history reads moved out of functions: CISD bk and LRL τ / separation (2026-10-30, branch `cisd/pine`) — EXPERIMENTAL, not frozen · validation 1.14.0
+
+**User (2026-10-30):** the first valid real capture of v0.7.0-dev showed CISD differences on `bk` only and real LRL divergence (τ, boundaries, events, ends, candidate counts).
+* Find the root cause first.
+* Do not change CISD-R or the LRL definition.
+* Fix only the wrong side, add a regression test, run FULL and re-run the capture.
+
+**ROOT CAUSE** (one Pine construct, three lines). Pine keeps a separate history **per call** of a user function or method. A history read of a user series inside a function that does not run on every bar returns the value of an earlier CALL, not of the earlier BAR.
+* **CISD**, `float tr1 = cisdTra[1]` in `confirmCisd`:
+  * there are two call sites, one per side, so `[1]` = the TR average at the previous same-side confirmation;
+  * the first reproducible divergence is 2026-10-29 22:16 BEAR, where Pine used 14.607143 (22:05's value) and the oracle 14.75 (22:15, the bar before);
+  * emulating that reproduces **80 of 80** of Pine's bk values; the intended value matches 1 of 83.
+* **LRL**, `lrlTra[bar_index - xa]` in `seed` (τ) and `fits` (separation):
+  * the first divergence is the LRL LOW anchored 2026-10-29 23:33, confirmed at 23:59: Pine τ 5.88392857 = 0.5 × 11.767857, a TR average from an earlier bar (23:20), where the oracle has 0.5 × 14.446429, the TR average at the anchor;
+  * none of Pine's τ is the anchor's;
+  * with Pine's logged τ injected, the oracle's LRL differences fall **330 → 70**. The rest sit where the same wrong read decided the separation check (an extension at 03:31, a candidate at 12:21).
+* Phase 1, Phase 2 and HTF FVG have no such read (`f_htfPack` runs on every bar of its request): 0 differences in the capture.
+* The oracle was right in both cases; the definitions are unchanged.
+
+**CHANGE (`src/IST.pine`)**
+* `float cisdTraPrv = cisdTra[1]` at global scope; `confirmCisd` uses it.
+* The LRL TR average of every closed bar is recorded at global scope (`lrlTraBuf`, 100 bars; `LRL_TRA_BUF`). `fits` / `seed` read the anchor's value with `f_lrlTraAt(xa)`. `max_bars_back(lrlTra, 100)` is removed (unused).
+* `IST_BUILD = "v0.7.1-dev"`, written into the CAPTURE line (`build=`).
+* No other line is changed.
+
+**WHY:** to make Pine compute what the approved definitions say. The CISD metadata is the TR average of the 14 bars before the confirmation (DEF-CISD6); τ = max(EQ tolerance, 0.5 × TR average at the anchor) (DEF-LRL2).
+
+**PHASE 1 IMPACT:** none (ST-15). **REPAINT IMPACT:** none.
+
+**Validation 1.14.0**
+* **ST-21:** no history read of a user series inside a function or method (allowed: `f_htfPack`). It catches both defects.
+* **ST-12:** also checks `IST_BUILD`.
+* **ST-17 / ST-20:** the new lines are pinned; the CISD engine now reads no history at all.
+* **Mutations:** the call-history read (CISD and LRL), the TR average of the confirming bar itself, and recording only on pivots are all caught.
+* **`tests/test_parity_cisd.py`:** a capture with v0.7.0-dev's bk is flagged on bk alone.
+* **The real capture is kept as evidence** (`parity/evidence/ist-v0.7.0-dev_mnq-1m_capture-1000_2026-10-30.csv`, SHA256). `tests/test_parity_v070_evidence.py` pins the diagnosis: other modules exact, CISD differences bk-only and 80/80 reproduced, LRL 330 → 70.
+* **The parity report names the capture's build.** A capture from another build is reported as unable to show the current Pine. The observed-capture test is skipped, never passed, with the reason "a NEW TradingView capture is required".
+
+**TEST:**
+* FULL: **PASS**, exit 0, 505.5 s, **767 passed, 2 skipped**:
+  * static 21/21 (ST-21 new);
+  * LRL 85/85;
+  * CISD 157/157;
+  * parity 116/118;
+  * the 2 skips are the previous one and the observed-capture test, which skips on a v0.7.0-dev capture with the reason given;
+  * Phase 1 / 2 and HTF sections unchanged.
+* The saved v0.7.0-dev capture still differs, as it must: it is v0.7.0-dev's output.
+* **A NEW TradingView Pine Logs capture with v0.7.1-dev is required** (CISD-L10, LRL-L11).
+
 ## CISD human / reference audit — validation 1.13.1 (2026-10-30, branch `cisd/pine`) — no indicator change, no definition change
 
 **User (2026-10-30):** audit the supplied CISD screenshots, the product reference and the video against CISD-R, without changing it.

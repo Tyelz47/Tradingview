@@ -3,6 +3,7 @@
 CISD_* events with their audit text) and the comparison, on synthetic captures written from a
 run over the WHOLE history (what Pine knows when it logs), cut to the last N + warm-up bars: the
 window starts with an established delivery state."""
+from dataclasses import replace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -35,10 +36,13 @@ def _i(x, off):
     return "na" if x is None else str(x + off)
 
 
-def pine_capture(cs, n, off=10_000, memory=50, cisd=True) -> list[str]:
-    """The Pine Logs messages for the last n + warm-up bars. Bar indices are shifted by `off`."""
+def pine_capture(cs, n, off=10_000, memory=50, cisd=True, call_history_bk=False) -> list[str]:
+    """The Pine Logs messages for the last n + warm-up bars. Bar indices are shifted by `off`.
+    `call_history_bk`: write bk as IST v0.7.0-dev did (the TR average read inside confirmCisd,
+    i.e. at the previous same-side confirmation bar, the previous call of that call site)."""
     from validation.parity import oracle_series
     a = len(cs) - (n + W)
+    prev_conf = {}
     series = oracle_series(cs, S, IstModel(S))
     main = {}
     for e in IstModel(S).run(cs).events:
@@ -51,6 +55,13 @@ def pine_capture(cs, n, off=10_000, memory=50, cisd=True) -> list[str]:
         log.at(t, c.time)
         m.step(t, c)
         new = log.events[k:]
+        if call_history_bk:
+            for i, e in enumerate(new):
+                if e.type == "CISD_CONFIRMED":
+                    j, prev_conf[e.dir] = prev_conf.get(e.dir), t
+                    vals = [m.tr.get(x) for x in range(j - 13, j + 1)] if j is not None else [None]
+                    bk = None if None in vals else e.dir * (c.close - c.open) / (sum(vals) / 14)
+                    new[i] = replace(e, meta=e.meta.rsplit("bk=", 1)[0] + "bk=" + _n(bk))
         if t < a:
             continue
         if t == a and cisd:
@@ -163,6 +174,17 @@ ERRORS = {
 def test_each_error_kind_is_detected(nq_lines, kind):
     r = _cmp(ERRORS[kind](nq_lines))
     assert _diffs(r), kind
+
+
+def test_v070_call_history_body_tr_is_detected():
+    """Regression of the IST v0.7.0-dev defect (real capture 2026-10-30): bk computed from the TR
+    average at the previous same-side confirmation instead of the bar before the confirming bar.
+    Every CISD after the warm-up is flagged on bk alone; the faithful capture stays exact."""
+    cs = nq_candles()
+    r = _cmp(pine_capture(cs, 300, call_history_bk=True))
+    d = _diffs(r)
+    assert len(d) >= 10 and all(x.rsplit(": ", 1)[1].startswith("bk Pine") for x in d)
+    assert not _diffs(_cmp(pine_capture(cs, 300)))
 
 
 def test_settings_differ_when_pine_ran_other_constants(nq_lines):

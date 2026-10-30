@@ -225,6 +225,8 @@ Developer: Inspect CISD (0 = current).
 
 **Warm-up and stabilisation.** CISD needs no capture warm-up (the snapshot carries its state). On a chart, detection runs from the first loaded bar (UNKNOWN). The 200-bar guard only hides drawings and alerts; the reload measurements are in §3.
 
+**v0.7.1-dev fix.** The body / TR metadata reads the previous bar's TR average at global scope (`cisdTraPrv = cisdTra[1]`, every bar). In v0.7.0-dev, `cisdTra[1]` inside `confirmCisd` gave the previous same-side confirmation's value (Pine keeps a history per call of a function); only `bk` was affected, never a CISD (real capture 2026-10-30; ST-21).
+
 **Pine-specific compromises.**
 * State in objects (a Pine function cannot assign a global).
 * A `runtime.error` for the impossible double confirmation.

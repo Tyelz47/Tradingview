@@ -149,7 +149,8 @@ MUTATIONS = {
         "    while s.dBar.size() > 0 and s.dBar.first() < a\n",
         "    while s.dBar.size() > 0 and (s.dBar.first() < a or bar_index - s.dBar.first() > 500)\n"),
     "15b a history buffer on the engine": (
-        "float cisdTra = ta.sma(ta.tr(true), CISD_TRA_LEN)\n", "float cisdTra = ta.sma(ta.tr(true), CISD_TRA_LEN)\nmax_bars_back(cisdTra, 500)\n"),
+        "float cisdTra    = ta.sma(ta.tr(true), CISD_TRA_LEN)\n",
+        "float cisdTra    = ta.sma(ta.tr(true), CISD_TRA_LEN)\nmax_bars_back(cisdTra, 500)\n"),
     "15c re-reading old bars": ("    float lo = s.sign > 0 ? low : -high\n", "    float lo = s.sign > 0 ? low[1] : -high\n"),
     "the active CISD dropped by memory": ("        Cisd old = b.recs.shift()\n", "        Cisd old = b.recs.pop()\n"),
     "memory 60": ("CISD_MEM     = 50 ", "CISD_MEM     = 60 "),
@@ -160,6 +161,11 @@ MUTATIONS = {
     "drawing before the guard": ("        if cur.cBar >= CISD_GUARD\n", "        if true\n"),
     "alert ON regardless of the guard": (
         "EV_CISD_CONFIRMED => cisdAlert and e.eventBar >= CISD_GUARD", "EV_CISD_CONFIRMED => cisdAlert"),
+    # v0.7.1-dev (real capture 2026-10-30): read inside the method, [1] is the previous CALL of that
+    # call site (the previous same-side CISD), not the previous bar
+    "bk: TR average read inside confirmCisd (call history, v0.7.0-dev)": (
+        "    float tr1 = cisdTraPrv\n", "    float tr1 = cisdTra[1]\n"),
+    "bk: TR average of the confirming bar itself": ("float cisdTraPrv = cisdTra[1]\n", "float cisdTraPrv = cisdTra\n"),
 }
 
 

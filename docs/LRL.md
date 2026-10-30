@@ -144,6 +144,8 @@
 
 ## 6 · Pine implementation (IST v0.5.3-dev)
 
+**v0.7.1-dev fix (real capture 2026-10-30).** IST v0.5.0-dev … v0.7.0-dev read the TR average inside `seed` / `fits` (`lrlTra[bar_index - xa]`). Inside a function that does not run on every bar, Pine returns the value of an earlier CALL, not the earlier bar, so τ and the separation check used wrong TR averages (the first divergence: the LRL LOW anchored 2026-10-29 23:33, τ 5.88 instead of 7.22; with Pine's logged τ injected the oracle loses 260 of the 330 differences). v0.7.1-dev records the TR average of every closed bar at global scope (`lrlTraBuf`) and reads the anchor's value from it (`f_lrlTraAt`); ST-21 forbids the construct. The definition is unchanged. **LRL-L11 needs a new capture with v0.7.1-dev.**
+
 **Layers:**
 * **L1:** `lrlTra`, its own SMA(TR, 14), and the 3 / 2 pivot windows. `max_bars_back` 5000 on high and low (the clean-line scan), 5000 on `time` (bar_index drawings are converted through `time`; historical LRL drawings reach up to `LRL_SPAN` bars back), 100 on `lrlTra`. ST-17 pins all of them.
 * **L2:** `lrlPivH` / `lrlPivL` (DEF-LRL1).

@@ -240,8 +240,10 @@ def st11_liquidity_alerts_default_off():
 def st12_version_consistent():
     head = re.search(r"\(IST\) · (v[\w.\-]+)", "\n".join(source()[:5]))
     log = re.search(r"^## (v[\w.\-]+)", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
-    ok = bool(head and log and head.group(1) == log.group(1))
-    return ok, f"IST.pine header {head and head.group(1)} vs CHANGELOG top {log and log.group(1)}"
+    build = re.search(r'^IST_BUILD\s*=\s*"(v[\w.\-]+)"', "\n".join(source()), re.M)
+    ok = bool(head and log and build and head.group(1) == log.group(1) == build.group(1))
+    return ok, (f"IST.pine header {head and head.group(1)} vs CHANGELOG top {log and log.group(1)} vs capture build "
+                f"IST_BUILD {build and build.group(1)}")
 
 
 def st13_oracle_defaults_match_pine():
@@ -327,6 +329,12 @@ def st16_dominance_rule(src: str | None = None):
 # line by line. Each rule must match exactly one code line (comments and strings ignored).
 LRL_RULES = {
     "TR average": r"^float\s+lrlTra\s+=\s+ta\.sma\(ta\.tr\(true\), LRL_TRA_LEN\)\s*$",
+    # v0.7.1-dev: the TR average of every closed bar is recorded at global scope; fits / seed read
+    # the anchor's value from it (a history read inside a method reads the call history: ST-21)
+    "TR average recorded every closed bar": r"^if barstate\.isconfirmed\n    lrlTraBuf\.push\(lrlTra\)\s*$",
+    "TR average at bar x": r"^\s+v := lrlTraBuf\.get\(lrlTraBuf\.size\(\) - 1 - k\)\s*$",
+    "separation: TR average at the earlier point": r"^\s+float\s+tra\s+=\s+f_lrlTraAt\(xa\)\n\s+float\s+pull\s+=",
+    "tau: TR average at the anchor": r"^\s+float\s+tra\s+=\s+f_lrlTraAt\(xa\)\n\s+if not na\(tra\)\n\s+float\s+tau\s+=",
     # history buffers: the clean-line scan reads high / low over an LRL's span (LRL_SPAN), and
     # bar_index drawings (historical LRL polylines) are converted through `time` (v0.5.1-dev
     # runtime error: "historical offset (1231) is beyond the historical buffer's limit (1230)")
@@ -476,7 +484,8 @@ CISD_RULES = {
         r"^\s+Cisd r = Cisd\.new\(s\.sign, s\.dOrgT\.first\(\), b\.state, s\.sign \* s\.dL\.first\(\), origin, eb, "
         r"s\.dTime\.first\(\), s\.sign \* s\.dLow\.first\(\), s\.sign \* leg, s\.known, bar_index, time, close, bk\)\s*$",
     "leg extreme: every low from the origin": r"^\s+if j >= origin\s*$",
-    "body / TR before the bar": r"^\s+float\s+tr1\s+=\s+cisdTra\[1\]\s*$",
+    "body / TR before the bar (read every bar, at global scope)":
+        r"^float\s+cisdTraPrv\s+=\s+cisdTra\[1\]\s*$(?:.|\n)*^\s+float\s+tr1\s+=\s+cisdTraPrv\s*$",
     "the previous CISD ends": r"^\s+prv\.endBar := bar_index\s*$",
     "flip: the state becomes the CISD's side": r"^\s+b\.state\s+:= s\.sign\s*$",
     "flip: the opposite leg starts at this leg's delivery extreme": r"^\s+op\.pruneCisd\(eb\)\s*$",
@@ -516,9 +525,9 @@ def _cisd_blocks(lines: list[str]) -> list[str]:
 
 def st20_cisd_rules(src: str | None = None):
     """DEF-CISD1…CISD9 in IST.pine: the approved constants (= CisdSettings), every rule line,
-    the per-bar order, no history read beyond the metadata's [1] and no number but 0 / 1 in the
-    engine (no leg-length limit, no truncation), the 200-bar guard and the display inputs
-    outside detection, side in the identity."""
+    the per-bar order, no history read and no number but 0 / 1 in the engine (no leg-length
+    limit, no truncation; the metadata's previous-bar TR average is read at global scope), the
+    200-bar guard and the display inputs outside detection, side in the identity."""
     from validation.models.types import CisdSettings
     raw = src.splitlines() if src is not None else list(source())
     lines = [code(ln) for ln in raw]
@@ -534,7 +543,7 @@ def st20_cisd_rules(src: str | None = None):
         if None in at or at != sorted(at) or len(set(at)) != len(at):
             bad.append("order " + " → ".join(seq))
     engine = "\n".join(_cisd_blocks(raw))
-    hist = [h for h in re.findall(r"\w+\[[^\]]*\]", engine) if h != "cisdTra[1]"]
+    hist = re.findall(r"\w+\[[^\]]*\]", engine)
     nums = sorted({n for n in re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", engine) if float(n) not in (0, 1)})
     if not engine or hist or nums or "max_bars_back" in engine:
         bad.append(f"engine reads history {hist or ''} / numbers {nums or ''}: a leg-length limit or truncation")
@@ -546,6 +555,35 @@ def st20_cisd_rules(src: str | None = None):
         bad.append(f"guard / display / alert input read by detection: lines {leaks}")
     return not bad, (f"{len(CISD_RULES)} rules, {len(CISD_CONSTANTS)} constants, {len(CISD_ORDER)} orders, no history / "
                      f"limit, guard and display outside detection; wrong or missing: {bad or 'none'}")
+
+
+# Functions that run on every bar of their context, so a history read inside them is a bar
+# history: f_htfPack is the expression of each HTF request.security (DEF-B0).
+EVERY_BAR_FUNCTIONS = {"f_htfPack"}
+SERIES_BUILTINS = {"open", "high", "low", "close", "time", "time_close", "volume", "hl2", "hlc3", "ohlc4", "bar_index"}
+
+
+def st21_no_history_in_functions(src: str | None = None):
+    """No history read of a user-defined series inside a user function or method (v0.7.1-dev,
+    real capture 2026-10-30). Pine keeps a separate history per call of a function: a function
+    that does not run on every bar (the CISD confirmation, the LRL seed / fit checks) gets the
+    value of an earlier CALL, not of the earlier BAR. Read the value at global scope (every bar)
+    or keep it in a per-bar array. Built-in series (high, low, …) are exempt: their reads inside
+    methods match the oracle on real captures (LRL points, liquidity)."""
+    lines = src.splitlines() if src is not None else list(source())
+    hits, fn = [], None
+    for i, ln in enumerate(lines):
+        m = re.match(r"^(?:method\s+)?(\w+)\(.*\)\s*=>", ln)
+        if m:
+            fn = m.group(1)
+        elif ln and not ln[0].isspace() and not ln.startswith("//"):
+            fn = None
+        if fn is None or fn in EVERY_BAR_FUNCTIONS or not ln[:1].isspace():
+            continue
+        for name, idx in re.findall(r"\b(\w+)\[([^\]]+)\]", code(ln)):
+            if name not in SERIES_BUILTINS and not re.match(r"^\s*(?:var\s+)?array", code(ln)):
+                hits.append(f"line {i + 1}: {fn}: {name}[{idx}]")
+    return not hits, f"history reads of user series inside functions / methods: {hits or 'none'}"
 
 
 def st18_no_overloaded_functions(src: str | None = None):
@@ -581,4 +619,6 @@ CHECKS = [
     ("ST-19", "DEF-B0…B6 HTF FVG: approved constants, timing and definition lines, per-bar order", st19_htf_rules),
     ("ST-20", "DEF-CISD1…CISD9 CISD-R: approved rules and constants, per-bar order, no leg-length limit, "
               "guard and display outside detection", st20_cisd_rules),
+    ("ST-21", "No history read of a user series inside a function or method (Pine call history ≠ bar history)",
+     st21_no_history_in_functions),
 ]

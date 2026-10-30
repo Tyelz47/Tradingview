@@ -18,7 +18,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from validation import VALIDATION_DIR
+from validation import PINE_SOURCE, VALIDATION_DIR
 from validation.models.cisd import Cisd, CisdEngine, CisdStack
 from validation.models.events import LRL_TERMINAL, EventLog
 from validation.models.htf_fvg import NAMES, HtfBar, HtfEngine, HtfFvg
@@ -354,6 +354,12 @@ def parse(text: str) -> dict:
 
 # ── comparison ─────────────────────────────────────────────────────────────────
 
+def pine_build() -> str | None:
+    """The build in src/IST.pine's header (the build a new capture would carry)."""
+    m = re.search(r"\(IST\) · (v[\w.\-]+)", "\n".join(PINE_SOURCE.read_text(encoding="utf-8").splitlines()[:5]))
+    return m.group(1) if m else None
+
+
 def settings_of(h: dict) -> tuple[Settings, bool]:
     """The oracle's settings from the CAPTURE line, and whether the session windows are
     plain HHMM-HHMM (anything else is not modelled)."""
@@ -385,6 +391,11 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     if h["liq"] != "1":
         raise ValueError("the capture was made with the liquidity engine OFF: turn it on and capture again")
     s, ses_ok = settings_of(h)
+    cap_build, cur_build = h.get("build"), pine_build()      # build= since v0.7.1-dev
+    if cap_build != cur_build:
+        notes.append(f"this capture was written by IST {cap_build or 'v0.7.0-dev or earlier (no build= in its CAPTURE line)'}; "
+                     f"src/IST.pine is now {cur_build}: the comparison checks the oracle against that older Pine output, "
+                     f"it cannot show the current Pine. Take a new capture with {cur_build}")
     if name in PRESETS:
         for key, got, want in zip(("left", "right", "k", "W"), (s.liq.left, s.liq.right, s.liq.k, s.liq.dom),
                                   PRESETS[name]):
@@ -511,6 +522,7 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     sym = re.search(r'"symbol"\s*:\s*"([^"]+)"', h.get("sym", ""))       # extended tickerid: a JSON object
     cnt = Counter(c["status"] for c in checks)
     return {"status": "COMPARED", "mode": "BOUNDED PINE-LOG BAR-BY-BAR PARITY", "checks": checks, "counts": cnt,
+            "capture_build": cap_build, "current_build": cur_build,
             "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars), "lrl": lrl, "htf": htf, "cisd": cisd,
             "compared_bars": max(0, len(bars) - max(w_fvg, w_liq)), "warmup": max(w_fvg, w_liq),
             "series": sum(1 for k in FIELDS.values() if compared[k]),
@@ -930,7 +942,7 @@ def verdict(r: dict) -> str:
 def show(r: dict, build: str) -> None:
     print("BOUNDED PINE-LOG BAR-BY-BAR PARITY — the bars and events IST logged, replayed by the oracle.")
     print("Only the captured window is covered; this is NOT full CSV bar-by-bar parity.\n")
-    print(f"  {r['symbol']} · IST {build} · {r['about']}")
+    print(f"  {r['symbol']} · capture by IST {r.get('capture_build') or 'v0.7.0-dev or earlier'} · src/IST.pine {build} · {r['about']}")
     print(f"  input: {r.get('file', '—')} · {r['source']}")
     print(f"  window {r['window']} · {r['bars']} bars · first {r['warmup']} = warm-up (never compared)")
     for n in r["notes"]:

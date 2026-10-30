@@ -4,6 +4,8 @@
 
 **Build:** `src/IST.pine` v0.5.3-dev (branch `lrl/pine`). v0.5.3-dev draws one straight line per LRL (user, 2026-10-29); no polyline.
 
+**v0.7.1-dev:** IST v0.5.0-dev … v0.7.0-dev read the TR average inside `seed` / `fits` (`lrlTra[bar_index - xa]`). Inside a function that does not run on every bar, Pine returns the value of an earlier CALL, not the earlier bar, so τ and the separation check used wrong TR averages (the first divergence: the LRL LOW anchored 2026-10-29 23:33, τ 5.88 instead of 7.22; with Pine's logged τ injected the oracle loses 260 of the 330 differences). v0.7.1-dev records the TR average of every closed bar at global scope (`lrlTraBuf`) and reads the anchor's value from it (`f_lrlTraAt`); ST-21 forbids the construct. The definition is unchanged. **LRL-L11 needs a new capture with v0.7.1-dev.**
+
 **History:** v0.5.0-dev LRL-L00 **FAIL** (user, 2026-10-28): CE10182, an overloaded `advance` (FVG + LRL). Fixed in v0.5.1-dev (LRL method renamed `advanceLrl`; ST-18).
 * v0.5.1-dev: LRL-L00 compile **PASS** (user, 2026-10-29).
 * v0.5.1-dev runtime with **Show historical LRL ON: FAIL** (user): "Error on bar 11241: The requested historical offset (1231) is beyond the historical buffer's limit (1230)" in `f_lrlDraw` (bar_index polyline). The `time` series' history was too short for historical bar_index drawings.

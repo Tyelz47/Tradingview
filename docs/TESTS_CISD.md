@@ -5,7 +5,9 @@
 * TradingView: every CISD-L test is **PENDING**. They are recorded only from the user's results, never assumed.
 * CISD is frozen only after **CISD-L10** (real Pine ↔ oracle capture parity) gives **0 DIFFERENCE** and the user's labelled golden cases (**CISD-L11**) agree.
 
-**Build:** `src/IST.pine` v0.7.0-dev (branch `cisd/pine`). Definition: `docs/CISD.md` (CISD-R, approved 2026-10-30). Not yet compiled on TradingView.
+**Build:** `src/IST.pine` v0.7.1-dev (branch `cisd/pine`). Definition: `docs/CISD.md` (CISD-R, approved 2026-10-30).
+
+**First real capture (v0.7.0-dev, 2026-10-30, `validation/parity/evidence/ist-v0.7.0-dev_mnq-1m_capture-1000_2026-10-30.csv`):** v0.7.0-dev compiled and ran. Every CISD agreed with the oracle (side, id, time, L, previous state, close, extreme, its time). Only the metadata bk differed: `cisdTra[1]`, read inside `confirmCisd`, returned the TR average of the previous same-side confirmation (the previous call of that call site), not of the bar before the confirming bar (80 of 80 reproduced). v0.7.1-dev reads it at global scope (`cisdTraPrv`); ST-21. **CISD-L10 needs a new capture with v0.7.1-dev.**
 
 ## Automated (before TradingView)
 

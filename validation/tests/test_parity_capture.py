@@ -17,7 +17,7 @@ from validation import PINE_SOURCE, stats
 from validation.candles import random_walk
 from validation.models.ist import IstModel
 from validation.models.types import PRESETS, Settings
-from validation.parity import CAPTURE_V043, CAPTURE_V044, EVIDENCE, capture, manual, oracle_series
+from validation.parity import CAPTURE_V043, CAPTURE_V044, CAPTURE_V070, EVIDENCE, capture, manual, oracle_series
 from validation.parity.__main__ import main
 
 pytestmark = [pytest.mark.common, pytest.mark.section("parity")]
@@ -401,7 +401,7 @@ def test_v044_capture_parity_c1_frozen_baseline():
 def test_evidence_captures_are_unchanged():
     """The evidence files are byte-identical to the hashes recorded at the freeze."""
     sums = dict(reversed(ln.split(" *", 1)) for ln in (EVIDENCE / "SHA256SUMS.txt").read_text().splitlines() if ln)
-    assert set(sums) == {CAPTURE_V043.name, CAPTURE_V044.name}
+    assert set(sums) == {CAPTURE_V043.name, CAPTURE_V044.name, CAPTURE_V070.name}
     for name, digest in sums.items():
         assert hashlib.sha256((EVIDENCE / name).read_bytes()).hexdigest() == digest, name
 
@@ -411,4 +411,8 @@ def test_capture_observed_tradingview_data():
     stats.RESULTS["capture_parity"] = result
     if result["status"] == "NO OBSERVED DATA":
         pytest.skip(f"bounded Pine-Log parity is PENDING: {result['reason']}")
+    if result["capture_build"] != result["current_build"]:
+        pytest.skip(f"the latest capture ({result['file']}) was written by IST {result['capture_build'] or 'v0.7.0-dev or earlier'}, "
+                    f"src/IST.pine is {result['current_build']}: a NEW TradingView capture is required "
+                    f"({result['differences']} differences against the older Pine output)")
     assert result["differences"] == 0, _diffs(result)

@@ -38,6 +38,13 @@ MUTATIONS = {
     "judged on its confirmation bar": ("        if r.born < t\n", "        if r.born <= t\n"),
     "no clean-line check": ("if s.hiS(j) > p0 + sl * (j - x0) + tau + EPS", "if false"),
     "chord from the first two points": ("float sl = (pb - p0) / (xb - x0)", "float sl = (ps.get(1) - p0) / (xs.get(1) - x0)"),
+    # v0.7.1-dev (real capture 2026-10-30): a history read inside a method reads the call history
+    "τ: TR average read inside seed (call history, v0.5–v0.7.0)": (
+        "                float tra = f_lrlTraAt(xa)", "                float tra = lrlTra[bar_index - xa]"),
+    "separation: TR average read inside fits (call history)": (
+        "        float tra  = f_lrlTraAt(xa)", "        float tra  = lrlTra[bar_index - xa]"),
+    "TR average recorded only when a pivot forms": ("if barstate.isconfirmed\n    lrlTraBuf.push(lrlTra)",
+                                                    "if barstate.isconfirmed and lrlPivH\n    lrlTraBuf.push(lrlTra)"),
     "expiry one bar later": ("else if t > r.xs.last() + LRL_GAP + LRL_R", "else if t > r.xs.last() + LRL_GAP + LRL_R + 1"),
     "time history buffer removed": ("max_bars_back(time, 5000)\n", ""),
     "time history buffer too short": ("max_bars_back(time, 5000)", "max_bars_back(time, 1000)"),
