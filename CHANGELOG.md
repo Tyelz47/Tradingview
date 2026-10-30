@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.6.2-dev — HTF FVG palette for a `#C2BAAE` chart background (2026-10-30, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.10.1
+
+**User (2026-10-30):** the chart background is `#C2BAAE` and the HTF FVGs were still too hidden. The fix is a darker, neutral grey-brown palette, with no green / red. The hierarchy is kept: 15m / 30m lightest, 1H / 4H medium, 1D / 1W most visible.
+
+**CHANGE** (`src/IST.pine`, styling only: [view] constants and one renderer call, `f_htfBox`):
+
+| constant | v0.6.1-dev | v0.6.2-dev |
+|---|---|---|
+| `HTF_TXT_COL` | `color.new(chart.fg_color, 35)` | `color.new(#4F473F, 0)` |
+| `HTF_FILL_1` (new, 15m / 30m) | `color.new(HTF_COL, 94)` | `color.new(#6F665B, 88)` |
+| `HTF_FILL_2` (new, 1H / 4H) | `color.new(HTF_COL, 91)` | `color.new(#655D54, 84)` |
+| `HTF_FILL_3` (new, 1D / 1W) | `color.new(HTF_COL, 88)` | `color.new(#5A534B, 80)` |
+| `HTF_BORDER_1` (new, 15m / 30m) | `color.new(HTF_COL, 85)` | `color.new(#6A6157, 35)` |
+| `HTF_BORDER_2` (new, 1H / 4H) | `color.new(HTF_COL, 70)` | `color.new(#5E564D, 20)` |
+| `HTF_BORDER_3` (new, 1D / 1W) | `color.new(HTF_COL, 55)` | `color.new(#4F473F, 10)` |
+| `HTF_COL` | `#9598A1` | removed (no longer used) |
+
+* `f_htfBox` picks the fill and border by tier, where it computed them from `HTF_COL` before.
+
+**Unchanged:**
+* the 1 px border;
+* the label bottom-right, `HTF_TXT_SIZE` = `size.small`, the full text `15m Fair Value Gap` …;
+* no object added;
+* the LRL style (v0.6.1-dev);
+* no detection, state, event, oracle or lifecycle change.
+
+**Validation:** no logic test changed. `tests/test_htf_pine.py::test_renderer_rules` pinned the old style (`HTF_COL`); it now pins the new constants:
+* fill transparency 88 / 84 / 80;
+* border transparency 35 / 20 / 10;
+* the text `#4F473F` opaque.
+
+**TEST:**
+* QUICK: **PASS**, exit 0, **527 passed, 1 skipped**; static 19/19.
+* TradingView: the visual check on the `#C2BAAE` chart (HTF-L04) is pending.
+
 ## v0.6.1-dev — visual readability pass: HTF FVG labels, LRL line (2026-10-30, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.10.1
 
 **TradingView (user, 2026-10-30):** v0.6.0-dev compiles and runs. The visual direction is confirmed:

@@ -1,8 +1,8 @@
-# IST · HTF FVG tests — v0.6.1-dev (EXPERIMENTAL)
+# IST · HTF FVG tests — v0.6.2-dev (EXPERIMENTAL)
 
 **Status.** Automated validation: see `CHANGELOG.md`. TradingView: every HTF-L test **PENDING**. They are recorded only from the user's results, never assumed. HTF FVG is frozen only after **HTF-L12** (real Pine ↔ oracle parity) gives **0 DIFFERENCE**.
 
-**Build:** `src/IST.pine` v0.6.1-dev (branch `lrl/pine`). Definition: `docs/HTF_FVG.md`. v0.6.0-dev compiles and runs on TradingView (user, 2026-10-30; HTF-L00 for v0.6.0-dev); v0.6.1-dev changes styling only (label size and colour, LRL line colour).
+**Build:** `src/IST.pine` v0.6.2-dev (branch `lrl/pine`). Definition: `docs/HTF_FVG.md`. v0.6.0-dev compiles and runs on TradingView (user, 2026-10-30; HTF-L00 for v0.6.0-dev); v0.6.1-dev and v0.6.2-dev change styling only (label size and colour, LRL line colour; v0.6.2-dev: the grey-brown HTF palette).
 
 ## Automated (before TradingView)
 
@@ -20,7 +20,7 @@
 
 ## TradingView procedure (NQ1! 1m unless stated; Confirmed only ON)
 
-Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.6.1-dev, save it, and add it to an NQ1! 1m chart. Debug mode rows 42–44 show the HTF engine, its registries and the drawn boxes.
+Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.6.2-dev, save it, and add it to an NQ1! 1m chart. Debug mode rows 42–44 show the HTF engine, its registries and the drawn boxes.
 
 | id | test | how | expected |
 |---|---|---|---|

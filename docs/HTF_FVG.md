@@ -15,7 +15,7 @@
 | D4 | The frozen Phase 1 FVG definition and thresholds (DEF-A1, DEF-A2), on each timeframe's own candles and TR average |
 | D5 | Invalidation only by a close of the zone's OWN timeframe. A 1m close never invalidates a 4H / 1D / 1W zone |
 | D6 | Per timeframe, the nearest open zone above and the nearest open zone below price: at most 12 boxes. Logical memory is independent |
-| D7 | Neutral grey. The hierarchy is fill and border opacity only: 15m / 30m light, 1H / 4H medium, 1D / 1W strongest |
+| D7 | Neutral colours (grey-brown since v0.6.2-dev, user 2026-10-30, for the `#C2BAAE` chart background; no green / red). The hierarchy is fill and border strength only: 15m / 30m light, 1H / 4H medium, 1D / 1W strongest |
 | D8 | The box's visual origin is HTF candle 1, but the zone is neither visible nor logically active before candle 3 closes |
 | D9 | Phase 1 `Show FVGs` default OFF (display only), recorded in `validation/baselines/PHASE1_DEVIATIONS.md` |
 | D10 | Label `15m Fair Value Gap` … `1W Fair Value Gap`; `15m FVG` only as a Developer option |
@@ -78,8 +78,8 @@ On every chart bar from the known bar on, for every zone not invalidated, on the
 * Shown: zones not fully filled and not invalidated (untouched or partially filled).
 * Per timeframe, the nearest shown zone **above** and **below** the last close (above / below by the zone's midpoint; distance from the close to its near edge, 0 inside; ties → the newest). At most 2 per timeframe, ≤ 12 boxes.
 * Drawn 1W first and 15m last, so a nested lower-timeframe zone stays visible over its parent. Nothing is merged or hidden.
-* Box: from candle 1's open to the current bar + right offset (`xloc.bar_time`); fill and border grey `#9598A1`, fill transparency 94 / 91 / 88 and border transparency 85 / 70 / 55 for 15m–30m / 1H–4H / 1D–1W.
-* Label: the box text, bottom-right inside the zone, `size.small`, neutral grey = the chart's text colour at 35 % transparency (`chart.fg_color`: darker on a light chart, lighter on a dark one; v0.6.1-dev, user readability pass): `15m Fair Value Gap` … `1W Fair Value Gap` (Developer: `15m FVG`).
+* Box: from candle 1's open to the current bar + right offset (`xloc.bar_time`); for 15m–30m / 1H–4H / 1D–1W: fill `#6F665B` 88 / `#655D54` 84 / `#5A534B` 80 and 1 px border `#6A6157` 35 / `#5E564D` 20 / `#4F473F` 10 (colour, transparency %; user palette v0.6.2-dev).
+* Label: the box text, bottom-right inside the zone, `size.small`, `#4F473F` opaque (v0.6.2-dev, user palette): `15m Fair Value Gap` … `1W Fair Value Gap` (Developer: `15m FVG`).
 * Rebuilt from state on the last bar only. The per-timeframe switches and "Show HTF FVGs" are **[view]**: every active timeframe is always computed.
 
 ## DEF-B6 · Memory

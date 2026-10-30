@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.6.1-dev · LRL + HTF fair value gaps development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.6.2-dev · LRL + HTF fair value gaps development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -312,8 +312,15 @@ EV_HTF_CE      = 28
 EV_HTF_FULL    = 29
 EV_HTF_INVAL   = 30
 EV_HTF_DROPPED = 31
-HTF_COL      = #9598A1                 // [view] neutral grey (D7): the timeframe hierarchy is opacity only
-HTF_TXT_COL  = color.new(chart.fg_color, 35)   // [view] the timeframe label (box text): neutral grey from the chart's text colour, readable on light and dark charts (v0.6.1-dev)
+// [view] HTF FVG palette (user, 2026-10-30): dark grey-brown for the #C2BAAE chart background,
+// neutral (no green / red); the timeframe hierarchy is fill and border strength only (D7).
+HTF_FILL_1   = color.new(#6F665B, 88)  // [view] fill · 15m / 30m (lightest)
+HTF_FILL_2   = color.new(#655D54, 84)  // [view] fill · 1H / 4H
+HTF_FILL_3   = color.new(#5A534B, 80)  // [view] fill · 1D / 1W (most visible)
+HTF_BORDER_1 = color.new(#6A6157, 35)  // [view] 1 px border · 15m / 30m
+HTF_BORDER_2 = color.new(#5E564D, 20)  // [view] 1 px border · 1H / 4H
+HTF_BORDER_3 = color.new(#4F473F, 10)  // [view] 1 px border · 1D / 1W
+HTF_TXT_COL  = color.new(#4F473F, 0)   // [view] the timeframe label (box text)
 HTF_TXT_SIZE = size.small              // [view] the timeframe label's size (v0.6.0-dev: tiny)
 
 f_lineStyle(LnStyle s) =>
@@ -2012,7 +2019,7 @@ f_htfOn(string tf) =>
 f_htfBox(HtfTf s, HtfZone r) =>
     int    tier = s.tf == "15" or s.tf == "30" ? 0 : s.tf == "60" or s.tf == "240" ? 1 : 2
     string txt  = htfLabels ? s.name + (htfCompact ? " FVG" : " Fair Value Gap") : ""
-    htfBoxes.push(box.new(r.c1, r.top, rightT, r.bottom, xloc = xloc.bar_time, bgcolor = color.new(HTF_COL, 94 - 3 * tier), border_color = color.new(HTF_COL, 85 - 15 * tier), border_width = 1, text = txt, text_size = HTF_TXT_SIZE, text_color = HTF_TXT_COL, text_halign = text.align_right, text_valign = text.align_bottom))
+    htfBoxes.push(box.new(r.c1, r.top, rightT, r.bottom, xloc = xloc.bar_time, bgcolor = tier == 0 ? HTF_FILL_1 : tier == 1 ? HTF_FILL_2 : HTF_FILL_3, border_color = tier == 0 ? HTF_BORDER_1 : tier == 1 ? HTF_BORDER_2 : HTF_BORDER_3, border_width = 1, text = txt, text_size = HTF_TXT_SIZE, text_color = HTF_TXT_COL, text_halign = text.align_right, text_valign = text.align_bottom))
     true
 
 // Above / below by the zone's midpoint; distance from the close to its near edge (0 inside).

@@ -93,12 +93,17 @@ def test_renderer_rules():
     box = _between("f_htfBox(HtfTf s, HtfZone r) =>", "f_htfRender(HtfTf s) =>")
     assert box.count("box.new(") == 1 and "box.new(r.c1, r.top, rightT, r.bottom, xloc = xloc.bar_time" in box
     assert "text_halign = text.align_right, text_valign = text.align_bottom" in box and "text_size = HTF_TXT_SIZE" in box
-    # v0.6.1-dev readability pass (user, 2026-10-30): one step larger, the chart's text colour at 35 %
+    # readability (user, 2026-10-30): one step larger (v0.6.1-dev), dark grey-brown, opaque (v0.6.2-dev)
     assert re.search(r"^HTF_TXT_SIZE = size\.small\b", SRC, re.M)
-    assert re.search(r"^HTF_TXT_COL  = color\.new\(chart\.fg_color, 35\)", SRC, re.M)
+    assert re.search(r"^HTF_TXT_COL  = color\.new\(#4F473F, 0\)", SRC, re.M)
     assert "border_width = 1" in box
     assert 's.name + (htfCompact ? " FVG" : " Fair Value Gap")' in box
-    assert "HTF_COL      = #9598A1" in SRC and "color.new(HTF_COL, 94 - 3 * tier)" in box
+    # user palette 2026-10-30 (chart background #C2BAAE): per-tier fill and border, stronger for higher timeframes
+    assert "bgcolor = tier == 0 ? HTF_FILL_1 : tier == 1 ? HTF_FILL_2 : HTF_FILL_3" in box
+    assert "border_color = tier == 0 ? HTF_BORDER_1 : tier == 1 ? HTF_BORDER_2 : HTF_BORDER_3" in box
+    fill = [int(t) for t in re.findall(r"^HTF_FILL_[123]\s+= color\.new\(#[0-9A-F]{6}, (\d+)\)", SRC, re.M)]
+    edge = [int(t) for t in re.findall(r"^HTF_BORDER_[123] = color\.new\(#[0-9A-F]{6}, (\d+)\)", SRC, re.M)]
+    assert fill == [88, 84, 80] and edge == [35, 20, 10]          # each tier less transparent than the one below
     run = _between("// HTF FVG (DEF-B5): rebuilt from state", "// ════ L7 · ALERTS")
     assert "for i = htfTfs.size() - 1 to 0" in run
     assert "var array<HtfTf> htfTfs = array.from(h15, h30, h60, h240, hD, hW)" in SRC
