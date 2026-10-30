@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.6.2-dev · LRL + HTF fair value gaps development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.7.0-dev · LRL + HTF fair value gaps + CISD development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -12,6 +12,8 @@
 //                  v0.4.4-dev (tag PHASE2_BASELINE_v0.4.4-dev); LRL is additive.
 //                  HTF FVG: fair value gaps of the 15m / 30m / 1H / 4H / 1D / 1W
 //                  candles (DEF-B0…B6 → docs/HTF_FVG.md); additive, Module B.
+//                  CISD: change in state of delivery, detection only (CISD-R,
+//                  DEF-CISD1…CISD9 → docs/CISD.md); additive, reads bars only.
 //  Layers          L1 market data / time   L2 detection   L3 state management
 //                  L4 context / filtering  L5 event bus   L6 renderer
 //                  L7 alerts / diagnostics
@@ -83,6 +85,7 @@ G_LIQV = "LIQUIDITY · DISPLAY"
 G_EQ   = "EQH / EQL"
 G_LRL  = "LRL · DIAGONAL LIQUIDITY"
 G_HTF  = "HTF FAIR VALUE GAPS"
+G_CISD = "CISD · CHANGE IN STATE OF DELIVERY"
 
 TT_CONF = "[calc] ON: every state change is evaluated once, at bar close. Realtime output is identical to the historical chart after reload.\nOFF (live): wick milestones update intrabar. Creation and invalidation still wait for the close."
 TT_MIN  = "[view] Hides secondary visuals: CE lines, FVG labels, faded FVGs, session boxes and midpoints, taken liquidity levels and liquidity labels."
@@ -107,6 +110,8 @@ TT_LRL  = "[calc] LRL = a diagonal line through three or more successive failure
 TT_LRLS = "[view] The nearest active LRL per side: one thin straight line from its first to its latest failure swing (the intermediate swings lie within τ of it), the same line dashed to the right while it is active, and a small LRL label. When a later swing extends the LRL, the line is redrawn first → new latest from that bar on."
 TT_LRLH = "[view] Also draw ended LRLs (the last 10 per side), faded; the projection ends on the bar where the LRL ended."
 TT_LRLM = "[view] Where an ended LRL finished: D drift (the high crossed the projected boundary but not the boundary projected on the previous bar) · S sweep · B break (closed beyond the boundary) · E expired. Needs Show historical LRL."
+TT_CISD  = "[calc] CISD = change in state of delivery (docs/CISD.md, CISD-R; no tuning inputs). Bullish: the level L is the OPEN of the first candle of the down-close series that delivered price into the lowest down-close low of the current down leg (only down-close candles count; a doji ends a series; an equal low moves L to the later series). The CISD is the first close strictly above L (a wick, or a close exactly at L, is not; any candle colour). Bearish is the exact mirror. The state of delivery starts UNKNOWN, and bullish and bearish CISDs then strictly alternate. Decided at bar close. OFF: nothing is computed; every other module's output is the same either way."
+TT_CISDS = "[view] The current CISD only: a short 1 px line at L, from the first candle of the delivery series to the confirming candle, and a small CISD label. A CISD confirmed in the first 200 loaded bars is never drawn (chart-start guard; it is still part of the logical state)."
 TT_HTF  = "[view] Fair value gaps of the 15m, 30m, 1H, 4H, 1D and 1W candles (docs/HTF_FVG.md). Every timeframe above the chart timeframe is always computed; these switches only show or hide. Per timeframe: the nearest open zone above and below price. A zone exists from the first chart bar after its third HTF candle closed (no repaint); its box starts at its first HTF candle. Phase 1 FVG definition and thresholds; invalidated only by a close of its own timeframe; no longer drawn once fully filled."
 
 confirmedOnly = input.bool(true, "Confirmed only", tooltip = TT_CONF, group = G_GEN, display = display.none)
@@ -210,6 +215,11 @@ htfOnD    = input.bool(true, "1D", inline = "h2", group = G_HTF, display = displ
 htfOnW    = input.bool(true, "1W", inline = "h2", group = G_HTF, display = display.none)
 htfLabels = input.bool(true, "Show timeframe labels", tooltip = "[view] The timeframe written in the bottom-right corner of every HTF zone: \"15m Fair Value Gap\" … \"1W Fair Value Gap\".", group = G_HTF, display = display.none)
 
+cisdOn    = input.bool(true, "Enable CISD engine", tooltip = TT_CISD, group = G_CISD, display = display.none)
+cisdShow  = input.bool(true, "Show CISD", tooltip = TT_CISDS, group = G_CISD, display = display.none)
+cisdPrev  = input.bool(false, "Show previous CISD (faded)", tooltip = "[view] Also the CISD before the current one, faded. Same 200-bar guard.", group = G_CISD, display = display.none)
+cisdAlert = input.bool(false, "CISD alerts", tooltip = "[alert] One alert per CISD_CONFIRMED, at the close of the confirming bar. Never during the first 200 loaded bars. OFF by default.", group = G_CISD, display = display.none)
+
 alTiming  = input.enum(AlertTiming.barClose, "Timing", tooltip = TT_ALT, group = G_ALR, display = display.none)
 alBullNew = input.bool(true, "FVG created · bull", inline = "a1", group = G_ALR, display = display.none)
 alBearNew = input.bool(true, "bear", inline = "a1", group = G_ALR, display = display.none)
@@ -232,6 +242,7 @@ capN       = input.int(300, "Capture last N closed bars", minval = 50, maxval = 
 dbgLrlIns  = input.int(0, "Inspect LRL (0 = newest, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
 dbgLrlCand = input.bool(false, "Draw LRL candidates (2 points, debug only)", tooltip = "[view] Debug mode only: dotted segments for the internal 2-point candidates. A candidate is never an LRL: it has no event and is not drawn otherwise.", group = G_DBG, display = display.none)
 htfCompact = input.bool(false, "Compact HTF labels (15m FVG)", tooltip = "[view] \"15m FVG\" instead of \"15m Fair Value Gap\". The timeframe is always written.", group = G_DBG, display = display.none)
+dbgCisdIns = input.int(0, "Inspect CISD (0 = current, 1 = previous, …)", minval = 0, group = G_DBG, display = display.none)
 
 // ════ CONSTANTS ════════════════════════════════════════════════════════════════
 
@@ -322,6 +333,15 @@ HTF_BORDER_2 = color.new(#5E564D, 20)  // [view] 1 px border · 1H / 4H
 HTF_BORDER_3 = color.new(#4F473F, 10)  // [view] 1 px border · 1D / 1W
 HTF_TXT_COL  = color.new(#4F473F, 0)   // [view] the timeframe label (box text)
 HTF_TXT_SIZE = size.small              // [view] the timeframe label's size (v0.6.0-dev: tiny)
+// CISD (DEF-CISD1…CISD9 → docs/CISD.md, CISD-R approved 2026-10-30). The definition has no parameter:
+// these are bookkeeping constants. There is no leg-length limit anywhere (no history read beyond [1]).
+CISD_MEM     = 50                      // DEF-CISD7 records kept (both sides); the oldest ENDED one goes first
+CISD_TRA_LEN = 14                      // TR average of the body / TR metadata only: no decision reads it
+CISD_GUARD   = 200                     // [view] DEF-CISD9: no drawing or alert for a CISD confirmed before this bar index (not DEF-CISD)
+EV_CISD_CONFIRMED = 32                 // CISD: dir +1 bullish / −1 bearish · sid = origin candle time; identity = side + origin time
+EV_CISD_DROPPED   = 33
+CISD_COL     = color.new(#4F473F, 0)   // [view] the CISD line and label (the HTF label tone, for the #C2BAAE background)
+CISD_PREV_T  = 60                      // [view] transparency of the previous CISD (Show previous CISD)
 
 f_lineStyle(LnStyle s) =>
     switch s
@@ -596,6 +616,62 @@ type HtfTf
     int           seeded = 0
     int           dropped = 0
 
+// L3 · one confirmed CISD (DEF-CISD6). Identity = side + origin time: `id` alone is not unique
+// across sides by contract. Prices are real prices; every field but the facts and the end is final
+// at the confirmation.
+type Cisd
+    int   side          // +1 bullish · −1 bearish
+    int   id            // open time of the origin candle (the first candle of the delivery series)
+    int   before        // delivery state before it: 0 UNKNOWN (first CISD) or −side; after it: side
+    float level         // L = the origin candle's open
+    int   origin        // origin bar: the line starts here
+    int   extBar        // the delivery extreme that selected the series
+    int   extTime
+    float ext           // its low (bullish) / high (bearish)
+    float legExt        // the leg extreme from the origin to the confirmation, any candle (leg-break fact)
+    int   known         // bar at whose close the reference was (re)selected
+    int   cBar          // confirmation bar
+    int   cTime
+    float cClose
+    float bodyK         // side × (close − open) / TR average before the bar: metadata only (future displacement module)
+    int   endBar        // the opposite CISD's bar: ACTIVE → ENDED
+    int   retest        // record facts, from the bar after the confirmation while ACTIVE, stamped once
+    int   reclaim
+    int   broken
+
+// L3 · one side of the CISD engine, side coordinates (bullish: as is · bearish: open and close
+// negated, high ↔ −low), so one set of rules serves both sides. No bar is ever re-read: `d` holds
+// the suffix minima of the delivery lows in the leg window (bar ≥ a), so its first entry is the
+// window's delivery extreme (the latest on a tie) with its series; `w` the suffix minima of every
+// low, for the leg extreme. A window restart only drops entries before the new start.
+type CisdSide
+    int          sign
+    bool         armed = true   // may confirm: both sides while UNKNOWN, then only the side against the state
+    int          a = 0          // leg window start (bar)
+    int          since = -1     // confirmation only after this bar (the last flip)
+    int          known          // bar at whose close the reference was (re)selected
+    bool         inRun = false  // the current delivery series: start bar, time, open (side coordinates)
+    int          runBar
+    int          runTime
+    float        runL
+    array<int>   dBar           // delivery-low stack: bar, time, low, series start bar, its time, its open
+    array<int>   dTime
+    array<float> dLow
+    array<int>   dOrg
+    array<int>   dOrgT
+    array<float> dL
+    array<int>   wBar           // every-low stack: bar, low
+    array<float> wLow
+    int          peak = 0       // the largest stack so far (resources)
+
+// L3 · the CISD engine's own state (a function cannot assign a global): delivery state, records
+// (both sides, confirmation order; only the newest can be ACTIVE) and counters.
+type CisdBook
+    int         state = 0       // 0 UNKNOWN · +1 UP (after a bullish CISD) · −1 DOWN (after a bearish CISD)
+    array<Cisd> recs
+    int         confirmed = 0
+    int         dropped = 0
+
 // ════ STATE ════════════════════════════════════════════════════════════════════
 
 // L3 · logical state
@@ -641,6 +717,13 @@ var HtfTf hW   = HtfTf.new(tf = "W", name = "1W", active = timeframe.in_seconds(
 var array<HtfTf> htfTfs = array.from(h15, h30, h60, h240, hD, hW)
 // L6 · HTF view, rebuilt on the last bar (dropping these never touches logical state)
 var array<box>      htfBoxes = array.new<box>()
+// L3 · CISD (DEF-CISD1…CISD9): bullish side (sign +1) and bearish side (sign −1)
+var CisdSide cisdUp   = CisdSide.new(sign = 1, dBar = array.new<int>(), dTime = array.new<int>(), dLow = array.new<float>(), dOrg = array.new<int>(), dOrgT = array.new<int>(), dL = array.new<float>(), wBar = array.new<int>(), wLow = array.new<float>())
+var CisdSide cisdDn   = CisdSide.new(sign = -1, dBar = array.new<int>(), dTime = array.new<int>(), dLow = array.new<float>(), dOrg = array.new<int>(), dOrgT = array.new<int>(), dL = array.new<float>(), wBar = array.new<int>(), wLow = array.new<float>())
+var CisdBook cisdBook = CisdBook.new(recs = array.new<Cisd>())
+// L6 · CISD view, rebuilt on the last bar (dropping these never touches logical state)
+var array<line>  cisdLns  = array.new<line>()
+var array<label> cisdLbls = array.new<label>()
 // L1 · chart-side period trackers: anchors + source validation (DEF-G6)
 var float dHi     = na
 var int   dHiT    = na
@@ -701,6 +784,10 @@ max_bars_back(lrlTra, 100)
 // Drawings at bar_index coordinates are converted through the `time` series internally:
 // historical LRL drawings (pivots up to LRL_SPAN bars back) need its history too.
 max_bars_back(time, 5000)
+
+// CISD (DEF-CISD6): its own TR average, for the confirmation body / TR metadata only (read at [1]:
+// the 14 bars before the confirming bar). The CISD engine reads no other history.
+float cisdTra = ta.sma(ta.tr(true), CISD_TRA_LEN)
 
 // The single gate between "observe" and "change state" (ARCHITECTURE §5).
 bool engineTick = not confirmedOnly or barstate.isconfirmed
@@ -940,11 +1027,13 @@ f_evName(int k, int dir) =>
         EV_HTF_FULL    => "HTF_FVG_FULL_FILL"
         EV_HTF_INVAL   => "HTF_FVG_INVALIDATED"
         EV_HTF_DROPPED => "HTF_FVG_DROPPED_MEMORY"
+        EV_CISD_CONFIRMED => "CISD_CONFIRMED"
+        EV_CISD_DROPPED   => "CISD_DROPPED_MEMORY"
         => "UNKNOWN"
 
 f_evText(Event e) =>
     bool   isFvg = e.kind <= EV_FVG_DROPPED
-    isFvg := isFvg or e.kind >= EV_HTF_CREATED                              // HTF FVG: BULL / BEAR too
+    isFvg := isFvg or e.kind >= EV_HTF_CREATED                              // HTF FVG and CISD: BULL / BEAR too
     bool   isLiq = e.kind >= EV_LIQ_CREATED and e.kind <= EV_EQ_DROPPED   // LRL names carry no side: HIGH / LOW is added
     string d     = isLiq ? "" : e.dir > 0 ? (isFvg ? " BULL" : " HIGH") : e.dir < 0 ? (isFvg ? " BEAR" : " LOW") : ""
     string id    = e.kind == EV_LEVEL_SET ? "" : " id=" + f_tid(e.sid)
@@ -1624,6 +1713,139 @@ method stepHtf(HtfTf s) =>
         s.milestonesHtf()
     s
 
+// ── CISD (DEF-CISD1…CISD9 → docs/CISD.md; reference model validation/models/cisd.py) ──
+// Reads bars and its own TR average (metadata) only: it never reads or writes FVG, session,
+// level, BSL/SSL, EQ, LRL or HTF FVG state. Every decision is made at a bar's close. Incremental:
+// per bar each stack is updated in amortised O(1); a window restart drops stack entries only, so
+// a leg of any length is handled exactly (no bar is re-read, no history buffer is involved).
+f_cisdName(int d) =>
+    d > 0 ? "UP" : d < 0 ? "DOWN" : "UNKNOWN"
+
+// Audit text of CISD_CONFIRMED (parsed by the parity tool; = validation/models/cisd.py audit()).
+f_cisdTxt(Cisd r) =>
+    "prev=" + f_cisdName(r.before) + " · close=" + f_x(r.cClose) + " · ext=" + f_x(r.ext) + " · et=" + str.tostring(r.extTime) + " · bk=" + f_x(r.bodyK)
+
+// The identity of a CISD: side + origin time (approved 2026-10-30).
+f_cisdKey(Cisd r) =>
+    str.tostring(r.side) + ":" + str.tostring(r.id)
+
+// The leg window restarts at bar a: entries before it are dropped, nothing is recomputed.
+method pruneCisd(CisdSide s, int a) =>
+    s.a := a
+    while s.dBar.size() > 0 and s.dBar.first() < a
+        s.dBar.shift()
+        s.dTime.shift()
+        s.dLow.shift()
+        s.dOrg.shift()
+        s.dOrgT.shift()
+        s.dL.shift()
+    while s.wBar.size() > 0 and s.wBar.first() < a
+        s.wBar.shift()
+        s.wLow.shift()
+    s
+
+// DEF-CISD1…CISD3 on this bar, side coordinates: the every-low stack, then the delivery series
+// (a down-close candle for the bullish side; anything else, a doji included, ends it) and the
+// delivery-low stack. An equal low pops the older entry: the later candle wins the tie. A new
+// bottom = a new delivery extreme of the window: the reference L moved.
+method feedCisd(CisdSide s) =>
+    float o  = s.sign * open
+    float lo = s.sign > 0 ? low : -high
+    float cl = s.sign * close
+    while s.wBar.size() > 0 and lo <= s.wLow.last() + EPS
+        s.wBar.pop()
+        s.wLow.pop()
+    s.wBar.push(bar_index)
+    s.wLow.push(lo)
+    if cl < o - EPS
+        if not s.inRun
+            s.inRun   := true
+            s.runBar  := bar_index
+            s.runTime := time
+            s.runL    := o
+        while s.dBar.size() > 0 and lo <= s.dLow.last() + EPS
+            s.dBar.pop()
+            s.dTime.pop()
+            s.dLow.pop()
+            s.dOrg.pop()
+            s.dOrgT.pop()
+            s.dL.pop()
+        s.dBar.push(bar_index)
+        s.dTime.push(time)
+        s.dLow.push(lo)
+        s.dOrg.push(s.runBar)
+        s.dOrgT.push(s.runTime)
+        s.dL.push(s.runL)
+        if s.dBar.size() == 1
+            s.known := bar_index
+    else
+        s.inRun := false
+    s.peak := math.max(s.peak, s.dBar.size(), s.wBar.size())
+    s
+
+// DEF-CISD5: an armed side with a reference confirms on the first later close strictly beyond L
+// (any candle colour), after its series' first candle and after the last flip.
+method readyCisd(CisdSide s) =>
+    bool ok = false
+    if s.armed and s.dBar.size() > 0
+        ok := bar_index > s.dOrg.first() and bar_index > s.since and s.sign * close > s.dL.first() + EPS
+    ok
+
+// Record facts of the ACTIVE CISD, from the bar after its confirmation, each stamped once.
+method factsCisd(CisdBook b) =>
+    if b.recs.size() > 0
+        Cisd r = b.recs.last()
+        if na(r.endBar)
+            float lv = r.side * r.level
+            float lo = r.side > 0 ? low : -high
+            float cl = r.side * close
+            if na(r.retest) and lo <= lv + EPS
+                r.retest := bar_index
+            if na(r.reclaim) and cl <= lv + EPS
+                r.reclaim := bar_index
+            if na(r.broken) and cl < r.side * r.legExt - EPS
+                r.broken := bar_index
+    b
+
+// DEF-CISD4 / DEF-CISD7: side `s` confirms. The record, then the flip: the state becomes s's side,
+// the previous CISD ends, the opposite side's window restarts at this leg's delivery extreme and
+// this side's at the opposite side's extreme there (or this bar). Memory: the oldest record goes
+// (never the active one: it is the newest).
+method confirmCisd(CisdBook b, CisdSide s, CisdSide op) =>
+    int   origin = s.dOrg.first()
+    int   eb     = s.dBar.first()
+    float leg    = na
+    for [i, j] in s.wBar
+        if j >= origin
+            leg := s.wLow.get(i)
+            break
+    float tr1 = cisdTra[1]
+    float bk  = na(tr1) or tr1 == 0 ? na : s.sign * (close - open) / tr1
+    Cisd r = Cisd.new(s.sign, s.dOrgT.first(), b.state, s.sign * s.dL.first(), origin, eb, s.dTime.first(), s.sign * s.dLow.first(), s.sign * leg, s.known, bar_index, time, close, bk)
+    if b.recs.size() > 0
+        Cisd prv = b.recs.last()
+        if na(prv.endBar)
+            prv.endBar := bar_index
+    b.recs.push(r)
+    b.confirmed := b.confirmed + 1
+    b.state     := s.sign
+    op.pruneCisd(eb)
+    int na0 = bar_index                     // no opposite delivery candle since eb: this bar
+    if op.dBar.size() > 0
+        na0 := op.dBar.first()
+    s.pruneCisd(na0)
+    op.known := bar_index
+    s.known  := bar_index
+    s.armed  := false
+    op.armed := true
+    op.since := bar_index
+    f_emit(EV_CISD_CONFIRMED, r.side, r.id, r.origin, r.level, f_cisdTxt(r))
+    if b.recs.size() > CISD_MEM
+        Cisd old = b.recs.shift()
+        b.dropped := b.dropped + 1
+        f_emit(EV_CISD_DROPPED, old.side, old.id, old.origin, old.level, "ended record")
+    r
+
 // ════ L6 · RENDERER (functions: read state, write drawing handles only) ═════════
 
 int rightT = time + rightOffset * TF_MS   // where "extends to now" ends
@@ -2045,6 +2267,30 @@ f_htfRender(HtfTf s) =>
         f_htfBox(s, dn)
     true
 
+// ── CISD (DEF-CISD9, D-C8). Pure reads of L3; the only writes are to the renderer's own pool.
+//    One short 1 px line at L, from the origin candle to the confirming candle, and a small
+//    CISD label at its end. Times, not bar indices: an old origin needs no history buffer. ──
+f_cisdDraw(Cisd r, bool faded) =>
+    color  col = faded ? color.new(CISD_COL, CISD_PREV_T) : CISD_COL
+    string tip = (r.side > 0 ? "CISD ▲ bullish" : "CISD ▼ bearish") + " · L " + f_px(r.level) + " (open of " + f_tid(r.id) + ")\ndelivery extreme " + f_px(r.ext) + " " + f_tid(r.extTime) + " · confirmed " + f_tid(r.cTime) + " close " + f_px(r.cClose) + "\n" + (na(r.endBar) ? "ACTIVE" : "ENDED")
+    cisdLns.push(line.new(r.id, r.level, r.cTime, r.level, xloc = xloc.bar_time, color = col, style = line.style_solid, width = 1))
+    cisdLbls.push(label.new(r.cTime, r.level, "CISD", xloc = xloc.bar_time, style = r.side > 0 ? label.style_label_up : label.style_label_down, color = CLR_NONE, textcolor = col, size = size.tiny, tooltip = tip))
+    true
+
+// The current CISD (the newest record, always the ACTIVE one) and, with Show previous CISD, the
+// one before it. Never a CISD confirmed before bar CISD_GUARD: it stays logical state only.
+f_cisdRender() =>
+    int n = cisdBook.recs.size()
+    if n > 0
+        Cisd cur = cisdBook.recs.last()
+        if cur.cBar >= CISD_GUARD
+            f_cisdDraw(cur, false)
+        if cisdPrev and n > 1
+            Cisd prv = cisdBook.recs.get(n - 2)
+            if prv.cBar >= CISD_GUARD
+                f_cisdDraw(prv, true)
+    true
+
 // ════ ENGINE RUN · L1 → L2/L4 → L3 → L5 (fixed order) ══════════════════════════
 
 barEv.clear()
@@ -2187,6 +2433,28 @@ if engineTick
     for s in htfTfs
         s.stepHtf()
 
+    // ── CISD (DEF-CISD1…CISD9). Runs last and reads no Phase 1 / Phase 2 / LRL / HTF state: bars
+    //    and its own TR average (metadata) only. Decided at bar close in both modes: FACTS of the
+    //    active CISD, both sides' stacks, the state side's restart at the armed side's new extreme,
+    //    then the confirmation of the armed side (both while UNKNOWN; never both on one bar). ──
+    if cisdOn and barstate.isconfirmed
+        cisdBook.factsCisd()
+        cisdUp.feedCisd()
+        cisdDn.feedCisd()
+        if cisdBook.state != 0
+            CisdSide arm = cisdBook.state > 0 ? cisdDn : cisdUp
+            CisdSide sts = cisdBook.state > 0 ? cisdUp : cisdDn
+            if arm.dBar.size() > 0 and arm.dBar.first() == bar_index
+                sts.pruneCisd(bar_index)
+        bool upHit = cisdUp.readyCisd()
+        bool dnHit = cisdDn.readyCisd()
+        if upHit and dnHit
+            runtime.error("CISD: two confirmations on one bar, impossible by DEF-CISD4 (docs/CISD.md)")
+        if upHit
+            cisdBook.confirmCisd(cisdUp, cisdDn)
+        else if dnHit
+            cisdBook.confirmCisd(cisdDn, cisdUp)
+
 // ════ L6 · RENDERER (run) ══════════════════════════════════════════════════════
 
 // Levels: superseded instances freeze and join the capped visual history.
@@ -2294,6 +2562,18 @@ if barstate.islast
             if s.active and f_htfOn(s.tf)
                 f_htfRender(s)
 
+// CISD (DEF-CISD9): rebuilt from state on the last bar. Show CISD / Show previous CISD and the
+// 200-bar guard decide only what is drawn; the engine never reads them.
+if barstate.islast
+    for x in cisdLns
+        line.delete(x)
+    for x in cisdLbls
+        label.delete(x)
+    cisdLns.clear()
+    cisdLbls.clear()
+    if cisdOn and cisdShow
+        f_cisdRender()
+
 // ════ L7 · ALERTS ══════════════════════════════════════════════════════════════
 // Alert toggles filter delivery only; every event is logged regardless.
 
@@ -2308,6 +2588,7 @@ f_alertOn(Event e) =>
         EV_LIQ_SWEEP   => alLiqSwp
         EV_LIQ_BREAK   => alLiqBrk
         EV_EQ_TAKEN    => alEqTkn
+        EV_CISD_CONFIRMED => cisdAlert and e.eventBar >= CISD_GUARD   // DEF-CISD9: never in the first 200 loaded bars
         => false
 
 varip int    firedBar  = -1
@@ -2341,7 +2622,7 @@ if barstate.isrealtime and barEv.size() > 0
 
 // ════ L7 · DIAGNOSTICS (one table, no drawing objects) ═════════════════════════
 
-var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 45,bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
+var table dbgTbl  = dbgOn ? table.new(position.bottom_right, 2, 52,bgcolor = color.new(#131722, 10), frame_color = #363A45, frame_width = 1, border_width = 0) : na
 var table warnTbl = table.new(position.top_right, 1, 2)
 var int   dbgFirstT = time    // first loaded bar: where a replay of the history must start
 
@@ -2578,6 +2859,38 @@ f_htfState() =>
             out += (out == "" ? "" : "\n") + s.name + ": open " + str.tostring(op) + " (unfilled " + str.tostring(sh) + ") · records " + str.tostring(s.recs.size()) + "/" + str.tostring(HTF_MEM) + " · created " + str.tostring(s.created) + " · seeded " + str.tostring(s.seeded) + " · dropped " + str.tostring(s.dropped) + " · last HTF bar " + f_mt(s.lastT)
     out == "" ? "no timeframe above the chart's" : out
 
+// CISD per bar, for parity: a side's candidate L ("off" = not armed, "na" = armed, no reference yet).
+f_cisdCand(CisdSide s) =>
+    string out = "off"
+    if s.armed
+        out := s.dBar.size() > 0 ? f_cap(s.sign * s.dL.first()) : "na"
+    out
+
+// The ACTIVE CISD's identity (side:origin time), or na.
+f_cisdActive() =>
+    string out = "na"
+    if cisdBook.recs.size() > 0
+        Cisd r = cisdBook.recs.last()
+        if na(r.endBar)
+            out := f_cisdKey(r)
+    out
+
+// A side's two stacks for the parity snapshot, side coordinates: d = bar:time:low:origin bar:origin
+// time:L;… and w = bar:low;…, bottom first.
+f_cisdStacks(CisdSide s) =>
+    string d = ""
+    for [i, b] in s.dBar
+        d += (i == 0 ? "" : ";") + str.tostring(b) + ":" + str.tostring(s.dTime.get(i)) + ":" + f_cap(s.dLow.get(i)) + ":" + str.tostring(s.dOrg.get(i)) + ":" + str.tostring(s.dOrgT.get(i)) + ":" + f_cap(s.dL.get(i))
+    string w = ""
+    for [i, b] in s.wBar
+        w += (i == 0 ? "" : ";") + str.tostring(b) + ":" + f_cap(s.wLow.get(i))
+    "d=" + d + "|w=" + w
+
+// CISD debug: one side in one line (real prices).
+f_cisdSideState(CisdSide s) =>
+    string rf = s.dBar.size() == 0 ? "no reference" : "L " + f_px(s.sign * s.dL.first()) + " (series from " + f_mt(s.dOrgT.first()) + ") · delivery extreme " + f_px(s.sign * s.dLow.first()) + " " + f_mt(s.dTime.first())
+    (s.armed ? "ARMED" : "not armed") + " · " + rf + " · leg window from bar " + str.tostring(s.a) + " · stacks " + str.tostring(s.dBar.size()) + " / " + str.tostring(s.wBar.size()) + " (peak " + str.tostring(s.peak) + ")"
+
 // Warm-up = the dependency graph of the compared values: an FVG verdict at t needs
 // fvgLen true ranges ending at t − 2 (plus the close before them); a swing verdict at
 // t = X + R needs, before X, the TR average (LIQ_TRA_LEN), the left window and the
@@ -2590,7 +2903,7 @@ var int capDone = 0
 bool capBar   = capOn and barstate.isconfirmed and bar_index > last_bar_index - capTotal and capDone < capTotal
 if capBar
     if capDone == 0
-        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+        log.info("CAPTURE|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|cisd=" + (cisdOn ? "1" : "0") + "|cisdmem=" + str.tostring(CISD_MEM) + "|cisdtra=" + str.tostring(CISD_TRA_LEN) + "|cisdguard=" + str.tostring(CISD_GUARD) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
         // HTF snapshot after this first captured bar: per active timeframe the last completed
         // HTF bars and the whole registry, which the oracle restores and replays (§10 (c)).
         for s in htfTfs
@@ -2598,12 +2911,20 @@ if capBar
                 log.info("HTFSTATE|tf=" + s.tf + "|last=" + f_capInt(s.lastT) + "|bars=" + (na(s.bars3) ? "" : s.bars3))
                 for r in s.recs
                     log.info("HTFREC|tf=" + s.tf + "|dir=" + str.tostring(r.dir) + "|id=" + str.tostring(r.id) + "|c1=" + str.tostring(r.c1) + "|top=" + f_cap(r.top) + "|bottom=" + f_cap(r.bottom) + "|known=" + str.tostring(r.knownBar) + "|kt=" + str.tostring(r.knownTime) + "|seeded=" + f_capBool(r.seeded) + "|pt=" + f_capBool(r.preTouch) + "|pc=" + f_capBool(r.preCe) + "|touch=" + f_capInt(r.touchBar) + "|ce=" + f_capInt(r.ceBar) + "|full=" + f_capInt(r.fullBar) + "|inv=" + f_capInt(r.invBar) + "|invc=" + f_cap(r.invClose))
+        // CISD snapshot after this first captured bar: the whole engine state, which the parity tool
+        // restores and replays, so a window that starts with an established state is compared exactly.
+        if cisdOn
+            log.info("CISDSTATE|state=" + str.tostring(cisdBook.state) + "|confirmed=" + str.tostring(cisdBook.confirmed) + "|dropped=" + str.tostring(cisdBook.dropped))
+            for s in array.from(cisdUp, cisdDn)
+                log.info("CISDSIDE|side=" + str.tostring(s.sign) + "|armed=" + f_capBool(s.armed) + "|a=" + str.tostring(s.a) + "|since=" + str.tostring(s.since) + "|known=" + f_capInt(s.known) + "|run=" + f_capBool(s.inRun) + "|rb=" + f_capInt(s.runBar) + "|rt=" + f_capInt(s.runTime) + "|rl=" + f_cap(s.runL) + "|" + f_cisdStacks(s))
+            for r in cisdBook.recs
+                log.info("CISDREC|side=" + str.tostring(r.side) + "|id=" + str.tostring(r.id) + "|before=" + str.tostring(r.before) + "|level=" + f_cap(r.level) + "|origin=" + str.tostring(r.origin) + "|eb=" + str.tostring(r.extBar) + "|et=" + str.tostring(r.extTime) + "|ext=" + f_cap(r.ext) + "|leg=" + f_cap(r.legExt) + "|known=" + f_capInt(r.known) + "|bar=" + str.tostring(r.cBar) + "|time=" + str.tostring(r.cTime) + "|close=" + f_cap(r.cClose) + "|bk=" + f_cap(r.bodyK) + "|end=" + f_capInt(r.endBar) + "|rt=" + f_capInt(r.retest) + "|rc=" + f_capInt(r.reclaim) + "|br=" + f_capInt(r.broken))
     capDone += 1
     for s in htfTfs
         if s.active and s.doneBar == bar_index
             log.info("HTFBAR|tf=" + s.tf + "|i=" + str.tostring(bar_index) + "|t=" + str.tostring(s.bT) + "|O=" + f_cap(s.bO) + "|H=" + f_cap(s.bH) + "|L=" + f_cap(s.bL) + "|C=" + f_cap(s.bC) + "|tra=" + f_cap(s.bTra) + "|rng=" + f_cap(s.bRng))
     int fv = bullCand ? 2 : rawBull ? 1 : bearCand ? -2 : rawBear ? -1 : 0
-    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : "") + "|HO=" + f_htfOpen())
+    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : "") + "|HO=" + f_htfOpen() + (cisdOn ? "|CS=" + str.tostring(cisdBook.state) + "|CU=" + f_cisdCand(cisdUp) + "|CN=" + f_cisdCand(cisdDn) + "|CA=" + f_cisdActive() : ""))
 if barstate.isconfirmed and (capOn ? capBar : dbgOn)
     for e in barEv
         log.info(str.format_time(e.eventTime, "yyyy-MM-dd HH:mm", sesTz) + "  " + f_evText(e))
@@ -2683,6 +3004,20 @@ if dbgOn and barstate.islast
     f_dbgRow(42, "HTF FVG engine", "15m · 30m · 1H · 4H · 1D · 1W, those above the chart timeframe, always computed · Phase 1 definition: gap ≥ max(" + str.tostring(fvgMinTicks) + " ticks, " + str.tostring(fvgMinTra) + " × TR(" + str.tostring(fvgLen) + "), " + str.tostring(fvgMinRng) + " × avg range) of that timeframe · known on the first chart bar after candle 3 closed · invalidation: own-timeframe close · memory " + str.tostring(HTF_MEM) + "/tf · seeds " + str.tostring(HTF_SEEDS) + "/direction")
     f_dbgRow(43, "HTF registries", f_htfState())
     f_dbgRow(44, "HTF drawn", str.tostring(htfBoxes.size()) + " boxes (nearest open above + below per shown timeframe, ≤ 12)")
+    // ── CISD (v0.7.0-dev) ──
+    f_dbgRow(45, "CISD engine", cisdOn ? "ON · CISD-R: L = open of the first candle of the delivery series into the leg's delivery extreme (delivery candles only · doji ends a series · equal extreme → later candle) · first close strictly beyond L, any colour · state UNKNOWN, then alternating · no parameters · memory " + str.tostring(CISD_MEM) + " · decided at bar close" : "OFF")
+    f_dbgRow(46, "CISD state", f_cisdName(cisdBook.state) + " · records " + str.tostring(cisdBook.recs.size()) + "/" + str.tostring(CISD_MEM) + " · confirmed " + str.tostring(cisdBook.confirmed) + " · dropped " + str.tostring(cisdBook.dropped) + " · active " + f_cisdActive() + " · guard (view only): " + (bar_index >= CISD_GUARD ? "passed, drawing and alerts on" : "bar " + str.tostring(bar_index) + " < " + str.tostring(CISD_GUARD) + ", drawing and alerts suppressed"))
+    f_dbgRow(47, "CISD ▲ bullish side", f_cisdSideState(cisdUp))
+    f_dbgRow(48, "CISD ▼ bearish side", f_cisdSideState(cisdDn))
+    int nc = cisdBook.recs.size()
+    if dbgCisdIns >= nc
+        f_dbgRow(49, "CISD inspect #" + str.tostring(dbgCisdIns), "no CISD in memory")
+        f_dbgRow(50, "", "")
+    else
+        Cisd cq = cisdBook.recs.get(nc - 1 - dbgCisdIns)
+        f_dbgRow(49, "CISD inspect #" + str.tostring(dbgCisdIns), (cq.side > 0 ? "▲ bullish" : "▼ bearish") + " · id " + f_cisdKey(cq) + " · " + f_cisdName(cq.before) + " → " + f_cisdName(cq.side) + " · L " + f_px(cq.level) + " (origin " + f_mt(cq.id) + ") · extreme " + f_px(cq.ext) + " " + f_mt(cq.extTime) + " · confirmed " + f_mt(cq.cTime) + " (bar " + str.tostring(cq.cBar) + ") close " + f_px(cq.cClose) + " · " + (na(cq.endBar) ? "ACTIVE" : "ENDED bar " + str.tostring(cq.endBar)))
+        f_dbgRow(50, "facts · metadata", "retest " + f_capInt(cq.retest) + " · close back " + f_capInt(cq.reclaim) + " · leg break " + f_capInt(cq.broken) + " (leg extreme " + f_px(cq.legExt) + ") · body / TR " + f_num(cq.bodyK) + " (metadata only)")
+    f_dbgRow(51, "CISD drawn", "lines " + str.tostring(cisdLns.size()) + " · labels " + str.tostring(cisdLbls.size()))
     f_dbgRow(41, "LRL drawn","active ▼ " + str.tostring(lrlCnt.get(0)) + " · ▲ " + str.tostring(lrlCnt.get(1)) + " · ended " + str.tostring(lrlCnt.get(2)) + " · candidates " + str.tostring(lrlCnt.get(3)) + " · LRL lines " + str.tostring(lrlLns.size()) + " · labels " + str.tostring(lrlLbls.size()))
 
 // Normal-mode warnings: non-standard candles, and objects nearing the hard limit

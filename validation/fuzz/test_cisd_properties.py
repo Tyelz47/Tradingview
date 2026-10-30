@@ -50,6 +50,23 @@ def test_cisd_invariants_hold(candles, cs):
 
 
 @given(candles, cisd_settings)
+def test_cisd_pine_formulation_equals_oracle(candles, cs):
+    """Pine's incremental engine (CisdStack: stacks, prunes, no scan) = the approved CisdEngine."""
+    from validation.models.cisd import CisdEngine, CisdStack
+    from validation.models.events import EventLog
+    out = []
+    for cls in (CisdEngine, CisdStack):
+        log = EventLog()
+        e = cls(cs, 0.25, log)
+        for t, c in enumerate(candles):
+            log.at(t, c.time)
+            e.step(t, c)
+        out.append((e.recs, log.events, e.delivery))
+    assert out[0] == out[1]
+    stats.bump("property.examples")
+
+
+@given(candles, cisd_settings)
 def test_cisd_mirror_symmetry(candles, cs):
     """Reflecting prices (p → −p) swaps bullish and bearish CISDs, prices negated."""
     assert _cisd(run(mirror(candles, 0.0), _s(cs))) == _cisd(run(candles, _s(cs)), lambda p: -p, -1)
@@ -76,7 +93,8 @@ def test_cisd_guard_and_metadata_change_no_decision(candles, a, b):
     one, two = run(candles, _s(a)), run(candles, _s(CisdSettings(memory=a.memory, tra_len=b.tra_len, guard=b.guard)))
     strip = lambda m: [(r.bar, r.side, r.level, r.origin, r.ext_bar, r.retest, r.reclaim, r.broken, r.end)
                        for r in m.cisd.recs]
-    assert one.events == two.events and strip(one) == strip(two)
+    ev = lambda m: [(e.bar, e.type, e.dir, e.sid, e.price, e.origin_bar) for e in m.events]   # audit text holds bk
+    assert ev(one) == ev(two) and strip(one) == strip(two)
     stats.bump("property.examples")
 
 

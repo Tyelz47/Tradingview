@@ -51,7 +51,7 @@ SECTIONS = [  # key, report title, group
     ("parity", "Pine / Python parity", "COMMON"),
     ("lrl", "LRL detection (oracle + Pine v0.5.3-dev)", "LRL"),
     ("htf", "HTF FVG (oracle + Pine v0.6.2-dev)", "HTF"),
-    ("cisd", "CISD (oracle only; no Pine yet)", "CISD"),
+    ("cisd", "CISD (oracle + Pine v0.7.0-dev)", "CISD"),
     ("research.lrl", "LRL research study (no indicator change)", "RESEARCH"),
     ("research.cisd", "CISD research study (no indicator change)", "RESEARCH"),
 ]

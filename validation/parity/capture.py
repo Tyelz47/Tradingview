@@ -19,16 +19,17 @@ from datetime import datetime
 from pathlib import Path
 
 from validation import VALIDATION_DIR
+from validation.models.cisd import Cisd, CisdEngine, CisdStack
 from validation.models.events import LRL_TERMINAL, EventLog
 from validation.models.htf_fvg import NAMES, HtfBar, HtfEngine, HtfFvg
 from validation.models.ist import IstModel
-from validation.models.types import MODULES, PRESETS, Candle, HtfSettings, LrlSettings, Settings
+from validation.models.types import MODULES, PRESETS, Candle, CisdSettings, HtfSettings, LrlSettings, Settings
 from validation.parity import oracle_series
 from validation.parity.manual import DIFF, MATCH, NOBS, _ANY_NAME, _event, _fmt, _same_px, _tf_seconds, pine_text
 
 PARITY_DIR = VALIDATION_DIR / "parity"
 TOL = 1e-6                     # Pine prints these values with 8 decimals
-SECTIONS = ("settings", "bars", "events", "lrl", "htf")
+SECTIONS = ("settings", "bars", "events", "lrl", "htf", "cisd")
 # CAPTURE key → (LrlSettings field, type): the frozen LRL constants Pine ran with (v0.5.0-dev+).
 LRL_HEAD = {"lrlleft": ("left", int), "lrlright": ("right", int), "lrltol": ("tol_k", float), "lrlgap": ("gap", int),
             "lrlsep": ("sep_k", float), "lrldrop": ("drop_k", float), "lrltra": ("tra_len", int),
@@ -45,7 +46,8 @@ LABELS = {"fvg_verdict": "FVG verdict", "fvg_required": "FVG required gap", "bsl
           "bsl_dominance": "dominance reference high", "ssl_dominance": "dominance reference low"}
 HEAD = ("tick", "tz", "confirmed", "liq", "preset", "left", "right", "k", "eqtol", "eqmin", "liqmem",
         "fvgticks", "fvgtra", "fvgrng", "fvglen", "fvgmem", "ses", "bars", "warmup")
-_TOKEN = re.compile(r"\b(CAPTURE|BAR|END|HTFSTATE|HTFREC|HTFBAR)\|(.*)$")
+_TOKEN = re.compile(r"\b(CAPTURE|BAR|END|HTFSTATE|HTFREC|HTFBAR|CISDSTATE|CISDSIDE|CISDREC)\|(.*)$")
+CISD_LINES = ("CISDSTATE", "CISDSIDE", "CISDREC")
 _CSV_ROW = re.compile(r'^\s*\d{4}-\d\d-\d\d[^,"|]*,"')   # a `date,"message"` row without its header
 
 
@@ -90,7 +92,44 @@ def _bar(parts: list[str], tick: float | None) -> dict:
     return {"i": int(kv["i"]), "time": t, "candle": c,
             "vals": {s: _num(k, kv[k]) for k, s in FIELDS.items() if k in kv}, "lrl": _lrl_fields(kv),
             "htf_open": {tf: int(n) for tf, _, n in (x.partition(":") for x in kv["HO"].split(",") if x)}
-            if "HO" in kv else None}
+            if "HO" in kv else None,
+            "cisd": {"state": int(kv["CS"]), "up": _cand(kv["CU"]), "dn": _cand(kv["CN"]), "active": kv["CA"]}
+            if "CS" in kv else None}
+
+
+def _cand(v: str):
+    """A CISD side's candidate on a BAR line: 'off' (not armed), None (armed, no reference) or L."""
+    return "off" if v == "off" else _num("CU", v)
+
+
+def _cisd_line(kind: str, parts: list[str]) -> dict:
+    """CISDSTATE (engine), CISDSIDE (one side: window, series, both stacks, side coordinates) or
+    CISDREC (one record), logged after the first captured bar. Bar fields are Pine bar indices."""
+    kv = _pairs(parts)
+    opt = lambda k: None if kv[k] == "na" else int(kv[k])
+    if kind == "CISDSTATE":
+        return {k: int(kv[k]) for k in ("state", "confirmed", "dropped")}
+    if kind == "CISDSIDE":
+        d = []
+        for item in filter(None, kv["d"].split(";")):
+            p = item.split(":")
+            if len(p) != 6:
+                raise ValueError(f"d: expected bar:time:low:origin:origin time:L, got {item!r}")
+            d.append((int(p[0]), int(p[1]), float(p[2]), int(p[3]), int(p[4]), float(p[5])))
+        w = []
+        for item in filter(None, kv["w"].split(";")):
+            p = item.split(":")
+            if len(p) != 2:
+                raise ValueError(f"w: expected bar:low, got {item!r}")
+            w.append((int(p[0]), float(p[1])))
+        return {"side": int(kv["side"]), "armed": kv["armed"] == "1", "a": int(kv["a"]), "since": int(kv["since"]),
+                "known": opt("known"), "in_run": kv["run"] == "1", "rb": opt("rb"), "rt": opt("rt"),
+                "rl": _num("rl", kv["rl"]), "d": d, "w": w}
+    return {"side": int(kv["side"]), "id": int(kv["id"]), "before": int(kv["before"]), "level": _num("level", kv["level"]),
+            "origin": int(kv["origin"]), "eb": int(kv["eb"]), "et": int(kv["et"]), "ext": _num("ext", kv["ext"]),
+            "leg": _num("leg", kv["leg"]), "known": opt("known"), "bar": int(kv["bar"]), "time": int(kv["time"]),
+            "close": _num("close", kv["close"]), "bk": _num("bk", kv["bk"]), "end": opt("end"), "rt": opt("rt"),
+            "rc": opt("rc"), "br": opt("br")}
 
 
 def _htf_line(kind: str, parts: list[str]) -> dict:
@@ -229,6 +268,7 @@ def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
         return None, [f"line {n0}: CAPTURE: {e}"]
     bars, raw_events, end, ignored, errors = [], [], None, 0, []
     htf = {"HTFSTATE": [], "HTFREC": [], "HTFBAR": []}
+    cisd = {k: [] for k in CISD_LINES}
     for n, line in lines[1:]:
         m = _TOKEN.search(line)
         try:
@@ -236,6 +276,8 @@ def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
                 bars.append({**_bar([p.strip() for p in m[2].split("|")], tick), "line": n})
             elif m and m[1] in htf:
                 htf[m[1]].append(_htf_line(m[1], [p.strip() for p in m[2].split("|") if p.strip()]))
+            elif m and m[1] in cisd:
+                cisd[m[1]].append(_cisd_line(m[1], [p.strip() for p in m[2].split("|") if p.strip()]))
             elif m and m[1] == "END":
                 end = int(_pairs([m[2]])["bars"])
             elif not m and _ANY_NAME.search(line):
@@ -272,7 +314,7 @@ def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
                       f"(bars {head['bars']} + warm-up {head['warmup']})")
     if errors:
         return None, errors
-    return {"head": head, "bars": bars, "events": events, "end": end, "ignored": ignored, "htf": htf}, []
+    return {"head": head, "bars": bars, "events": events, "end": end, "ignored": ignored, "htf": htf, "cisd": cisd}, []
 
 
 def parse(text: str) -> dict:
@@ -403,7 +445,7 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     t0, t_end = bars[0]["time"], bars[-1]["time"]
     t_fvg = bars[w_fvg]["time"] if len(bars) > w_fvg else None
     t_swing = bars[w_swing]["time"] if len(bars) > w_swing else None
-    own_section = lambda typ: typ.startswith(("LRL_", "HTF_"))  # compared in _compare_lrl / _compare_htf
+    own_section = lambda typ: typ.startswith(("LRL_", "HTF_", "CISD_"))   # compared in _compare_lrl / _htf / _cisd
     oracle = [{"time": e.time, "type": e.type, "dir": e.dir, "sid": e.sid, "price": e.price, "e": e} for e in m.events
               if not own_section(e.type)]
     pine_events = [e for e in cap["events"] if not own_section(e["type"])]
@@ -465,10 +507,11 @@ def compare(cap: dict, preset: str | None = None) -> dict:
         add("events", NOBS, f"{n} Pine events not compared: {why}")
     lrl = _compare_lrl(cap, m, want, s, add, fmt) if lrl_on else None
     htf = _compare_htf(cap, s, add, fmt) if h.get("htf") == "1" else None
+    cisd = _compare_cisd(cap, s, add, fmt) if h.get("cisd") == "1" else None
     sym = re.search(r'"symbol"\s*:\s*"([^"]+)"', h.get("sym", ""))       # extended tickerid: a JSON object
     cnt = Counter(c["status"] for c in checks)
     return {"status": "COMPARED", "mode": "BOUNDED PINE-LOG BAR-BY-BAR PARITY", "checks": checks, "counts": cnt,
-            "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars), "lrl": lrl, "htf": htf,
+            "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars), "lrl": lrl, "htf": htf, "cisd": cisd,
             "compared_bars": max(0, len(bars) - max(w_fvg, w_liq)), "warmup": max(w_fvg, w_liq),
             "series": sum(1 for k in FIELDS.values() if compared[k]),
             "matched_events": sum(matched.values()), "window": f"{fmt(t0)} → {fmt(t_end)}",
@@ -724,6 +767,135 @@ def _compare_htf(cap: dict, s: Settings, add, fmt) -> dict:
             "not_observable": sum(nobs.values())}
 
 
+def _compare_cisd(cap: dict, s: Settings, add, fmt) -> dict:
+    """CISD in the captured window (docs/CISD.md §5).
+
+    (b) Exact: the engine state Pine logged after the first captured bar (CISDSTATE / CISDSIDE /
+        CISDREC) is restored into the incremental model (CisdStack, proven equal to the approved
+        CisdEngine) and replayed on the captured bars: per bar the delivery state, each side's
+        candidate L and the active CISD; every CISD event (side, id, time, L, previous state, close,
+        delivery extreme and its time, body / TR).
+    (c) The definition oracle (CisdEngine) itself, started UNKNOWN on the first captured bar: once
+        one of its CISDs equals one of Pine's (same bar, side, origin, L, extreme), both engines are
+        in the same state, so every later CISD must be identical.
+
+    NOT OBSERVABLE: the first captured bar's events (the snapshot already holds them); body / TR of
+    a CISD confirmed in the first `tra_len` + 1 bars (the replay's TR average needs them); in (c),
+    the CISDs before the definition oracle synchronises (a state started UNKNOWN cannot know Pine's)."""
+    h, bars, raw = cap["head"], cap["bars"], cap["cisd"]
+    approved = CisdSettings()
+    for k, f in (("cisdmem", "memory"), ("cisdtra", "tra_len"), ("cisdguard", "guard")):
+        add("settings", MATCH if h.get(k) == str(getattr(approved, f)) else DIFF,
+            f"CISD {f}: Pine {h.get(k, 'missing')} · approved {getattr(approved, f)}")
+    # replayed with the constants Pine ran with (a deviation is the settings DIFF above)
+    cs = CisdSettings(memory=int(h.get("cisdmem", approved.memory)), tra_len=int(h.get("cisdtra", approved.tra_len)))
+    i0, t0 = bars[0]["i"], bars[0]["time"]
+    candles = [b["candle"] for b in bars]
+    rel = lambda i: None if i is None else i - i0
+    pine = [e for e in cap["events"] if e["type"].startswith("CISD_")]
+    out, nobs = {"bars": 0, "events": 0, "cold": 0, "not_observable": 0}, Counter()
+    sides = {x["side"]: x for x in raw["CISDSIDE"]}
+    if len(raw["CISDSTATE"]) != 1 or set(sides) != {1, -1}:
+        add("cisd", DIFF, "no complete CISD snapshot (CISDSTATE + two CISDSIDE lines) after the first captured bar")
+        return out
+
+    # (b) restore, replay, compare bar by bar and event by event
+    st = raw["CISDSTATE"][0]
+    snap = {"delivery": st["state"], "confirmed": st["confirmed"], "dropped": st["dropped"],
+            "sides": {g: {"armed": x["armed"], "a": rel(x["a"]), "since": rel(x["since"]), "known": rel(x["known"]),
+                          "in_run": x["in_run"], "run": None if x["rb"] is None else (rel(x["rb"]), x["rt"], x["rl"]),
+                          "d": [(rel(b), t, lo, rel(o), ot, lv) for b, t, lo, o, ot, lv in x["d"]],
+                          "w": [(rel(b), lo) for b, lo in x["w"]]} for g, x in sides.items()},
+            "recs": [Cisd(r["id"], r["side"], r["before"], r["level"], rel(r["origin"]), rel(r["eb"]), r["ext"], r["leg"],
+                          rel(r["known"]), rel(r["bar"]), r["time"], r["close"], r["bk"], rel(r["end"]), rel(r["rt"]),
+                          rel(r["rc"]), rel(r["br"])) for r in raw["CISDREC"]]}
+    ext_t = {(r["side"], r["id"]): r["et"] for r in raw["CISDREC"]}
+    log = EventLog()
+    m = CisdStack(cs, s.tick, log)
+    m.restore(snap, candles[0])
+    same = lambda a, b: a == b if "off" in (a, b) or None in (a, b) else abs(a - b) <= TOL
+    bar_diff = 0
+    for t, c in enumerate(candles[1:], 1):
+        log.at(t, c.time)
+        m.step(t, c)
+        got = bars[t]["cisd"]
+        if got is None:
+            continue
+        act = m.active
+        want = {"state": m.delivery, "up": m.candidate(1), "dn": m.candidate(-1),
+                "active": "na" if act is None else f"{act.side}:{act.id}"}
+        if got["state"] != want["state"] or not same(got["up"], want["up"]) or not same(got["dn"], want["dn"]) \
+                or got["active"] != want["active"]:
+            bar_diff += 1
+            add("cisd", DIFF, f"{fmt(bars[t]['time'])} (i={bars[t]['i']}) CISD state · ▲ candidate · ▼ candidate · active: "
+                              f"Pine {got['state']} · {got['up']} · {got['dn']} · {got['active']} — oracle {want['state']} · "
+                              f"{want['up']} · {want['dn']} · {want['active']}")
+        else:
+            out["bars"] += 1
+    oracle = {(e.type, e.dir, e.sid, e.time): e for e in log.events}
+    matched = Counter()
+    for o in pine:
+        if o["time"] is None or o["time"] <= t0:
+            nobs["events of the first captured bar (in the snapshot)"] += 1
+            continue
+        e = oracle.pop((o["type"], o["dir"], o["sid"], o["time"]), None)
+        if e is None:
+            add("cisd", DIFF, f"line {o['line']}: {o['text']}: not in the oracle (an extra Pine event, or logged twice)")
+            continue
+        bad = [] if _same_px(o["price"], e.price, s.tick) else [f"L Pine {o['price']} · oracle {e.price}"]
+        got, exp = _kv(o["text"]), _kv(f"px=0 · {e.meta}")
+        for k in exp:
+            a, b = got.get(k), exp[k]
+            if k == "bk" and b == "na":
+                nobs["body / TR of a CISD in the first bars (the replay's TR average is still warming up)"] += a not in (None, "na")
+            elif k in ("close", "ext", "bk") and a not in (None, "na") and b != "na":
+                if abs(float(a) - float(b)) > TOL:
+                    bad.append(f"{k} Pine {a} · oracle {b}")
+            elif a != b:
+                bad.append(f"{k} Pine {a} · oracle {b}")
+        if bad:
+            add("cisd", DIFF, f"line {o['line']}: {o['text']}: {'; '.join(bad)}")
+        else:
+            matched[o["type"]] += 1
+    for e in sorted(oracle.values(), key=lambda e: e.time):
+        add("cisd", DIFF, f"missing in Pine: {pine_text(e, h['tz'], s.tick)} (oracle)")
+    if out["bars"] and not bar_diff:
+        add("cisd", MATCH, f"per bar: delivery state, both candidates, active CISD: {out['bars']} bars (restored state)")
+    for typ, n in sorted(matched.items()):
+        add("cisd", MATCH, f"{typ}: {n} (restored state)")
+    out["events"] = sum(matched.values())
+
+    # (c) the definition oracle, started UNKNOWN on the first captured bar
+    key = lambda typ, d, sid, t, px, kv: (typ, d, sid, t, round(px, 6), kv.get("et"))
+    p_conf = [key(o["type"], o["dir"], o["sid"], o["time"], o["price"], _kv(o["text"])) for o in pine
+              if o["type"] == "CISD_CONFIRMED" and o["price"] is not None]
+    clog = EventLog()
+    cold = CisdEngine(cs, s.tick, clog)
+    for t, c in enumerate(candles):
+        clog.at(t, c.time)
+        cold.step(t, c)
+    c_conf = [key(e.type, e.dir, e.sid, e.time, e.price, _kv(f"px=0 · {e.meta}")) for e in clog.events
+              if e.type == "CISD_CONFIRMED"]
+    j = next((j for j, x in enumerate(c_conf) if x in p_conf), None)
+    if j is None:
+        nobs[f"Pine CISDs: the definition oracle, started UNKNOWN on the first captured bar, never synchronised"] += len(p_conf)
+    else:
+        k = p_conf.index(c_conf[j])
+        if c_conf[j:] == p_conf[k:]:
+            out["cold"] = len(c_conf) - j
+            add("cisd", MATCH, f"definition oracle started UNKNOWN on the first captured bar: synchronised on "
+                               f"{fmt(c_conf[j][3])}, then {out['cold']} CISDs identical to Pine's")
+        else:
+            bad = next(((a, b) for a, b in zip(c_conf[j:], p_conf[k:]) if a != b), (c_conf[j:], p_conf[k:]))
+            add("cisd", DIFF, f"definition oracle after synchronising: oracle {bad[0]} · Pine {bad[1]}")
+        nobs["Pine CISDs before the definition oracle (started UNKNOWN) synchronised"] += k
+    for why, n in nobs.most_common():
+        if n:
+            add("cisd", NOBS, f"{n} not compared: {why}")
+    out["not_observable"] = sum(nobs.values())
+    return out
+
+
 def latest_capture() -> Path | None:
     """The most recently saved validation/parity/pine_capture*.csv / .txt, or pine-logs-*.csv
     (the name TradingView gives the file it saves; it may also append .csv to yours)."""
@@ -744,11 +916,13 @@ def run(path=None, preset: str | None = None) -> dict:
 
 def verdict(r: dict) -> str:
     c = r["counts"]
-    lrl, htf = r.get("lrl"), r.get("htf")
+    lrl, htf, cisd = r.get("lrl"), r.get("htf"), r.get("cisd")
     tally = (f"{r['compared_bars']} bars × {r['series']} series and {r['matched_events']} events compared"
              + (f" + LRL: {lrl['events']} events, {lrl['boundaries']} boundaries, {lrl['cand_bars']} candidate counts"
                 if lrl else "")
              + (f" + HTF: {htf['candles']} candles, {htf['events']} events, {htf['open_bars']} bar registries" if htf else "")
+             + (f" + CISD: {cisd['bars']} bar states, {cisd['events']} events, {cisd['cold']} CISDs by the definition oracle"
+                if cisd else "")
              + f"; {c[MATCH]} MATCH · {c[DIFF]} DIFFERENCE · {c[NOBS]} NOT OBSERVABLE")
     return f"BOUNDED PINE-LOG BAR-BY-BAR PARITY: {'FAIL' if r['differences'] else 'PASS'} — {tally}"
 

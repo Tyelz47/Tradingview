@@ -9,7 +9,7 @@ import pytest
 from validation.candles import mirror, random_walk, shift
 from validation.invariants import run_checked
 from validation.models.cisd import UNKNOWN
-from validation.models.events import ORACLE_ONLY, TYPES
+from validation.models.events import TYPES
 from validation.models.ist import IstModel
 from validation.models.types import MODULES, CisdSettings, Settings
 from validation.studies import cisd as study
@@ -96,7 +96,7 @@ def test_t02_the_first_resolved_structure_establishes_the_state():
         first = m.cisd.recs[0]
         assert (first.side, first.before, m.cisd.delivery) == (side, UNKNOWN, side)
         assert m.state()["cisd"]["records"][0]["before"] == "UNKNOWN"
-        assert m.state()["cisd"]["records"][0]["after"] == ("BULL" if side > 0 else "BEAR")
+        assert m.state()["cisd"]["records"][0]["after"] == ("UP" if side > 0 else "DOWN")
 
 
 def test_t03_strict_alternation_after_the_state_is_established():
@@ -265,12 +265,12 @@ def test_record_carries_every_approved_field():
             "close", "body_k", "retest", "reclaim", "broken", "status", "end"} <= set(rec)
     assert (rec["side"], rec["before"], rec["after"], rec["level"], rec["origin"], rec["ext"], rec["leg_ext"],
             rec["bar"], rec["retest"], rec["reclaim"], rec["broken"], rec["status"], rec["end"]) == \
-           ("BULL", "UNKNOWN", "BULL", 100, 1, 95, 95, 5, 6, 6, 7, "ENDED", 7)
+           ("BULL", "UNKNOWN", "UP", 100, 1, 95, 95, 5, 6, 6, 7, "ENDED", 7)
 
 
 def test_lifecycle_facts_are_immutable_records_not_events():
     """Retest, close back through L and leg break are record facts: no event type exists for them."""
-    assert {t for t in TYPES if t.startswith("CISD_")} == {"CISD_CONFIRMED", "CISD_DROPPED_MEMORY"} == ORACLE_ONLY
+    assert {t for t in TYPES if t.startswith("CISD_")} == {"CISD_CONFIRMED", "CISD_DROPPED_MEMORY"}
     m = model(SC["11 confirmed CISD, then a retest"])
     assert m.cisd.recs[0].retest == 6 and evs(m) == [(5, "CISD_CONFIRMED", 1, 100, 1)]
 

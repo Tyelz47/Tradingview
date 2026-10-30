@@ -47,7 +47,8 @@ validation/
     htf_fvg.py          docs/HTF_FVG.md DEF-B0…B6: opt-in module "htf" (6 timeframes, seeds, own-timeframe
                         invalidation; restore() + an external HTF feed for the Parity capture). Pine: v0.6.0-dev, ST-03, ST-19
     cisd.py             docs/CISD.md DEF-CISD1…CISD9: opt-in module "cisd" (UNKNOWN start, alternating
-                        state, record facts; no Pine yet: its event names are ORACLE_ONLY for ST-14)
+                        state, record facts); CisdStack = Pine's incremental formulation (no scan),
+                        proven equal, restorable from the parity snapshot. Pine: v0.7.0-dev, ST-20
     ist.py              all modules in the Pine engine order → events + state
   invariants.py         68 named invariants (10 LRL, 8 HTF, 8 CISD, checked only when the module runs) + the per-bar Monitor
   static_checks.py      text checks of src/IST.pine

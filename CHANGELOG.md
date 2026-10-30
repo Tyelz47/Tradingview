@@ -1,5 +1,84 @@
 # Changelog
 
+## v0.7.0-dev — CISD in Pine (2026-10-30, branch `cisd/pine`) — EXPERIMENTAL, not frozen · validation 1.13.0
+
+**User (2026-10-30):** the CISD-R oracle is approved; implement CISD in Pine without changing the definition.
+* Identity = side + origin time.
+* Explicit UNKNOWN start, strict alternation.
+* No 500-bar (or any) leg-length limit.
+* Events `CISD_CONFIRMED` / `CISD_DROPPED_MEMORY` (remove the ST-14 oracle-only exception).
+* Memory 50, oldest ENDED record first.
+* 200-bar display / alert guard (not DEF-CISD).
+* Current CISD only, previous optional.
+* Minimal settings, alert OFF.
+* Debug, parity capture, static and mutation tests.
+* No displacement, IFVG, DEF-LRL9 or scoring.
+
+**CHANGE (`src/IST.pine`)**
+* **CISD engine (L3)**, after the HTF engine, on closed bars, reading bars only:
+  * types `Cisd` (record), `CisdSide` (per side) and `CisdBook` (state, records, counters);
+  * methods `feedCisd`, `pruneCisd`, `readyCisd`, `factsCisd`, `confirmCisd`;
+  * its own TR average `cisdTra`, for the body / TR metadata only.
+* **Incremental, no scan.** Each side keeps the suffix minima of its delivery lows (with each one's series origin and L) and of every low, in its leg window. A window restart only drops entries. No series is read beyond `cisdTra[1]`, so a leg of any length is handled exactly and no history buffer is involved.
+* **Events** `CISD_CONFIRMED` (`dir` = side, `id` = origin time, `px` = L, audit `prev · close · ext · et · bk`) and `CISD_DROPPED_MEMORY`.
+* **Renderer:** the current CISD as one 1 px line at L from the origin candle to the confirming candle, plus a tiny "CISD" label, colour `#4F473F`. The previous one is drawn faded with its toggle. Bar-time coordinates. Never a CISD confirmed before bar 200.
+* **Settings** (group "CISD · CHANGE IN STATE OF DELIVERY"): Enable ON [calc], Show ON, Show previous OFF, CISD alerts OFF. Developer: Inspect CISD.
+* **Alert:** one per `CISD_CONFIRMED` at the bar close, never before bar 200.
+* **Debug rows 45–51** (table 52 rows).
+* **Capture:** header `cisd / cisdmem / cisdtra / cisdguard`; the snapshot `CISDSTATE` / `CISDSIDE` / `CISDREC` after the first captured bar; per bar `CS / CU / CN / CA`.
+* Phase 1 / 2, LRL and HTF FVG code is unchanged. The only shared lines touched are additions:
+  * the header;
+  * one `f_evName` case pair;
+  * one `f_alertOn` case;
+  * the `isFvg` comment;
+  * the debug table size;
+  * the capture header and BAR line.
+
+**WHY:** the approved CISD-R definition, as the oracle runs it, without the 500-bar re-scan limit that a direct port of the oracle's restart scan would need.
+
+**PHASE 1 IMPACT:** none. ST-15 shows no Phase 1 line removed beyond the reviewed manifest.
+
+**REPAINT IMPACT:** none.
+* Decided at bar close.
+* L is known at the close of the extreme's bar.
+* Facts are stamped from the bar after.
+* The guard and the display inputs are never read by detection (ST-01, ST-20).
+
+**Validation 1.13.0**
+* **Oracle:**
+  * `validation/models/cisd.py` `CisdStack`: Pine's incremental formulation, with `snapshot` / `restore`;
+  * delivery state names UNKNOWN / UP / DOWN (sides BULL / BEAR);
+  * the audit text gains `et` and `bk`.
+* **ST-20** (34 rule lines, constants, per-bar order, no history / numbers in the engine, guard and display outside detection).
+* **ST-14:** exact again (`ORACLE_ONLY` removed).
+* **ST-08:** CISD in scope; IFVG, SMT, displacement, confluence and quality score still forbidden.
+* **`tests/test_cisd_pine.py`:**
+  * incremental = oracle on NQ 1m / 3m / 5m / 15m, four 20,000-bar walks, a mirrored walk and all scenarios, with memory 50 and 2;
+  * a leg longer than 500 bars exact (origin 657 bars back; flip window 649 bars);
+  * snapshot / restore;
+  * 27 mutations caught (the user's 15 and 12 more);
+  * settings, renderer, debug and capture.
+* **Property:** incremental = oracle on generated candles.
+* **`tests/test_parity_cisd.py`:**
+  * faithful captures starting from an established state give 0 DIFFERENCE (NQ; walks with memory drops);
+  * 10 error kinds detected;
+  * replay with Pine's constants.
+* **`parity/capture.py` `_compare_cisd`:**
+  * (b) the restored snapshot replayed exactly;
+  * (c) the definition oracle started UNKNOWN, compared after synchronising.
+* **`docs/CISD.md` §5** (Pine) and **`docs/TESTS_CISD.md`** (CISD-L00…L12).
+
+**TEST:**
+* FULL: **PASS**, exit 0, 665.1 s, **756 passed, 1 skipped** (the same skip as before):
+  * static 20/20 (ST-20 new);
+  * cisd 155/155 (oracle 75 + Pine 80);
+  * parity 113/114 (16 CISD);
+  * properties 30/30;
+  * long walks 16/16;
+  * detectors 70/70;
+  * every other section unchanged.
+* TradingView: CISD-L00…L12 PENDING (not compiled yet).
+
 ## CISD oracle — validation 1.12.0 (2026-10-30, branch `research/cisd`) — no indicator change, for approval before Pine
 
 **User (2026-10-30):** CISD-R is approved for the reference-model / oracle phase; **no Pine yet**.

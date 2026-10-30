@@ -14,14 +14,15 @@ from validation import PINE_SOURCE, ROOT, VALIDATION_DIR
 # [calc] inputs: everything else declared with input.* is [view] or [alert] (ARCHITECTURE §2.2).
 CALC_INPUTS = {"confirmedOnly", "fvgMinTicks", "fvgMinTra", "fvgMinRng", "fvgLen", "fvgMemory", "sesTz",
                "s1Nm", "s2Nm", "s3Nm", "s4Nm", "s1Ss", "s2Ss", "s3Ss", "s4Ss", "liqOn", "liqPreset", "liqLeftIn",
-               "liqRightIn", "liqReactIn", "liqMemory", "eqTolTk", "eqMinTch", "lrlOn"}
+               "liqRightIn", "liqReactIn", "liqMemory", "eqTolTk", "eqMinTch", "lrlOn", "cisdOn"}
 # Display policy accessors: they read fvgMitRule but are called only from L6/L7 (S-01 since v0.3.2).
 VIEW_READ_ALLOWED = {"policyBar", "policyTime"}
 CALC_SECTIONS = ("L1 · MARKET DATA", "L2 · DETECTION", "L5 · EVENT BUS", "L3 · STATE MANAGEMENT", "ENGINE RUN")
 RENDER_SECTIONS = ("L6 · RENDERER (functions", "L6 · RENDERER (run)")
 DRAWING_TYPES = {"line", "box", "label", "linefill", "table", "polyline"}
 STATE_CALLS = re.compile(r"\.(step|register|take|takeEq|cluster|trigger|advance|dropCluster|pushExtreme|markFinal|supersede|"
-                         r"advanceLrl|judge|grow|promote|seed|finish|trim|feedHtf|stepHtf|seedHtf|trimHtf|milestonesHtf)\(|"
+                         r"advanceLrl|judge|grow|promote|seed|finish|trim|feedHtf|stepHtf|seedHtf|trimHtf|milestonesHtf|"
+                         r"pruneCisd|feedCisd|factsCisd|confirmCisd)\(|"
                          r"\b(f_emit|f_emitHtf|f_roll|f_sesNew|f_sesStep|f_sesExtend|f_sesFinalize|f_sesSupersede|f_fvgStep)\(")
 
 
@@ -213,7 +214,7 @@ def st07_single_creation_paths():
 
 
 def st08_scope_no_later_phases():
-    pat = re.compile(r"\b(cisd|ifvg|smt|displacement|confluence|qualityscore)\b", re.I)
+    pat = re.compile(r"\b(ifvg|smt|displacement|confluence|qualityscore)\b", re.I)   # CISD: in scope since v0.7.0-dev
     bad = [f"line {i + 1}: {m.group(0)}" for i, ln in enumerate(source()) if (m := pat.search(code(ln)))]
     return not bad, f"later-phase identifiers in code: {bad or 'none'}"
 
@@ -274,15 +275,13 @@ def st13_oracle_defaults_match_pine():
 
 
 def st14_event_names_match_oracle():
-    from validation.models.events import ORACLE_ONLY, TYPES
+    from validation.models.events import TYPES
     src = "\n".join(source())
     fixed = set(re.findall(r'EV_\w+\s*=>\s*"([A-Z_]+)"', src))
     sided = re.findall(r"EV_\w+\s*=>\s*([sq]) \+ \"([A-Z_]+)\"", src)
     names = fixed | {f"{p}{n}" for k, n in sided for p in (("BSL_", "SSL_") if k == "s" else ("EQH_", "EQL_"))}
-    want = set(TYPES) - ORACLE_ONLY
-    ok = names == want
-    return ok, (f"Pine names {len(names)}, oracle names {len(want)} (+{len(ORACLE_ONLY)} oracle-only, not in Pine yet); "
-                f"only in Pine: {sorted(names - want) or 'none'}; only in oracle: {sorted(want - names) or 'none'}")
+    ok = names == set(TYPES)
+    return ok, f"Pine names {len(names)}, oracle names {len(TYPES)}; only in Pine: {sorted(names - set(TYPES)) or 'none'}; only in oracle: {sorted(set(TYPES) - names) or 'none'}"
 
 
 def st15_phase1_baseline_guard():
@@ -446,6 +445,109 @@ def st19_htf_rules(src: str | None = None):
     return not bad, f"{len(HTF_RULES)} rules, {len(HTF_CONSTANTS)} constants, {len(HTF_ORDER)} orders; wrong or missing: {bad or 'none'}"
 
 
+# DEF-CISD1…CISD9 (CISD-R) as they must read in Pine: the oracle's rules in Pine's incremental
+# formulation (validation/models/cisd.py CisdStack, proven equal to CisdEngine). Each rule must
+# match exactly one code line (comments and strings emptied; multi-line rules where structure matters).
+CISD_RULES = {
+    "TR average (body / TR metadata only)": r"^float\s+cisdTra\s+=\s+ta\.sma\(ta\.tr\(true\), CISD_TRA_LEN\)\s*$",
+    "starts UNKNOWN": r"^\s+int\s+state = 0\s*$",
+    "both sides armed while UNKNOWN": r"^\s+bool\s+armed = true\s*$",
+    "side coordinates (bearish: open and close negated, high ↔ −low)":
+        r"^\s+float\s+o\s+=\s+s\.sign \* open\n\s+float\s+lo\s+=\s+s\.sign > 0 \? low : -high\n\s+float\s+cl\s+=\s+s\.sign \* close\s*$",
+    "every low enters the leg-extreme stack": r"^\s+while s\.wBar\.size\(\) > 0 and lo <= s\.wLow\.last\(\) \+ EPS\s*$",
+    # a delivery candle (doji excluded) starts or continues a series and enters the delivery stack;
+    # anything else, a doji included, ends the series
+    "delivery candle → series → delivery stack": r"^    if cl < o - EPS\n        if not s\.inRun\n(?:            .*\n){4}"
+                                                r"        while s\.dBar\.size\(\) > 0 and lo <= s\.dLow\.last\(\) \+ EPS$",
+    "anything else ends the series (doji included)": r"^    else\n        s\.inRun := false$",
+    "L = the open of the series' first candle": r"^\s+s\.runL\s+:= o\s*$",
+    "equal extreme → the later candle (≤ pops)": r"^\s+while s\.dBar\.size\(\) > 0 and lo <= s\.dLow\.last\(\) \+ EPS\s*$",
+    "a new bottom = the reference moved": r"^\s+if s\.dBar\.size\(\) == 1\s*$",
+    "window restart drops older entries only": r"^\s+while s\.dBar\.size\(\) > 0 and s\.dBar\.first\(\) < a\s*$",
+    "armed sides with a reference": r"^\s+if s\.armed and s\.dBar\.size\(\) > 0\s*$",
+    "confirmation: first close strictly beyond L, any colour, after the origin and the flip":
+        r"^\s+ok := bar_index > s\.dOrg\.first\(\) and bar_index > s\.since and s\.sign \* close > s\.dL\.first\(\) \+ EPS\s*$",
+    "decided at bar close, independent of display": r"^\s+if cisdOn and barstate\.isconfirmed\s*$",
+    "the armed side is against the state": r"^\s+CisdSide arm = cisdBook\.state > 0 \? cisdDn : cisdUp\s*$",
+    "the state side restarts at the armed side's new extreme":
+        r"^\s+if arm\.dBar\.size\(\) > 0 and arm\.dBar\.first\(\) == bar_index\n\s+sts\.pruneCisd\(bar_index\)\s*$",
+    "never two CISDs on one bar": r"^\s+if upHit and dnHit\s*$",
+    "the record (L, extreme, leg extreme, metadata)":
+        r"^\s+Cisd r = Cisd\.new\(s\.sign, s\.dOrgT\.first\(\), b\.state, s\.sign \* s\.dL\.first\(\), origin, eb, "
+        r"s\.dTime\.first\(\), s\.sign \* s\.dLow\.first\(\), s\.sign \* leg, s\.known, bar_index, time, close, bk\)\s*$",
+    "leg extreme: every low from the origin": r"^\s+if j >= origin\s*$",
+    "body / TR before the bar": r"^\s+float\s+tr1\s+=\s+cisdTra\[1\]\s*$",
+    "the previous CISD ends": r"^\s+prv\.endBar := bar_index\s*$",
+    "flip: the state becomes the CISD's side": r"^\s+b\.state\s+:= s\.sign\s*$",
+    "flip: the opposite leg starts at this leg's delivery extreme": r"^\s+op\.pruneCisd\(eb\)\s*$",
+    "flip: this side's next leg starts at the opposite extreme": r"^\s+na0 := op\.dBar\.first\(\)\n\s+s\.pruneCisd\(na0\)\s*$",
+    "flip: alternation": r"^\s+s\.armed\s+:= false\n\s+op\.armed := true\n\s+op\.since := bar_index\s*$",
+    "identity = side + origin time": r"^\s+str\.tostring\(r\.side\) \+ \"\" \+ str\.tostring\(r\.id\)\s*$",
+    "event: side, id, origin, L": r"^\s+f_emit\(EV_CISD_CONFIRMED, r\.side, r\.id, r\.origin, r\.level, f_cisdTxt\(r\)\)\s*$",
+    "fact: retest (wick back to L)": r"^\s+if na\(r\.retest\) and lo <= lv \+ EPS\s*$",
+    "fact: close back at or through L": r"^\s+if na\(r\.reclaim\) and cl <= lv \+ EPS\s*$",
+    "fact: close beyond the leg extreme": r"^\s+if na\(r\.broken\) and cl < r\.side \* r\.legExt - EPS\s*$",
+    "facts only while ACTIVE": r"^\s+if na\(r\.endBar\)\n\s+float\s+lv\s+=\s+r\.side \* r\.level\s*$",
+    "memory: the oldest record goes": r"^\s+if b\.recs\.size\(\) > CISD_MEM\n\s+Cisd old = b\.recs\.shift\(\)\s*$",
+    "renderer: no CISD before the guard": r"^\s+if cur\.cBar >= CISD_GUARD\s*$",
+    "alert: OFF by default input, never before the guard":
+        r"^\s+EV_CISD_CONFIRMED => cisdAlert and e\.eventBar >= CISD_GUARD\s*$",
+}
+# FACTS → stacks → state-side restart → confirmation, after the HTF engine; inside the flip the
+# opposite side restarts first (this side's next leg starts at its new extreme).
+CISD_ORDER = (("s.stepHtf()", "cisdBook.factsCisd()", "cisdUp.feedCisd()", "cisdDn.feedCisd()", "sts.pruneCisd(bar_index)",
+               "bool upHit = cisdUp.readyCisd()", "cisdBook.confirmCisd(cisdUp, cisdDn)"),
+              ("op.pruneCisd(eb)", "s.pruneCisd(na0)", "f_emit(EV_CISD_CONFIRMED"))
+CISD_CONSTANTS = {"CISD_MEM": "memory", "CISD_TRA_LEN": "tra_len", "CISD_GUARD": "guard"}
+
+
+def _cisd_blocks(lines: list[str]) -> list[str]:
+    """The CISD engine's code: its L3 block and its ENGINE RUN block."""
+    out, on = [], False
+    for ln in lines:
+        if ln.startswith("// ── CISD (DEF-CISD1") or ln.startswith("    // ── CISD (DEF-CISD1"):
+            on = True
+        elif on and (ln.startswith("// ════") or ln.startswith("// ── ")):
+            on = False
+        if on:
+            out.append(code(ln))
+    return out
+
+
+def st20_cisd_rules(src: str | None = None):
+    """DEF-CISD1…CISD9 in IST.pine: the approved constants (= CisdSettings), every rule line,
+    the per-bar order, no history read beyond the metadata's [1] and no number but 0 / 1 in the
+    engine (no leg-length limit, no truncation), the 200-bar guard and the display inputs
+    outside detection, side in the identity."""
+    from validation.models.types import CisdSettings
+    raw = src.splitlines() if src is not None else list(source())
+    lines = [code(ln) for ln in raw]
+    text = "\n".join(lines)
+    bad = [name for name, rx in CISD_RULES.items() if len(re.findall(rx, text, re.M)) != 1]
+    want = CisdSettings()
+    for name, field in CISD_CONSTANTS.items():
+        m = re.findall(rf"^{name}\s*=\s*([\d.]+)\s*$", text, re.M)
+        if len(m) != 1 or float(m[0]) != float(getattr(want, field)):
+            bad.append(f"{name} = {m or 'missing'} (oracle {getattr(want, field)})")
+    for seq in CISD_ORDER:
+        at = [next((i for i, ln in enumerate(lines) if s in ln), None) for s in seq]
+        if None in at or at != sorted(at) or len(set(at)) != len(at):
+            bad.append("order " + " → ".join(seq))
+    engine = "\n".join(_cisd_blocks(raw))
+    hist = [h for h in re.findall(r"\w+\[[^\]]*\]", engine) if h != "cisdTra[1]"]
+    nums = sorted({n for n in re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", engine) if float(n) not in (0, 1)})
+    if not engine or hist or nums or "max_bars_back" in engine:
+        bad.append(f"engine reads history {hist or ''} / numbers {nums or ''}: a leg-length limit or truncation")
+    if any(re.search(r"max_bars_back\(\s*cisd", ln) for ln in lines):
+        bad.append("max_bars_back on a CISD series")
+    calc = {i for i, _ in lines_of(CALC_SECTIONS)}
+    leaks = [i + 1 for i, ln in enumerate(lines) if i in calc and re.search(r"\b(CISD_GUARD|cisdShow|cisdPrev|cisdAlert)\b", ln)]
+    if leaks:
+        bad.append(f"guard / display / alert input read by detection: lines {leaks}")
+    return not bad, (f"{len(CISD_RULES)} rules, {len(CISD_CONSTANTS)} constants, {len(CISD_ORDER)} orders, no history / "
+                     f"limit, guard and display outside detection; wrong or missing: {bad or 'none'}")
+
+
 def st18_no_overloaded_functions(src: str | None = None):
     """Pine forbids global variables inside an overloaded user function or method (CE10182:
     'Cannot use global variable … in the local scope of overloaded function'). Every
@@ -477,4 +579,6 @@ CHECKS = [
     ("ST-17", "DEF-LRL1…LRL6: approved constants, oracle formulas, ADVANCE before JUDGE", st17_lrl_rules),
     ("ST-18", "No overloaded user function or method names (Pine CE10182)", st18_no_overloaded_functions),
     ("ST-19", "DEF-B0…B6 HTF FVG: approved constants, timing and definition lines, per-bar order", st19_htf_rules),
+    ("ST-20", "DEF-CISD1…CISD9 CISD-R: approved rules and constants, per-bar order, no leg-length limit, "
+              "guard and display outside detection", st20_cisd_rules),
 ]

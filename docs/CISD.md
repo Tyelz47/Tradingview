@@ -4,9 +4,12 @@
 * **The definition was APPROVED by the user on 2026-10-30.** It is the recommendation CISD-R of `docs/STUDY_CISD.md` §H. The decisions D-C1…D-C12 were approved, with these clarifications:
   * an explicit UNKNOWN initial state (DEF-CISD4);
   * the 200-bar guard is a display / alert guard only, not part of the definition (DEF-CISD9).
-* **Oracle only (validation 1.12.0).** `validation/models/cisd.py` is the opt-in module `cisd`.
-  * **No Pine yet.** The Pine implementation starts only after the user approves these oracle results.
-  * Default runs, the regression baseline and parity do not include it.
+* **Oracle approved by the user on 2026-10-30** (validation 1.12.0): `validation/models/cisd.py` is the opt-in module `cisd` of the oracle; default runs and the regression baseline do not include it.
+* **Implemented in Pine: IST v0.7.0-dev (EXPERIMENTAL, NOT frozen), validation 1.13.0.** §5 describes it.
+  * The definition was not changed for Pine.
+  * The identity of a CISD is **side + origin time** (user, 2026-10-30).
+  * TradingView testing is pending (`docs/TESTS_CISD.md`).
+  * CISD is frozen only after a real TradingView Pine ↔ oracle capture parity with 0 DIFFERENCE (CISD-L10) and the user's labelled golden cases (CISD-L11).
 * Real golden cases come later. Once the Pine implementation runs in TradingView, the user marks real CISDs on the chart, and those become the first human-labelled golden cases. The oracle is validated without them: synthetic cases, real NQ statistical replay, random walks.
 * The frozen baselines `PHASE1_BASELINE_v0.3.2` and `PHASE2_BASELINE_v0.4.4-dev` are untouched. Phase 1, Phase 2, LRL and HTF FVG are untouched.
 
@@ -30,15 +33,15 @@
 | **DEF-CISD1** delivery candle, series | A **delivery candle** has close < open − ε (down-close). A **doji** (\|close − open\| ≤ ε) is not one. A **delivery series** is a maximal run of consecutive delivery candles: an up-close candle **or a doji ends it**. |
 | **DEF-CISD2** leg window | The bars searched for the bullish side's delivery extreme. While the state is UNKNOWN: from bar 0 (the first loaded bar). Otherwise from the delivery extreme of the leg before it: the bar of the bearish CISD's extreme, its highest delivery high. |
 | **DEF-CISD3** level L | The **lowest delivery low** in the leg window, counting delivery candles only (a non-delivery wick never selects). On an **equal low, the later delivery candle wins**. **L = the open of the first candle of the series holding that low** (the origin). L is known at the close of the bar that made that low. |
-| **DEF-CISD4** state of delivery | One value: **UNKNOWN**, **BULL** or **BEAR**. The engine starts UNKNOWN; the first loaded bar establishes nothing. While UNKNOWN, both sides are armed; the first confirmed CISD (either side) establishes the state. Afterwards only the side against the state is armed, so CISDs **strictly alternate**. Proof that two CISDs never confirm on one bar is below. |
+| **DEF-CISD4** state of delivery | One value: **UNKNOWN**, **UP** (after a bullish CISD) or **DOWN** (after a bearish CISD). The engine starts UNKNOWN; the first loaded bar establishes nothing. While UNKNOWN, both sides are armed; the first confirmed CISD (either side) establishes the state. Afterwards only the side against the state is armed, so CISDs **strictly alternate**. Proof that two CISDs never confirm on one bar is below. |
 | **DEF-CISD5** confirmation | The first bar t > origin (and after the previous CISD) whose **close > L + ε**. The confirming candle may be **any colour** (up, down or doji). A wick through L does not confirm, nor does a close exactly at L; one tick beyond does. |
-| **DEF-CISD6** record | Fields: `id` (origin candle time), `side`, delivery state `before` / `after`, `level` L, `origin`, `ext_bar`, `ext` (the delivery extreme), `leg_ext`, `known`, `bar`, `time`, `close`, `body_k`, `end` (status ACTIVE → ENDED), and the facts `retest`, `reclaim`, `broken`. Definitions of the less obvious fields:<br>• `leg_ext`: the lowest wick from the origin to the confirmation. It is the extreme the CISD protects.<br>• `body_k`: side × (close − open) / TR average of the 14 bars before the confirmation. It is metadata for a future displacement module; no decision reads it.<br>• facts (immutable, from the bar after the confirmation, while ACTIVE): `retest` = the first wick back to L; `reclaim` = the first close back at or through L; `broken` = the first close beyond `leg_ext`. Always retest ≤ reclaim ≤ broken. |
+| **DEF-CISD6** record | Identity: **side + origin time** (`id` alone is not the identity). Fields: `id` (origin candle time), `side`, delivery state `before` / `after`, `level` L, `origin`, `ext_bar`, `ext` (the delivery extreme), `leg_ext`, `known`, `bar`, `time`, `close`, `body_k`, `end` (status ACTIVE → ENDED), and the facts `retest`, `reclaim`, `broken`. Definitions of the less obvious fields:<br>• `leg_ext`: the lowest wick from the origin to the confirmation. It is the extreme the CISD protects.<br>• `body_k`: side × (close − open) / TR average of the 14 bars before the confirmation. It is metadata for a future displacement module; no decision reads it.<br>• facts (immutable, from the bar after the confirmation, while ACTIVE): `retest` = the first wick back to L; `reclaim` = the first close back at or through L; `broken` = the first close beyond `leg_ext`. Always retest ≤ reclaim ≤ broken. |
 | **DEF-CISD7** lifecycle, memory | A confirmed CISD is **ACTIVE** until the opposite CISD, which **ENDS** it on its own bar. There are no further states and no RETEST / INVALIDATED events. At most one record is ACTIVE (the newest). Records kept: `memory` = 50. When full, the oldest (always ENDED) record goes, with `CISD_DROPPED_MEMORY`. |
 | **DEF-CISD8** isolation | Detection reads bars only: no Phase 1 / 2 state, sessions, levels, LRL, HTF FVG, liquidity or context. With CISD on, every other module's events and state are byte-identical. |
 | **DEF-CISD9** display / alert guard (**not part of the definition**) | The renderer and alerts ignore a CISD confirmed before bar index 200. It is a conservative chart-start / reload stabilisation guard and may be revised after real TradingView reload tests. During the first 200 bars the CISD calculation, records, events and state run normally; parity and debug can observe them. |
 
 **After a CISD (the flip).** Say a bullish CISD confirms on bar t:
-* the state becomes BULL;
+* the state becomes UP;
 * the previous (bearish) CISD ends on bar t;
 * the bearish side is armed. Its leg window restarts at this CISD's delivery extreme (`ext_bar`) and is scanned up to t;
 * the bullish side is disarmed. Its window restarts at the bearish side's new extreme, and then again at every new bearish-side extreme, so its next leg is always measured from the turn.
@@ -59,9 +62,10 @@
 | `CISD_CONFIRMED` | +1 / −1 | origin candle time | L | origin bar | the confirmation bar |
 | `CISD_DROPPED_MEMORY` | +1 / −1 | the record's id | L | origin bar | the bar a new CISD pushes the oldest record out |
 
-* The audit text is `prev=UNKNOWN|BULL|BEAR · close=… · ext=…`.
+* The events carry the side (`dir`, printed BULL / BEAR) and the origin time (`id`): together, the identity.
+* The audit text of `CISD_CONFIRMED` is `prev=UNKNOWN|UP|DOWN · close=… · ext=… · et=<the extreme's bar time, ms> · bk=<body / TR, or na>` (oracle `audit()` = Pine `f_cisdTxt`).
 * Retest, close back through L and leg break are **record facts, not events**. They become events only if a later study proves they deserve it.
-* Both types are `ORACLE_ONLY`: static check ST-14 excludes them until Pine gains the module. ST-14 stays exact for every other name.
+* Pine has both names since v0.7.0-dev: static check ST-14 is exact again (the temporary oracle-only exception is removed).
 
 ## 3 · Non-repaint guarantees
 
@@ -127,25 +131,110 @@ They are checked on every bar of every checked run:
 * generated cases;
 * long walks: 20,000 bars × 3 seeds in FULL.
 
-## 5 · Pine notes (for the next phase; nothing is implemented)
+## 5 · Pine implementation (IST v0.7.0-dev, validation 1.13.0)
 
-* Per bar the cost is O(1); a flip adds one bounded scan of the leg window.
-  * The longest scan measured is 85 bars on NQ 1m (`max_scan` counter) and ≤ 67 on walks.
-  * Pine's `max_bars_back` must cover it: 500 is the proposal.
-  * A longer window is possible in principle (a very long leg). The Pine phase must decide what happens beyond the buffer and test it.
-* Event names `CISD_CONFIRMED` / `CISD_DROPPED_MEMORY` and the audit text above.
-* Renderer (D-C8):
-  * the ACTIVE CISD only by default: a short horizontal 1 px line from the origin to the confirmation, with a small `CISD` label;
-  * the previous CISD optionally faded;
-  * no boxes, no history clutter;
-  * the guard as in DEF-CISD9.
-* Alert: exists, **OFF** by default (D-C12).
-* Chart timeframe only; no MTF CISD (D-C11).
-* Freeze gate: a real TradingView Pine ↔ oracle parity with 0 DIFFERENCE, then the user's labelled golden cases.
+**No leg-length limit, no backward scan.**
+* The oracle re-reads the leg window at a flip. Pine does not: it runs the same definition incrementally.
+* This incremental form is `validation/models/cisd.py` `CisdStack`. It is proven record-for-record and event-for-event equal to `CisdEngine` on:
+  * NQ 1m / 3m / 5m / 15m;
+  * four 20,000-bar walks and a mirrored walk;
+  * every scenario, with memory 50 and 2;
+  * generated candles (Hypothesis).
+* Each side (side coordinates) keeps two stacks:
+  * `d`: the suffix minima of the delivery lows in its leg window, each entry carrying its series' origin and L. The first entry is the window's delivery extreme (an equal low pops the older entry: the later candle wins) and its reference.
+  * `w`: the suffix minima of every low, for the leg extreme.
+* A window restart (the flip, or the state side's restart at the armed side's new extreme) only drops the entries before the new start. No bar is ever re-read, and no history buffer is involved:
+  * the engine reads no series beyond `cisdTra[1]`, the body / TR metadata;
+  * drawings use bar times.
+* **Proof on a leg longer than 500 bars** (`tests/test_cisd_pine.py::test_a_leg_longer_than_500_bars_is_exact`):
+  * the bullish CISD's origin is 657 bars back, its delivery extreme 648 and its leg extreme 560;
+  * the oracle's flip re-reads 649 bars;
+  * the next bearish CISD's origin is 603 bars back;
+  * Pine's formulation gives the exact records, with stacks of at most 4 entries;
+  * on the last 500 bars only, the same bar would have another level (95.5 instead of 100).
+* **Resources.**
+  * Per bar and side: amortised O(1) pushes and pops.
+  * At a flip: array shifts of the dropped entries.
+  * Stack sizes are bounded by the distinct price levels inside a leg, not by its length. Measured peak: 25 entries on NQ 1m, 17 on 20,000-bar walks, 4 on the 657-bar leg.
+  * Records: 50 `Cisd` objects.
+  * Drawings: at most 2 lines and 2 labels.
+
+**Pine objects.**
+* `Cisd`: the record. Identity side + origin time (`f_cisdKey`).
+* `CisdSide` ×2 (`cisdUp`, `cisdDn`): armed flag, window start, last flip, the current series, both stacks.
+* `CisdBook`: the delivery state (0 UNKNOWN · +1 UP · −1 DOWN), the records and the counters. A Pine function cannot assign a global, so they live in an object.
+* Methods `feedCisd`, `pruneCisd`, `readyCisd`, `factsCisd`, `confirmCisd`.
+* Per closed bar, after the HTF engine:
+  1. the facts of the active CISD;
+  2. both sides' stacks;
+  3. the state side's restart at the armed side's new extreme;
+  4. the confirmation of the armed side (both while UNKNOWN). Two sides at once is impossible (proof §1); Pine stops with `runtime.error` if it ever happens.
+* Static check ST-20 pins every rule line, the constants, the per-bar order, the absence of any history read or number in the engine (no truncation), and the guard and display inputs outside detection.
+  * Its mutation tests catch the user's 15 listed mutations and more.
+
+**Settings** (group "CISD · CHANGE IN STATE OF DELIVERY"; no mathematical input, CISD-R has none):
+* Enable CISD engine **ON** [calc];
+* Show CISD **ON** [view];
+* Show previous CISD (faded) **OFF** [view];
+* CISD alerts **OFF** [alert].
+
+Developer: Inspect CISD (0 = current).
+
+**Renderer** (D-C8):
+* the current CISD (the newest record, always the ACTIVE one): one 1 px solid line at L from the origin candle to the confirming candle, plus a tiny `CISD` label at its end;
+* colour `#4F473F`, the HTF label tone for the `#C2BAAE` background;
+* the previous CISD faded (transparency 60) only with Show previous CISD;
+* no boxes, no history;
+* rebuilt on the last bar from state; visibility never reaches L3.
+
+**200-bar guard** (DEF-CISD9, a UX / reload guard, **not DEF-CISD**):
+* a CISD confirmed before bar index 200 is never drawn and never alerted, also later, so nothing appears suddenly on bar 200;
+* it remains in the logical state, the events, the debug table and the capture.
+
+**Alert** (D-C12):
+* "CISD alerts", OFF by default;
+* one message per `CISD_CONFIRMED`, at the close of the confirming bar, never in the first 200 bars;
+* CISD is decided only on closed bars, so there is no intrabar CISD.
+
+**Debug table rows 45–51:**
+* engine;
+* state (UNKNOWN / UP / DOWN), records / memory, confirmed, dropped, the active CISD, the guard state;
+* per side: armed, candidate L with its series, the delivery extreme and its time, window start, stack sizes (and peak);
+* inspect: id = side:origin time, before → after, L, extreme, confirmation, close, status;
+* the facts, the leg extreme and body / TR;
+* what is drawn.
+
+**Parity capture (Pine Logs).**
+* `CAPTURE|…|cisd=1|cisdmem=50|cisdtra=14|cisdguard=200|…`.
+* After the first captured bar, the whole engine state:
+  * `CISDSTATE|state=|confirmed=|dropped=`;
+  * `CISDSIDE|side=±1|armed=|a=|since=|known=|run=|rb=|rt=|rl=|d=bar:time:low:origin:origin time:L;…|w=bar:low;…` (side coordinates, bottom first);
+  * one `CISDREC|side=|id=|before=|level=|origin=|eb=|et=|ext=|leg=|known=|bar=|time=|close=|bk=|end=|rt=|rc=|br=` per record.
+* Per `BAR`: `CS=` state, `CU=` / `CN=` the bullish / bearish candidate L (`off` = not armed, `na` = armed without a reference), `CA=` the active CISD's side:origin time (or `na`).
+* Events: `CISD_CONFIRMED BULL|BEAR id=<origin> px=<L> · prev=… · close=… · ext=… · et=… · bk=…` and `CISD_DROPPED_MEMORY … · ended record`.
+
+`python -m validation.parity --capture` compares (`validation/parity/capture.py` `_compare_cisd`):
+* **(b) exactly from an established state.** The snapshot is restored into `CisdStack` and replayed on the captured bars. Compared:
+  * per bar: state, both candidates, the active CISD;
+  * every event: side, id, time, L, previous state, close, extreme, its time, body / TR.
+* **(c) against the definition oracle itself.** `CisdEngine` is started UNKNOWN on the first captured bar. After its first CISD that equals one of Pine's (same bar, side, origin, L, extreme), every later CISD must be identical: both engines are then in the same state.
+* NOT OBSERVABLE:
+  * the first captured bar's events (they are in the snapshot);
+  * body / TR of a CISD confirmed in the first 15 captured bars (the replay's TR average warms up);
+  * in (c), Pine's CISDs before the definition oracle synchronises (a state started UNKNOWN cannot know Pine's).
+
+**Warm-up and stabilisation.** CISD needs no capture warm-up (the snapshot carries its state). On a chart, detection runs from the first loaded bar (UNKNOWN). The 200-bar guard only hides drawings and alerts; the reload measurements are in §3.
+
+**Pine-specific compromises.**
+* State in objects (a Pine function cannot assign a global).
+* A `runtime.error` for the impossible double confirmation.
+* Pine's `ta.sma` and Python's sum can differ in the last float digit, so body / TR is compared within 1e-6.
+* Nothing in the definition was approximated, bounded or re-anchored.
+
+**Freeze gate:** a real TradingView Pine ↔ oracle capture parity with 0 DIFFERENCE (CISD-L10), then the user's labelled golden cases (CISD-L11).
 
 ## 6 · Not started (by instruction)
 
-* Pine CISD.
 * Displacement module.
 * IFVG.
 * DEF-LRL9 context.
