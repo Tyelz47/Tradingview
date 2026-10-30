@@ -1,5 +1,48 @@
 # Changelog
 
+## CISD oracle — validation 1.12.0 (2026-10-30, branch `research/cisd`) — no indicator change, for approval before Pine
+
+**User (2026-10-30):** CISD-R is approved for the reference-model / oracle phase; **no Pine yet**.
+* D-C1…D-C12 approved.
+* Clarifications:
+  * an explicit **UNKNOWN** initial state;
+  * the 200 bars are a **display / alert guard only**, not part of the definition and not a requirement for a CISD;
+  * the confirmation body / TR average is **metadata only**;
+  * real golden cases come from the user once Pine runs in TradingView.
+
+**DELIVERABLE** `docs/CISD.md` (DEF-CISD1…9):
+* delivery candle / series: a doji ends a series;
+* the leg window;
+* the level L: delivery extremes only, an equal extreme goes to the later candle;
+* the state of delivery: UNKNOWN → established → strict alternation, with the proof that two CISDs never confirm on one bar;
+* confirmation: first close > L + ε, any colour;
+* the record;
+* lifecycle ACTIVE → ENDED and memory;
+* isolation;
+* the display guard.
+
+**Oracle** `validation/models/cisd.py`, the opt-in module `cisd`:
+* not in default runs, baselines or parity;
+* `CisdSettings`: memory 50, TR length 14 (metadata), guard 200 (view);
+* events `CISD_CONFIRMED` and `CISD_DROPPED_MEMORY` (`events.ORACLE_ONLY`: ST-14 excludes them until Pine gains the module, and stays exact for every other name);
+* retest, close back through L and leg break are immutable record facts, not events;
+* record by record identical to the approved study engine: NQ 1m / 3m / 5m / 15m = 121 / 55 / 23 / 14 CISDs, walks, all 14 scenarios.
+
+**Validation 1.12.0:**
+* invariants INV-CISD-01…08 with negative tests: state, level and window, confirmation, timing, facts, frozen, events, memory / lifecycle;
+* `tests/test_cisd.py`: the user's T1…T18, plus oracle = study, record fields, memory drop path, invariants on NQ with every module, opt-in settings;
+* `fuzz/test_cisd_properties.py`: invariants, mirror, translation, no lookahead, guard and metadata change no decision, other modules unchanged, long walks;
+* report section `cisd`, `--phase cisd`.
+
+**Correction:** the study's reload figure (≤ 4 CISDs, ≤ 62 bars) covered starts in the first 600 bars only. Over the whole capture it is ≤ 8 CISDs and ≤ 87 bars (1m), ≤ 105 bars (5m), ≤ 60 on walks. All are inside the 200-bar display guard, which remains a safeguard, not a guarantee.
+
+**TEST:**
+* FULL: **PASS**, exit 0, 537.0 s, **658 passed, 1 skipped** (the same skip as before):
+  * cisd 75/75; detectors 70/70 (+8); properties 29/29; long walks 16/16;
+  * static 19/19; every other section unchanged;
+  * FULL takes about 4 minutes longer than in 1.11.0, mostly the CISD properties and long walks.
+* `src/IST.pine`, Phase 1, Phase 2, LRL, HTF FVG, the frozen tags and the regression baseline are unchanged.
+
 ## CISD research study — validation 1.11.0 (2026-10-30, branch `research/cisd`) — no indicator change, for approval
 
 **User (2026-10-30):** the next functional module is CISD. Define it exactly, deterministically and without repainting **before** any reference model or Pine. This is a research / specification phase only.

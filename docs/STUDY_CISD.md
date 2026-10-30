@@ -1,8 +1,8 @@
 # CISD research study · change in state of delivery
 
-**Status: RESEARCH / SPECIFICATION ONLY, for the user's approval.**
-* No change to `src/IST.pine`, the oracle, Phase 1, Phase 2, LRL or HTF FVG.
-* No reference model and no Pine code are written until the user approves a definition (§N).
+**Status: APPROVED by the user on 2026-10-30 (CISD-R, D-C1…D-C12, with clarifications).** The specification is now `docs/CISD.md`, and the oracle is `validation/models/cisd.py` (validation 1.12.0, no Pine yet). This study is kept as the research record.
+* **Correction (validation 1.12.0):** the reload figure "≤ 4 CISDs, ≤ 62 bars" below covered starts in the first 600 bars only. Over the whole capture it is ≤ 8 CISDs and ≤ 87 bars (`docs/CISD.md` §3).
+* At the time of the study: no change to `src/IST.pine`, the oracle, Phase 1, Phase 2, LRL or HTF FVG; no reference model and no Pine code before approval (§N).
 * Harness: `validation/studies/cisd.py` (`python -m validation.studies.cisd --svg docs/study_cisd`).
 * Tests: `validation/tests/test_cisd_study.py`, report section `research.cisd`.
 * Charts: `docs/study_cisd/cisd-R.svg` (recommended) and `cisd-2.svg` (a stateless candidate, for the clutter comparison).

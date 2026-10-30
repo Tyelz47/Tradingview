@@ -10,7 +10,8 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 | `docs/LIQUIDITY.md` | Phase 2 liquidity engine: exact definitions (DEF-L), timing, budgets, limitations. |
 | `docs/LRL.md` | LRL detection (diagonal failure-swing liquidity), DEF-LRL1…9 (approved) and its Pine implementation (§6). The research behind it is in `docs/STUDY_LRL.md`. |
 | `docs/HTF_FVG.md` | HTF Fair Value Gaps (15m · 30m · 1H · 4H · 1D · 1W), DEF-B0…B6 (approved 2026-10-29, decisions D1–D10), timing, seeds, reload consistency, parity capture. Design history: `docs/HTF_FVG_DESIGN.md`. |
-| `docs/STUDY_CISD.md` | CISD research / specification (A–N): five candidate definitions, real NQ vs random walk, recommended CISD-R (series open · state of delivery · close), lifecycle, events, renderer, validation plan, open decisions D-C1…D-C12. **For approval; nothing implemented.** |
+| `docs/CISD.md` | CISD (change in state of delivery), DEF-CISD1…9: CISD-R approved 2026-10-30, explicit UNKNOWN start, events, record facts, 200-bar display guard (not part of the definition), validation T1–T18. **Oracle only; no Pine yet.** |
+| `docs/STUDY_CISD.md` | CISD research (A–N): five candidate definitions, real NQ vs random walk, the recommendation CISD-R (approved), decisions D-C1…D-C12. |
 | `docs/TESTS_HTF.md` | HTF FVG tests: automated S-HTF, TradingView HTF-L00…L14 (L12 = Pine ↔ oracle parity, the freeze criterion). |
 | `docs/TESTS_LRL.md` | LRL tests: automated S-LRL, TradingView LRL-L00…L12 (L11 = Pine ↔ oracle parity, the freeze criterion). |
 | `docs/TESTS_PHASE2.md` | Phase 2 tests (S-01…S-13, L00–L48) and the manual validation procedure. |
@@ -35,6 +36,7 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 | 2 | Swing liquidity, BSL/SSL, taken, sweep vs break, EQH/EQL | **v0.4.4-dev FROZEN Phase 2 baseline (2026-10-28) · tag `PHASE2_BASELINE_v0.4.4-dev` · copy in `releases/v0.4.4-dev/` · significance C1 = reaction AND dominance (W 10/30/60) · TradingView L00, L45–L48 PASS (L48: 1,000-bar real-NQ parity, 0 DIFFERENCE); L01–L44 not recorded one by one · `docs/PHASE2_FREEZE_REPORT.md`** |
 | LRL | Diagonal failure-swing liquidity (detection only; target-quality context later) | **v0.5.3-dev EXPERIMENTAL (not frozen) · one straight line per LRL · LRL-L00 compile PASS (v0.5.1-dev); historical-drawing retest pending · in Pine, oracle + validation 1.9.3 (LRL unchanged in v0.6.0-dev; neutral grey) · terminal classes DRIFT / SWEEP / BREAK / EXPIRED · TradingView LRL-L00…L12 pending (`docs/TESTS_LRL.md`) · `docs/LRL.md`** |
 | HTF FVG | Fair value gaps of the 15m / 30m / 1H / 4H / 1D / 1W candles (Module B, beside the frozen Phase 1 engine) | **v0.6.2-dev EXPERIMENTAL (not frozen) · v0.6.0-dev compiles and runs (user, 2026-10-30); v0.6.1-dev / v0.6.2-dev = readability passes (labels, LRL line, grey-brown HTF palette for a `#C2BAAE` background) · in Pine, oracle + validation 1.10.1 · non-repainting ([1] + lookahead_on) · own-timeframe invalidation · seeds · ≤ 12 neutral grey boxes, timeframe label bottom-right · Phase 1 `Show FVGs` default OFF (reviewed deviation) · TradingView HTF-L00…L14 pending (`docs/TESTS_HTF.md`) · `docs/HTF_FVG.md`** |
-| 3 | Displacement, CISD | design in Appendix A |
+| CISD | Change in state of delivery (detection only; context later) | **CISD-R approved (2026-10-30) · oracle + validation 1.12.0 · no Pine yet · events CISD_CONFIRMED / CISD_DROPPED_MEMORY · `docs/CISD.md`** |
+| 3 | Displacement | design in Appendix A |
 | 4 | IFVG | design in Appendix A |
 | 5 | Quality score, confluence dashboard, UX | later |

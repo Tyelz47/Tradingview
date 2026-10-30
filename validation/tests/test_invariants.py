@@ -516,6 +516,80 @@ def htf08():
     mon.check()
 
 
+# ── CISD (opt-in module, docs/CISD.md) ──
+def cisd_case(n=None):
+    """The merged NQ captures with the CISD module, the first n bars stepped and checked."""
+    from validation.studies.lrl import nq_candles
+    m = IstModel(Settings(modules=("cisd",)))
+    mon = Monitor(m)
+    for c in nq_candles()[:n]:
+        m.step(c)
+        mon.check()
+    return m, mon
+
+
+def _cisd_bar(i=4):
+    """Confirmation bar of the i-th CISD on the NQ captures."""
+    from validation.studies.lrl import nq_candles
+    return [e.bar for e in IstModel(Settings(modules=("cisd",))).run(nq_candles()).events
+            if e.type == "CISD_CONFIRMED"][i]
+
+
+def cisd_new(corrupt):
+    """The 5th CISD's confirmation bar is stepped, its new record corrupted, then checked: the
+    monitor sees the record for the first time."""
+    from validation.studies.lrl import nq_candles
+    t = _cisd_bar()
+    m, mon = cisd_case(t)
+    m.step(nq_candles()[t])
+    corrupt(m.cisd.recs[-1])
+    mon.check()
+
+
+def cisd01():
+    m, mon = cisd_case(_cisd_bar() + 3)
+    m.cisd.delivery = -m.cisd.delivery
+    mon.check()
+
+
+def cisd02():
+    cisd_new(lambda r: setattr(r, "level", r.level + 0.25))
+
+
+def cisd03():
+    cisd_new(lambda r: setattr(r, "body_k", (r.body_k or 0) + 1))
+
+
+def cisd04():
+    cisd_new(lambda r: setattr(r, "known", r.bar + 1))
+
+
+def cisd05():
+    m, mon = cisd_case(_cisd_bar() + 1)                  # the confirmation bar, checked: no fact yet
+    r = m.cisd.recs[-1]
+    r.retest = r.bar                                      # a fact on the confirmation bar itself
+    mon.check()
+
+
+def cisd06():
+    m, mon = cisd_case()
+    m.cisd.recs[0].level += 0.25                          # an ENDED record
+    mon.check()
+
+
+def cisd07():
+    m, mon = cisd_case()
+    r = m.cisd.recs[-1]
+    m.log.events.append(ev_now(m, "CISD_DROPPED_MEMORY", r.side, r.id, r.level))   # still in memory
+    mon.check()
+
+
+def cisd08():
+    m, mon = cisd_case()
+    m.cisd.s = replace(m.cisd.s, memory=1)
+    mon.check()
+
+
 CASES = {
     "INV-EV-01": ev01, "INV-EV-02": ev02, "INV-EV-03": ev03, "INV-EV-04": ev04, "INV-EV-05": ev05,
     "INV-FVG-01": fvg01, "INV-FVG-02": fvg02, "INV-FVG-03": fvg03, "INV-FVG-04": fvg04, "INV-FVG-05": fvg05,
@@ -531,6 +605,8 @@ CASES = {
     "INV-LRL-06": lrl06, "INV-LRL-07": lrl07, "INV-LRL-08": lrl08, "INV-LRL-09": lrl09, "INV-LRL-10": lrl10,
     "INV-HTF-01": htf01, "INV-HTF-02": htf02, "INV-HTF-03": htf03, "INV-HTF-04": htf04, "INV-HTF-05": htf05,
     "INV-HTF-06": htf06, "INV-HTF-07": htf07, "INV-HTF-08": htf08,
+    "INV-CISD-01": cisd01, "INV-CISD-02": cisd02, "INV-CISD-03": cisd03, "INV-CISD-04": cisd04,
+    "INV-CISD-05": cisd05, "INV-CISD-06": cisd06, "INV-CISD-07": cisd07, "INV-CISD-08": cisd08,
 }
 
 

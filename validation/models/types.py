@@ -139,6 +139,16 @@ class HtfSettings:
 
 
 @dataclass(frozen=True)
+class CisdSettings:
+    """docs/CISD.md DEF-CISD (CISD-R, approved 2026-10-30). The definition has no parameter:
+    these are bookkeeping constants, variable here only so tests can exercise every rule."""
+    memory: int = 50            # DEF-CISD7 records kept (≥ 1); only the newest is ACTIVE
+    tra_len: int = 14           # TR average of the body / TR metadata (future displacement module); no decision reads it
+    guard: int = 200            # [view] DEF-CISD9: no display or alert for a CISD confirmed before this bar index;
+                                # chart-start / reload guard, not part of the definition; no decision reads it
+
+
+@dataclass(frozen=True)
 class SessionSettings:
     """DEF-F1…F6. Windows are `HHMM-HHMM` in `timezone`, every weekday."""
     timezone: str = "America/New_York"
@@ -176,9 +186,9 @@ class ViewSettings:
 
 
 MODULES = ("levels", "sessions", "fvg", "liq")
-# Opt-in modules: not in the default run (src/IST.pine has no LRL yet; baselines and parity
+# Opt-in modules: not in the default run (src/IST.pine has no CISD yet; baselines and parity
 # compare the default modules only).
-KNOWN_MODULES = MODULES + ("lrl", "htf")
+KNOWN_MODULES = MODULES + ("lrl", "htf", "cisd")
 
 
 @dataclass(frozen=True)
@@ -191,6 +201,7 @@ class Settings:
     view: ViewSettings = field(default_factory=ViewSettings)
     lrl: LrlSettings = field(default_factory=LrlSettings)
     htf: HtfSettings = field(default_factory=HtfSettings)
+    cisd: CisdSettings = field(default_factory=CisdSettings)
     modules: tuple = MODULES
 
     @property
@@ -206,7 +217,7 @@ class Settings:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        for opt in ("lrl", "htf"):
+        for opt in ("lrl", "htf", "cisd"):
             if opt not in self.modules:
                 del d[opt]               # opt-in module: absent cases keep their earlier definition (regression)
         if "htf" in d:
@@ -219,7 +230,8 @@ class Settings:
     def from_dict(cls, d: dict | None) -> "Settings":
         d = dict(d or {})
         sub = {"fvg": FvgSettings, "liq": LiqSettings, "sessions": SessionSettings,
-               "levels": LevelSettings, "view": ViewSettings, "lrl": LrlSettings, "htf": HtfSettings}
+               "levels": LevelSettings, "view": ViewSettings, "lrl": LrlSettings, "htf": HtfSettings,
+               "cisd": CisdSettings}
         kw = {}
         for name, typ in sub.items():
             if name in d:

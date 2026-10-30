@@ -124,6 +124,26 @@ HTF_EVENTS = _inv("INV-HTF-07", "HTF", "events and records agree: CREATED / SEED
                                        "INVALIDATED on its bar at its price, the event's timeframe = the record's")
 HTF_FROZEN = _inv("INV-HTF-08", "HTF", "identity, geometry, known bar and seed facts never change; a milestone once "
                                        "stamped never changes")
+# ── CISD (docs/CISD.md, oracle only) ──
+CISD_STATE = _inv("INV-CISD-01", "CISD", "delivery state UNKNOWN until the first CISD (whose prior state is UNKNOWN); "
+                                         "then CISDs alternate BULL / BEAR and the state is the last CISD's side")
+CISD_LEVEL = _inv("INV-CISD-02", "CISD", "L = open of the first candle of a delivery series (doji ends it); that series "
+                                         "holds the latest lowest delivery low (bullish) of the leg window, which "
+                                         "starts at the previous CISD's extreme (bar 0 while UNKNOWN); the leg extreme "
+                                         "is the lowest wick from the origin to the confirmation")
+CISD_CONFIRM = _inv("INV-CISD-03", "CISD", "the confirming close is strictly beyond L (> EPS), any colour; it is the "
+                                           "first such close since the reference was final; body / TR = metadata")
+CISD_TIMING = _inv("INV-CISD-04", "CISD", "origin ≤ extreme ≤ known ≤ confirmation, origin < confirmation; a record "
+                                          "appears on its confirmation bar (no early, late or future record)")
+CISD_FACTS = _inv("INV-CISD-05", "CISD", "retest / close back through L / close beyond the leg extreme: the first bar "
+                                         "after the confirmation that reaches it, never missed, never after the end; "
+                                         "retest ≤ close back ≤ leg break")
+CISD_FROZEN = _inv("INV-CISD-06", "CISD", "a record's identity, level, extreme and confirmation never change; a fact "
+                                          "or an end once stamped never changes")
+CISD_EVENTS = _inv("INV-CISD-07", "CISD", "events and records agree: CISD_CONFIRMED on the confirmation bar (side, id, "
+                                          "L, origin); CISD_DROPPED_MEMORY iff a record left memory")
+CISD_MEM = _inv("INV-CISD-08", "CISD", "records ≤ memory; only the newest is ACTIVE; each older record ended on the "
+                                       "next CISD's bar; a dropped record had ended")
 
 LIQ_FACTS = ("taken_bar", "take_ext", "take_close", "take_gap", "cls")
 
@@ -159,6 +179,8 @@ class Monitor:
         self.eq_snap: dict = {}
         self.lrl_snap: dict = {}
         self.lrl_ended: set = set()             # (dir, id) with a terminal event, for INV-LRL-10
+        self.cisd_snap: dict = {}               # (side, id) → frozen facts
+        self.cisd_last = None                   # the newest CISD seen: (side, ext_bar, bar)
         self.tol = model.settings.liq.tol_ticks * model.settings.tick
         self.eps = model.settings.eps
 
@@ -185,6 +207,8 @@ class Monitor:
             self._lrl(bar, new, full)
         if getattr(m, "hfvg", None) is not None:
             self._htf(bar, c, new)
+        if getattr(m, "cisd", None) is not None:
+            self._cisd(bar, new, full)
         self.n_events = len(m.events)
         self.last_event = m.events[-1] if m.events else None
 
@@ -202,6 +226,8 @@ class Monitor:
             self._eq(bar, c, [], True, final=True)
         if getattr(m, "lrl", None) is not None:
             self._lrl(bar, [], True, final=True)
+        if getattr(m, "cisd", None) is not None:
+            self._cisd(bar, [], final=True)
 
     # ── events ──
     def _events(self, bar, c, new, full=True):
@@ -224,7 +250,7 @@ class Monitor:
                 self.seen.add(e.ident())
             if fam in self.dropped:
                 self._fail(EV_AFTER_DROP, f"{e.type} id {e.sid} after its DROPPED_MEMORY")
-            if e.type.endswith("_CREATED") or e.type in ("SESSION_START", "LRL_CONFIRMED", "HTF_FVG_SEEDED"):
+            if e.type.endswith("_CREATED") or e.type in ("SESSION_START", "LRL_CONFIRMED", "HTF_FVG_SEEDED", "CISD_CONFIRMED"):
                 self.known.add(fam)
             elif e.type != "LEVEL_SET" and fam not in self.known:
                 self._fail(EV_KNOWN, f"{e.type} id {e.sid} refers to no known structure")
@@ -676,6 +702,88 @@ class Monitor:
                                            for x in new):
                 self._fail(HTF_EVENTS, f"{tag}: events {mine} vs records {sorted(want)}")
         for k in (HTF_TIMING, HTF_GEOM, HTF_MILE, HTF_INVAL, HTF_ID, HTF_MEM, HTF_EVENTS, HTF_FROZEN):
+            stats.INV_CHECKS[k] += 1
+
+    # ── CISD (docs/CISD.md) ──
+    def _cisd(self, bar, new, full=True, final=False):
+        """Independent of the engine's side lists: every check reads the candles (the body / TR
+        metadata also the engine's TR series). A new record is checked once, on its confirmation
+        bar (INV-CISD-06 then freezes it); the facts of the active one every bar; older (ended)
+        records on full sweeps. Linear in the walk."""
+        from validation.models.fvg import sma
+        e, cs, eps = self.m.cisd, self.m.candles, self.eps
+        v = lambda j, s: (cs[j].open, cs[j].low, cs[j].close) if s > 0 else (-cs[j].open, -cs[j].high, -cs[j].close)
+        dlv = lambda j, s: v(j, s)[2] < v(j, s)[0] - eps
+        recs = e.recs
+        seen = {(r.side, r.id) for r in recs}
+        sweep = recs if full else recs[-2:]                   # only the two newest can change on this bar
+        if len(recs) > e.s.memory or any(r.end is None for r in sweep[:-1]) or any(
+                a.end != b.bar for a, b in zip(sweep, sweep[1:])):
+            self._fail(CISD_MEM, f"{len(recs)} records (memory {e.s.memory}), ends {[r.end for r in recs]}")
+        for r in sweep:
+            k = (r.side, r.id)
+            old = self.cisd_snap.get(k)
+            s, tag = r.side, f"{'BULL' if r.side > 0 else 'BEAR'} CISD {r.id}"
+            if old is None:                                   # first sight: its confirmation bar
+                if r.bar != bar or r.time != cs[bar].time or not r.origin <= r.ext_bar <= r.known <= r.bar \
+                        or not r.origin < r.bar:
+                    self._fail(CISD_TIMING, f"{tag}: seen on bar {bar}, origin {r.origin} extreme {r.ext_bar} "
+                                            f"known {r.known} confirmed {r.bar}")
+                last = self.cisd_last
+                if r.before != (last[0] if last else 0) or (last and r.side != -last[0]):
+                    self._fail(CISD_STATE, f"{tag}: prior state {r.before}, previous CISD {last}")
+                w0 = last[1] if last else 0
+                lows = [(v(j, s)[1], j) for j in range(w0, bar + 1) if dlv(j, s)]
+                m0 = min((lo for lo, _ in lows), default=None)
+                want = max((j for lo, j in lows if lo <= m0 + eps), default=None)
+                if r.ext_bar != want or not all(dlv(j, s) for j in range(r.origin, r.ext_bar + 1)) or (
+                        r.origin and dlv(r.origin - 1, s)) or s * r.level != v(r.origin, s)[0] or \
+                        s * r.ext != v(r.ext_bar, s)[1] or r.id != cs[r.origin].time or \
+                        s * r.leg_ext != min(v(j, s)[1] for j in range(r.origin, bar + 1)):
+                    self._fail(CISD_LEVEL, f"{tag}: L {r.level} origin {r.origin} extreme {r.ext}@{r.ext_bar} "
+                                           f"(window from {w0}: {want}) leg {r.leg_ext}")
+                tra = sma(e.tr, bar - 1, e.s.tra_len)
+                lv = s * r.level
+                early = [j for j in range(max(r.ext_bar, last[2] + 1 if last else 0, r.origin + 1), bar)
+                         if v(j, s)[2] > lv + eps]
+                if not v(bar, s)[2] > lv + eps or early or r.close != cs[bar].close or \
+                        r.body_k != (s * (cs[bar].close - cs[bar].open) / tra if tra else None):
+                    self._fail(CISD_CONFIRM, f"{tag}: close {r.close} vs L {r.level}, earlier closes beyond {early}, "
+                                             f"body/TR {r.body_k}")
+                self.cisd_last = (r.side, r.ext_bar, r.bar)
+            if r.end is None or r.end == bar:                 # facts: first reach, never missed
+                lv, leg = s * r.level, s * r.leg_ext
+                stamps = (r.retest, r.reclaim, r.broken)
+                conds = (lambda j: v(j, s)[1] <= lv + eps, lambda j: v(j, s)[2] <= lv + eps,
+                         lambda j: v(j, s)[2] < leg - eps)
+                for i, (st, ok) in enumerate(zip(stamps, conds)):
+                    was = None if old is None else old[13 + i]
+                    # checked every bar while active: a fact is missed, or stamped on this bar, first reach
+                    if (st is None and bar > r.bar and ok(bar)) or (
+                            st is not None and was is None and not (st == bar > r.bar and ok(bar))):
+                        self._fail(CISD_FACTS, f"{tag}: facts {stamps} on bar {bar}, end {r.end}")
+                if any(b is not None and (a is None or b < a) for a, b in zip(stamps, stamps[1:])):
+                    self._fail(CISD_FACTS, f"{tag}: facts out of order {stamps}")
+            now = (r.side, r.before, r.level, r.origin, r.ext_bar, r.ext, r.leg_ext, r.known, r.bar, r.time, r.close,
+                   r.body_k, r.end, r.retest, r.reclaim, r.broken)
+            ended = old is not None and old[12] is not None           # ended before this bar: nothing moves
+            if old is not None and (old[:12] != now[:12] or (ended and old != now) or
+                                    any(a is not None and a != b for a, b in zip(old[12:], now[12:]))):
+                self._fail(CISD_FROZEN, f"{tag}: {old} → {now}")
+            self.cisd_snap[k] = now
+        if e.delivery != (recs[-1].side if recs else 0):
+            self._fail(CISD_STATE, f"engine state {e.delivery}, newest CISD {recs[-1].side if recs else None}")
+        gone = [k for k in self.cisd_snap if k not in seen]
+        evs = sorted((x.type, x.dir, x.sid, x.price, x.origin_bar) for x in new if x.type.startswith("CISD_"))
+        want = sorted([("CISD_CONFIRMED", r.side, r.id, r.level, r.origin) for r in recs if r.bar == bar] +
+                      [("CISD_DROPPED_MEMORY", k[0], k[1], self.cisd_snap[k][2], self.cisd_snap[k][3]) for k in gone])
+        if not final and evs != want:
+            self._fail(CISD_EVENTS, f"events {evs} vs records {want}")
+        if any(self.cisd_snap[k][12] is None for k in gone) and not any(r.bar == bar for r in recs):
+            self._fail(CISD_MEM, f"the ACTIVE record was dropped: {gone}")
+        for k in gone:
+            del self.cisd_snap[k]
+        for k in (CISD_STATE, CISD_LEVEL, CISD_CONFIRM, CISD_TIMING, CISD_FACTS, CISD_FROZEN, CISD_EVENTS, CISD_MEM):
             stats.INV_CHECKS[k] += 1
 
 
