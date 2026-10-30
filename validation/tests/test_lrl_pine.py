@@ -91,6 +91,19 @@ def test_renderer_draws_one_straight_line():
     assert "int   x0     = r.xs.first()" in draw and "int   x1     = r.xs.last()" in draw
 
 
+def test_lrl_style_solid_stronger_than_projection():
+    """v0.6.1-dev readability pass (user, 2026-10-30): neutral grey from the chart's text colour
+    (no magenta / cyan), the solid confirmed line stronger than the dashed projection, width 1,
+    a small LRL label."""
+    import re
+    solid = {int(t) for t in re.findall(r"^LRL_(?:BEAR|BULL)_COL = color\.new\(chart\.fg_color, (\d+)\)", SRC, re.M)}
+    proj = re.search(r"^LRL_PROJ_T\s+=\s+(\d+)", SRC, re.M)
+    assert len(solid) == 1 and proj and int(proj[1]) > solid.pop()
+    draw = SRC[SRC.index("f_lrlDraw(LrlSide s, Lrl r) =>"):SRC.index("f_lrlRender(LrlSide s, int slot) =>")]
+    assert "color.new(base, active ? LRL_PROJ_T : 75), style = line.style_dashed, width = 1" in draw
+    assert '"LRL", xloc = xloc.bar_index' in draw and "size = size.tiny" in draw
+
+
 def test_lrl_never_reads_phase1_or_phase2_state():
     """DEF-LRL8 in Pine: the LRL engine methods and its engine-run block mention no FVG,
     session, reference-level, BSL/SSL or EQ state (only bars, its own TR average, EQ_TOL

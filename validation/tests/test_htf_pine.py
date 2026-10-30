@@ -92,7 +92,11 @@ def test_renderer_rules():
     assert render.count("f_htfBox(s, up)") == 1 and render.count("f_htfBox(s, dn)") == 1
     box = _between("f_htfBox(HtfTf s, HtfZone r) =>", "f_htfRender(HtfTf s) =>")
     assert box.count("box.new(") == 1 and "box.new(r.c1, r.top, rightT, r.bottom, xloc = xloc.bar_time" in box
-    assert "text_halign = text.align_right, text_valign = text.align_bottom" in box and "text_size = size.tiny" in box
+    assert "text_halign = text.align_right, text_valign = text.align_bottom" in box and "text_size = HTF_TXT_SIZE" in box
+    # v0.6.1-dev readability pass (user, 2026-10-30): one step larger, the chart's text colour at 35 %
+    assert re.search(r"^HTF_TXT_SIZE = size\.small\b", SRC, re.M)
+    assert re.search(r"^HTF_TXT_COL  = color\.new\(chart\.fg_color, 35\)", SRC, re.M)
+    assert "border_width = 1" in box
     assert 's.name + (htfCompact ? " FVG" : " Fair Value Gap")' in box
     assert "HTF_COL      = #9598A1" in SRC and "color.new(HTF_COL, 94 - 3 * tier)" in box
     run = _between("// HTF FVG (DEF-B5): rebuilt from state", "// ════ L7 · ALERTS")

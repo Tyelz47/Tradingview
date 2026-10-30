@@ -79,7 +79,7 @@ On every chart bar from the known bar on, for every zone not invalidated, on the
 * Per timeframe, the nearest shown zone **above** and **below** the last close (above / below by the zone's midpoint; distance from the close to its near edge, 0 inside; ties → the newest). At most 2 per timeframe, ≤ 12 boxes.
 * Drawn 1W first and 15m last, so a nested lower-timeframe zone stays visible over its parent. Nothing is merged or hidden.
 * Box: from candle 1's open to the current bar + right offset (`xloc.bar_time`); fill and border grey `#9598A1`, fill transparency 94 / 91 / 88 and border transparency 85 / 70 / 55 for 15m–30m / 1H–4H / 1D–1W.
-* Label: the box text, bottom-right inside the zone, tiny, grey `#787B86` at 30 % transparency: `15m Fair Value Gap` … `1W Fair Value Gap` (Developer: `15m FVG`).
+* Label: the box text, bottom-right inside the zone, `size.small`, neutral grey = the chart's text colour at 35 % transparency (`chart.fg_color`: darker on a light chart, lighter on a dark one; v0.6.1-dev, user readability pass): `15m Fair Value Gap` … `1W Fair Value Gap` (Developer: `15m FVG`).
 * Rebuilt from state on the last bar only. The per-timeframe switches and "Show HTF FVGs" are **[view]**: every active timeframe is always computed.
 
 ## DEF-B6 · Memory

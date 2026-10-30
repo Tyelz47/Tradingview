@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.6.1-dev — visual readability pass: HTF FVG labels, LRL line (2026-10-30, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.10.1
+
+**TradingView (user, 2026-10-30):** v0.6.0-dev compiles and runs. The visual direction is confirmed:
+* straight LRL;
+* HTF FVGs only, local 1m FVGs hidden;
+* timeframe labels present.
+
+The HTF labels were too low-contrast and the LRL slightly too faint.
+
+**CHANGE** (`src/IST.pine`, styling only: [view] constants and three renderer calls):
+
+| constant | v0.6.0-dev | v0.6.1-dev |
+|---|---|---|
+| `HTF_TXT_COL` (HTF label colour) | `color.new(#787B86, 30)` | `color.new(chart.fg_color, 35)` |
+| `HTF_TXT_SIZE` (new; HTF label size) | `size.tiny` (inline) | `size.small` |
+| `LRL_BEAR_COL` / `LRL_BULL_COL` (solid confirmed LRL and its label) | `#9598A1` | `color.new(chart.fg_color, 30)` |
+| `LRL_PROJ_T` (new; dashed projection while active) | 40 (inline) | 60 |
+
+* `chart.fg_color` is the chart's own text colour, so both stay neutral grey and adapt to the theme: darker on a light chart, lighter on a dark one.
+* Approximate contrast against the chart background, light / dark:
+
+  | | v0.6.0-dev | v0.6.1-dev |
+  |---|---|---|
+  | HTF label | 2.6 : 1 / 2.7 : 1 | 5.8 : 1 / 5.7 : 1 |
+  | solid LRL | 3.0 : 1 / 6.2 : 1 | 7 : 1 / 6.4 : 1 |
+  | dashed projection | 1.7 : 1 / 3.0 : 1 | 2.6 : 1 / 2.9 : 1 |
+
+  So the projection stays clearly subtler than the solid segment.
+
+**Unchanged:**
+* HTF boxes: `HTF_COL #9598A1`; fill transparency 94 / 91 / 88 and border transparency 85 / 70 / 55 (15m–30m / 1H–4H / 1D–1W); border 1 px; label bottom-right with the full text.
+* LRL: width 1; the `LRL` label at `size.tiny`; ended LRLs (`T_HIST` 45, projection 75); no magenta / cyan.
+* No object added.
+* Session / PDH / PDL / PWH / PWL labels are Phase 1 and are not changed. They are already placed right of the last bar (`label.style_label_left` at the right offset); GENERAL → Label size → Tiny makes them lighter if they compete.
+* No detection, state, oracle, event, lifecycle or Phase 1 / 2 change.
+
+**Validation 1.10.1:**
+* `tests/test_htf_pine.py` pins the label size and colour and the 1 px border.
+* New `tests/test_lrl_pine.py::test_lrl_style_solid_stronger_than_projection`: grey from the chart's text colour, the projection's transparency above the solid line's, width 1, the label tiny.
+
+**TEST:**
+* QUICK: **PASS**.
+* FULL: **PASS**, exit 0, 686.5 s on a busier machine (v0.6.0-dev: 292.7 s; one test added, no logic change), **537 passed, 1 skipped**: static 19/19 (ST-15: the same 12 reviewed Phase 1 lines) · regression 5/5 · LRL · HTF unchanged.
+* TradingView: the visual check of v0.6.1-dev (HTF-L04 labels, LRL-L02 line) pending.
+
 ## v0.6.0-dev — HTF Fair Value Gaps (Module B) · neutral grey LRL · Phase 1 FVG display OFF (2026-10-29, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.10.0
 
 **Decisions (user, 2026-10-29):** the straight LRL renderer and the HTF FVG design are approved, with final decisions D1–D10 (`docs/HTF_FVG.md`):

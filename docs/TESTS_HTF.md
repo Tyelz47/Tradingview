@@ -1,8 +1,8 @@
-# IST · HTF FVG tests — v0.6.0-dev (EXPERIMENTAL)
+# IST · HTF FVG tests — v0.6.1-dev (EXPERIMENTAL)
 
 **Status.** Automated validation: see `CHANGELOG.md`. TradingView: every HTF-L test **PENDING**. They are recorded only from the user's results, never assumed. HTF FVG is frozen only after **HTF-L12** (real Pine ↔ oracle parity) gives **0 DIFFERENCE**.
 
-**Build:** `src/IST.pine` v0.6.0-dev (branch `lrl/pine`). Definition: `docs/HTF_FVG.md`.
+**Build:** `src/IST.pine` v0.6.1-dev (branch `lrl/pine`). Definition: `docs/HTF_FVG.md`. v0.6.0-dev compiles and runs on TradingView (user, 2026-10-30; HTF-L00 for v0.6.0-dev); v0.6.1-dev changes styling only (label size and colour, LRL line colour).
 
 ## Automated (before TradingView)
 
@@ -20,7 +20,7 @@
 
 ## TradingView procedure (NQ1! 1m unless stated; Confirmed only ON)
 
-Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.6.0-dev, save it, and add it to an NQ1! 1m chart. Debug mode rows 42–44 show the HTF engine, its registries and the drawn boxes.
+Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.6.1-dev, save it, and add it to an NQ1! 1m chart. Debug mode rows 42–44 show the HTF engine, its registries and the drawn boxes.
 
 | id | test | how | expected |
 |---|---|---|---|
@@ -28,7 +28,7 @@ Before you start: in the Pine Editor, replace the code with `src/IST.pine` v0.6.
 | HTF-L01 | settings target | open the settings | group HTF FAIR VALUE GAPS: Show HTF FVGs ON; 15m 30m 1H / 4H 1D 1W ON; Show timeframe labels ON. FVG · DISPLAY: Show FVGs **OFF** (no 1m FVG boxes) |
 | HTF-L02 | timing (no repaint) | Bar Replay on 1m; find a 15m gap (candles 09:30 / 09:45 / 10:00); step bar by bar from 10:00 | no box (and no `HTF_FVG_CREATED` in Pine Logs, Debug ON) on any bar before 10:15; the box appears on the 10:15 bar |
 | HTF-L03 | origin (D8) | the same zone | the box's left edge is at 09:30 (candle 1), its edges at high(09:30) / low(10:00) (bull) |
-| HTF-L04 | labels | look at several zones | `15m Fair Value Gap` … `1W Fair Value Gap`, bottom-right inside the box, small grey, the same placement for all; Developer "Compact HTF labels" → `15m FVG`. Note if a very thin zone clips its text |
+| HTF-L04 | labels | look at several zones | `15m Fair Value Gap` … `1W Fair Value Gap`, bottom-right inside the box, small neutral grey, immediately readable but not dominant (v0.6.1-dev), the same placement for all; Developer "Compact HTF labels" → `15m FVG`. Note if a very thin zone clips its text |
 | HTF-L05 | caps (D6) | Debug row 44 | at most one zone above and one below price per shown timeframe, ≤ 12 boxes |
 | HTF-L06 | toggles are view-only | switch 15m OFF, then Show HTF FVGs OFF | the 15m boxes (then all) disappear; Debug row 43 (registries) does not change |
 | HTF-L07 | own-timeframe invalidation (D5) | Bar Replay through a 1m close beyond a 1H / 4H zone that closes back inside on its own timeframe | the zone stays; it is invalidated (`HTF_FVG_INVALIDATED … tf=4H`) only on the first bar after a 4H candle closed beyond it |

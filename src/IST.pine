@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.6.0-dev · LRL + HTF fair value gaps development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.6.1-dev · LRL + HTF fair value gaps development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -295,8 +295,11 @@ EV_LRL_DRIFT     = 22
 EV_LRL_EXPIRED   = 23
 EV_LRL_DROPPED   = 24
 LRL_VIS_HIST = 10                      // [view] ended LRLs drawn per side (Show historical LRL)
-LRL_BEAR_COL = #9598A1                 // [view] high side (bearish LRL): neutral grey (user, 2026-10-29)
-LRL_BULL_COL = #9598A1                 // [view] low side (bullish LRL): the same grey; bull/bear colours may become a Style option
+// [view] LRL style (v0.6.1-dev readability pass). Neutral grey taken from the chart's own text
+// colour, so it reads on a light chart (darker) and a dark one (lighter): never weaker than v0.6.0-dev's #9598A1.
+LRL_BEAR_COL = color.new(chart.fg_color, 30)   // [view] high side (bearish LRL): the solid confirmed line and its label
+LRL_BULL_COL = color.new(chart.fg_color, 30)   // [view] low side (bullish LRL): the same grey; bull/bear colours may become a Style option
+LRL_PROJ_T   = 60                      // [view] transparency of the dashed projection while active: subtler than the solid line
 // HTF FVG (DEF-B0…B6 → docs/HTF_FVG.md, approved 2026-10-29): fixed numbers, not inputs. The FVG
 // definition and thresholds are the Phase 1 ones (D4), evaluated on each timeframe's own candles.
 HTF_MEM      = 20                      // DEF-B6 records per timeframe (both directions)
@@ -310,7 +313,8 @@ EV_HTF_FULL    = 29
 EV_HTF_INVAL   = 30
 EV_HTF_DROPPED = 31
 HTF_COL      = #9598A1                 // [view] neutral grey (D7): the timeframe hierarchy is opacity only
-HTF_TXT_COL  = color.new(#787B86, 30)  // [view] the timeframe label (box text)
+HTF_TXT_COL  = color.new(chart.fg_color, 35)   // [view] the timeframe label (box text): neutral grey from the chart's text colour, readable on light and dark charts (v0.6.1-dev)
+HTF_TXT_SIZE = size.small              // [view] the timeframe label's size (v0.6.0-dev: tiny)
 
 f_lineStyle(LnStyle s) =>
     switch s
@@ -1955,7 +1959,7 @@ f_lrlDraw(LrlSide s, Lrl r) =>
     // the same function y, dashed and fainter, so there is no kink where it starts. The
     // intermediate points validate the line; they are not drawn as vertices.
     lrlLns.push(line.new(x0, s.sign * r.yAt(x0), x1, s.sign * r.yAt(x1), xloc = xloc.bar_index, color = col, style = line.style_solid, width = 1))
-    lrlLns.push(line.new(x1, s.sign * r.yAt(x1), x2, s.sign * r.yAt(x2), xloc = xloc.bar_index, color = color.new(base, active ? 40 : 75), style = line.style_dashed, width = 1))
+    lrlLns.push(line.new(x1, s.sign * r.yAt(x1), x2, s.sign * r.yAt(x2), xloc = xloc.bar_index, color = color.new(base, active ? LRL_PROJ_T : 75), style = line.style_dashed, width = 1))
     string tip = (s.sign > 0 ? "LRL ▼ bearish · descending highs" : "LRL ▲ bullish · ascending lows") + " · " + str.tostring(r.xs.size()) + " points · τ " + f_x(r.tau) + "\nfirst " + f_tid(r.ts.first()) + " · latest " + f_tid(r.ts.last()) + " · confirmed " + f_tid(r.bornTime) + "\n" + f_lrlEndName(r.endKind) + (active ? "" : " " + f_tid(r.endTime))
     lrlLbls.push(label.new(x1, s.sign * r.ps.last(), "LRL", xloc = xloc.bar_index, style = s.sign > 0 ? label.style_label_down : label.style_label_up, color = CLR_NONE, textcolor = col, size = size.tiny, tooltip = tip))
     if lrlMarks and not active
@@ -2008,7 +2012,7 @@ f_htfOn(string tf) =>
 f_htfBox(HtfTf s, HtfZone r) =>
     int    tier = s.tf == "15" or s.tf == "30" ? 0 : s.tf == "60" or s.tf == "240" ? 1 : 2
     string txt  = htfLabels ? s.name + (htfCompact ? " FVG" : " Fair Value Gap") : ""
-    htfBoxes.push(box.new(r.c1, r.top, rightT, r.bottom, xloc = xloc.bar_time, bgcolor = color.new(HTF_COL, 94 - 3 * tier), border_color = color.new(HTF_COL, 85 - 15 * tier), border_width = 1, text = txt, text_size = size.tiny, text_color = HTF_TXT_COL, text_halign = text.align_right, text_valign = text.align_bottom))
+    htfBoxes.push(box.new(r.c1, r.top, rightT, r.bottom, xloc = xloc.bar_time, bgcolor = color.new(HTF_COL, 94 - 3 * tier), border_color = color.new(HTF_COL, 85 - 15 * tier), border_width = 1, text = txt, text_size = HTF_TXT_SIZE, text_color = HTF_TXT_COL, text_halign = text.align_right, text_valign = text.align_bottom))
     true
 
 // Above / below by the zone's midpoint; distance from the close to its near edge (0 inside).
