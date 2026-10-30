@@ -1,5 +1,45 @@
 # Changelog
 
+## CISD research study — validation 1.11.0 (2026-10-30, branch `research/cisd`) — no indicator change, for approval
+
+**User (2026-10-30):** the next functional module is CISD. Define it exactly, deterministically and without repainting **before** any reference model or Pine. This is a research / specification phase only.
+
+**DELIVERABLE** `docs/STUDY_CISD.md` (A–N):
+* formal semantics;
+* five candidate definitions with exact pseudocode;
+* comparison on real NQ 1m (1,639 bars, 27.3 h), resampled 3m / 5m / 15m, and a random walk;
+* 16 synthetic scenarios;
+* the recommendation, lifecycle, events, renderer, oracle / validation plan, Pine feasibility;
+* open decisions D-C1…D-C12.
+
+**Recommendation CISD-R:**
+* the level is the open of the down-close series (bullish CISD) that delivered price into the lowest low of the current bearish leg;
+* confirmed by the first close strictly beyond it;
+* a one-bit state of delivery makes bullish and bearish CISDs alternate;
+* no parameters, mirror-exact, prefix-invariant.
+
+**Measured:**
+* frequency: NQ 4.4 / h vs 14–19 / h for stateless definitions;
+* at most one candidate at any time;
+* no edge demonstrated: CISD frequency, retest and follow-through on NQ ≈ the random walk;
+* displacement removes 58 % of CISDs and stays a separate engine;
+* reload convergence: from 86 different first bars, identical to the full history after ≤ 4 CISDs (≤ 62 bars).
+
+**Findings that shaped the definition** (all in the study):
+* the leg extreme must be set by delivery candles only: a non-delivery wick spike left no candidate in one NQ case;
+* the opposite side's leg window starts at the previous leg's extreme, not at the confirmation bar;
+* "invalidation" is subsumed by the opposite CISD: 0 cases on NQ, rare gap-only exceptions on walks.
+
+**Validation 1.11.0** (study only):
+* `validation/studies/cisd.py`;
+* `validation/tests/test_cisd_study.py`, 29 tests: scenarios, candidate contrasts, mirror, translation, prefix, alternation, reload convergence;
+* report section `research.cisd`, marker `cisd`;
+* charts `docs/study_cisd/`.
+
+**TEST:**
+* FULL: **PASS**, exit 0, 298.2 s, **566 passed, 1 skipped**: research.cisd 29/29 · static 19/19 · every other section unchanged.
+* `src/IST.pine` is not modified.
+
 ## v0.6.2-dev — HTF FVG palette for a `#C2BAAE` chart background (2026-10-30, branch `lrl/pine`) — EXPERIMENTAL, not frozen · validation 1.10.1
 
 **User (2026-10-30):** the chart background is `#C2BAAE` and the HTF FVGs were still too hidden. The fix is a darker, neutral grey-brown palette, with no green / red. The hierarchy is kept: 15m / 30m lightest, 1H / 4H medium, 1D / 1W most visible.

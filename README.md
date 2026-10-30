@@ -10,6 +10,7 @@ A non-repainting ICT market-structure toolkit, tuned for NQ futures on 1m, 3m an
 | `docs/LIQUIDITY.md` | Phase 2 liquidity engine: exact definitions (DEF-L), timing, budgets, limitations. |
 | `docs/LRL.md` | LRL detection (diagonal failure-swing liquidity), DEF-LRL1…9 (approved) and its Pine implementation (§6). The research behind it is in `docs/STUDY_LRL.md`. |
 | `docs/HTF_FVG.md` | HTF Fair Value Gaps (15m · 30m · 1H · 4H · 1D · 1W), DEF-B0…B6 (approved 2026-10-29, decisions D1–D10), timing, seeds, reload consistency, parity capture. Design history: `docs/HTF_FVG_DESIGN.md`. |
+| `docs/STUDY_CISD.md` | CISD research / specification (A–N): five candidate definitions, real NQ vs random walk, recommended CISD-R (series open · state of delivery · close), lifecycle, events, renderer, validation plan, open decisions D-C1…D-C12. **For approval; nothing implemented.** |
 | `docs/TESTS_HTF.md` | HTF FVG tests: automated S-HTF, TradingView HTF-L00…L14 (L12 = Pine ↔ oracle parity, the freeze criterion). |
 | `docs/TESTS_LRL.md` | LRL tests: automated S-LRL, TradingView LRL-L00…L12 (L11 = Pine ↔ oracle parity, the freeze criterion). |
 | `docs/TESTS_PHASE2.md` | Phase 2 tests (S-01…S-13, L00–L48) and the manual validation procedure. |

@@ -52,6 +52,7 @@ SECTIONS = [  # key, report title, group
     ("lrl", "LRL detection (oracle + Pine v0.5.3-dev)", "LRL"),
     ("htf", "HTF FVG (oracle + Pine v0.6.2-dev)", "HTF"),
     ("research.lrl", "LRL research study (no indicator change)", "RESEARCH"),
+    ("research.cisd", "CISD research study (no indicator change)", "RESEARCH"),
 ]
 SCENARIO_SECTIONS = {"phase1.fvg", "phase1.lifecycle", "phase1.sessions", "phase1.levels", "phase2.swing",
                      "phase2.sweeps", "phase2.eq", "events"}
