@@ -5,13 +5,12 @@
   * an explicit UNKNOWN initial state (DEF-CISD4);
   * the 200-bar guard is a display / alert guard only, not part of the definition (DEF-CISD9).
 * **Oracle approved by the user on 2026-10-30** (validation 1.12.0): `validation/models/cisd.py` is the opt-in module `cisd` of the oracle; default runs and the regression baseline do not include it.
-* **Implemented in Pine: IST v0.7.1-dev. FREEZE PREPARED (2026-10-31): `docs/CISD_FREEZE_REPORT.md`.** §5 describes the implementation.
+* **Implemented in Pine: IST v0.7.1-dev. FROZEN (2026-10-31): tag `CISD_BASELINE_v0.7.1-dev` on commit `cb2ee97`, `docs/CISD_FREEZE_REPORT.md`.** §5 describes the implementation.
   * The definition was not changed for Pine.
   * The identity of a CISD is **side + origin time** (user, 2026-10-30).
   * CISD-L10 real parity: **0 DIFFERENCE** (v0.7.1-dev capture).
   * CISD-L11 human / golden validation: **PASS**.
-  * CISD-L12: automated part **PASS**; the TradingView reload check is the user's (`docs/TESTS_CISD.md`).
-  * Tag `CISD_BASELINE_v0.7.1-dev` follows that check.
+  * CISD-L12 reload / determinism: **PASS**, automated and the user's TradingView reload check (`docs/TESTS_CISD.md`).
 * Human / reference goldens: `validation/golden/human/` (H1, H2 exact; H3, H4 supporting) and `docs/AUDIT_CISD_HUMAN.md`.
 * The frozen baselines `PHASE1_BASELINE_v0.3.2` and `PHASE2_BASELINE_v0.4.4-dev` are untouched. Phase 1, Phase 2, LRL and HTF FVG are untouched.
 

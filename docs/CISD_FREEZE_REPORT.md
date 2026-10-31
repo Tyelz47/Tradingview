@@ -1,8 +1,8 @@
 # IST · CISD freeze report — v0.7.1-dev
 
-**Status: FREEZE PREPARED on 2026-10-31. Tag pending the user's manual CISD-L12 reload check.**
-* CISD-L00, CISD-L10, CISD-L11 and the automated part of CISD-L12 pass.
-* The annotated tag `CISD_BASELINE_v0.7.1-dev` is created only after the user's TradingView reload check (CISD-L12 manual, `docs/TESTS_CISD.md`) and the user's go.
+**Status: FROZEN on 2026-10-31. Annotated tag `CISD_BASELINE_v0.7.1-dev` on commit `cb2ee9700068f1e7697fe80bcc1f5fe80eb99538`.**
+* CISD-L00, CISD-L10, CISD-L11 and CISD-L12 (automated and the user's manual TradingView reload check) pass.
+* The tag was created after the user's reload check passed and the user's go. The tagged commit's own documents still read "freeze prepared / manual pending"; this status was recorded in a later documentation-only commit, and the tag message records the manual result.
 * This freezes the **CISD module** only:
   * LRL and HTF FVG in the same file stay EXPERIMENTAL;
   * the Phase 1 and Phase 2 baselines are untouched.
@@ -14,12 +14,12 @@
 | Build | IST **v0.7.1-dev** (label kept: the frozen bytes are the bytes captured in TradingView) |
 | Source | `src/IST.pine`, SHA-256 `29dd2bfd243f549d1e68db3daf941b343e4f3e3f3ffb25ebf2678008db4afbbf`, unchanged since commit `b34a194` (the build in the real capture, `build=v0.7.1-dev`) |
 | Oracle | `validation/models/cisd.py` (`CisdEngine` = the definition; `CisdStack` = Pine's formulation, proven equal), SHA-256 `73cb78793c449f3e07e85408af558895bd5155d80c4c297d2604d34643f4364e` |
-| Git tag (to create) | **`CISD_BASELINE_v0.7.1-dev`** (annotated, the convention of `PHASE1_BASELINE_v0.3.2` / `PHASE2_BASELINE_v0.4.4-dev`) on the freeze commit of branch `cisd/pine`. Not merged into `main` |
+| Git tag | **`CISD_BASELINE_v0.7.1-dev`** (annotated, the convention of `PHASE1_BASELINE_v0.3.2` / `PHASE2_BASELINE_v0.4.4-dev`) on the freeze commit `cb2ee97` of branch `cisd/pine`. Not merged into `main` |
 | Read-only copy | `releases/v0.7.1-dev/` with `SHA256SUMS.txt` (inside the folder: `sha256sum -c SHA256SUMS.txt`) and `MANIFEST.txt` (tests, goldens, evidence, from the repository root) |
 | Baselines | `PHASE1_BASELINE_v0.3.2` and `PHASE2_BASELINE_v0.4.4-dev` unchanged; the Phase 1 diff guard (ST-15) passes |
 | Validation tooling | 1.15.0 |
 
-**Rollback:** `git checkout CISD_BASELINE_v0.7.1-dev` (once tagged), or paste `releases/v0.7.1-dev/src/IST.pine` into the Pine Editor.
+**Rollback:** `git checkout CISD_BASELINE_v0.7.1-dev`, or paste `releases/v0.7.1-dev/src/IST.pine` into the Pine Editor.
 
 ## 2 · Evidence
 
@@ -64,7 +64,7 @@ Pinned by `tests/test_parity_v071_evidence.py`. The v0.7.0-dev capture and its f
   * a failed CISD stays a CISD;
   * no FVG / IFVG / LRL / sweep / displacement requirement.
 
-### 2.3 CISD-L12: reload / determinism — automated PASS, manual PENDING
+### 2.3 CISD-L12: reload / determinism — PASS (automated and manual)
 
 **Automated:**
 * the same OHLC and settings in two fresh engines and a full replay give the same per-bar state, both candidates, the active CISD, and every record and lifecycle; the Pine formulation equals the oracle (`test_l12_identical_history_gives_identical_results`);
@@ -73,7 +73,11 @@ Pinned by `tests/test_parity_v071_evidence.py`. The v0.7.0-dev capture and its f
 * the guard changes no logic (T18, property) and never draws a CISD confirmed before bar 200, even later as the previous one (`test_l12_guard_never_draws_retroactively`);
 * real parity: Pine's state equals the oracle's on every captured bar.
 
-**Manual:** the TradingView reload check in `docs/TESTS_CISD.md` is the user's.
+**Manual: PASS (user, 2026-10-31)**, the TradingView reload check in `docs/TESTS_CISD.md`:
+* the same 3 historical CISDs were checked;
+* a page refresh kept their side, origin / id, L, confirmation bar and delivery state;
+* removing and re-adding the indicator kept the same values;
+* no historical CISD changed.
 
 ### 2.4 Automated validation (FULL, final run before the freeze)
 
@@ -106,7 +110,6 @@ Bullish CISD; the bearish one is the exact mirror. ε = 0.01 tick.
 
 ## 5 · Open items (not blocking the freeze unless the user decides otherwise)
 
-* CISD-L12 manual reload check (user).
 * CISD-L01 … L09 were not recorded one by one; L10 covers their logic on real data.
 * The renderer differences from the references (line length past the confirmation, label position) are a separate styling decision; they do not touch detection (`docs/AUDIT_CISD_HUMAN.md` §D).
 

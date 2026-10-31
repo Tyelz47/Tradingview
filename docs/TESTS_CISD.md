@@ -1,11 +1,10 @@
-# IST · CISD tests — v0.7.1-dev (freeze prepared)
+# IST · CISD tests — v0.7.1-dev (FROZEN)
 
 **Status (2026-10-31).**
-* CISD-L00, CISD-L10 and CISD-L11 **PASS**.
-* CISD-L12: the automated part **PASS**; the TradingView reload check (manual) is **PENDING** (procedure below).
+* CISD-L00, CISD-L10, CISD-L11 and CISD-L12 **PASS**. CISD-L12: the automated part and the TradingView reload check (manual, the user's) both **PASS**.
 * CISD-L01 … L09 were not recorded one by one.
 * TradingView results are recorded only from the user's results, never assumed.
-* The freeze (`docs/CISD_FREEZE_REPORT.md`) is prepared. Tag `CISD_BASELINE_v0.7.1-dev` is created after the manual CISD-L12 check.
+* **CISD FROZEN:** tag `CISD_BASELINE_v0.7.1-dev` on commit `cb2ee97` (`docs/CISD_FREEZE_REPORT.md`, copy in `releases/v0.7.1-dev/`).
 
 **Build:** `src/IST.pine` v0.7.1-dev (branch `cisd/pine`). Definition: `docs/CISD.md` (CISD-R, approved 2026-10-30).
 
@@ -81,4 +80,4 @@ Results (user):
 | CISD-L01 … L09 | not recorded one by one | | |
 | CISD-L10 | **PASS** | 2026-10-31 | v0.7.1-dev real capture: 0 DIFFERENCE; CISD 1,075 bar states, 94 + 94 events, the definition oracle synchronised from UNKNOWN then 94 identical; 3 body / TR values NOT OBSERVABLE (TR warm-up) |
 | CISD-L11 | **PASS** | 2026-10-31 | H1 and H2 golden exact; H3 / H4 supporting (OHLC not recoverable), consistent; 0 human mismatch; no rule regression (`docs/CISD_FREEZE_REPORT.md` §2) |
-| CISD-L12 | automated **PASS** · manual **PENDING** | 2026-10-31 | `tests/test_cisd_freeze.py`; manual procedure above |
+| CISD-L12 | **PASS** (automated and manual) | 2026-10-31 | automated: `tests/test_cisd_freeze.py`. Manual (user): the same 3 historical CISDs kept the same side, origin / id, L, confirmation bar and delivery state after (a) a page refresh and (b) removing and re-adding the indicator; no historical CISD changed |

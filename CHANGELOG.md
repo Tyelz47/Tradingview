@@ -1,5 +1,13 @@
 # Changelog
 
+## CISD FROZEN — CISD-L12 manual PASS recorded (2026-10-31, branch `cisd/pine`) — documentation only
+
+**User (2026-10-31):** the CISD-L12 TradingView reload check passes. The same 3 historical CISDs kept their side, origin / id, L, confirmation bar and delivery state after a page refresh and after removing and re-adding the indicator; no historical CISD changed.
+
+* Annotated tag `CISD_BASELINE_v0.7.1-dev` on the freeze commit `cb2ee97` (created before this commit; not moved).
+* `docs/TESTS_CISD.md`, `docs/CISD_FREEZE_REPORT.md`, `docs/CISD.md`, `README.md`: CISD-L12 **PASS** (automated and manual), status FROZEN.
+* No change to `src/IST.pine`, the oracle, the tests, `releases/v0.7.1-dev/` or its hashes / manifest (the release keeps the freeze commit's documents).
+
 ## CISD freeze prepared — v0.7.1-dev unchanged · validation 1.15.0 (2026-10-31, branch `cisd/pine`) — no indicator change
 
 **User (2026-10-31):** the real v0.7.1-dev capture passes with 0 DIFFERENCE. Complete CISD-L11 and CISD-L12, then prepare the CISD freeze, without changing CISD-R, LRL or styling.
