@@ -5,12 +5,14 @@
   * an explicit UNKNOWN initial state (DEF-CISD4);
   * the 200-bar guard is a display / alert guard only, not part of the definition (DEF-CISD9).
 * **Oracle approved by the user on 2026-10-30** (validation 1.12.0): `validation/models/cisd.py` is the opt-in module `cisd` of the oracle; default runs and the regression baseline do not include it.
-* **Implemented in Pine: IST v0.7.0-dev (EXPERIMENTAL, NOT frozen), validation 1.13.0.** §5 describes it.
+* **Implemented in Pine: IST v0.7.1-dev. FREEZE PREPARED (2026-10-31): `docs/CISD_FREEZE_REPORT.md`.** §5 describes the implementation.
   * The definition was not changed for Pine.
   * The identity of a CISD is **side + origin time** (user, 2026-10-30).
-  * TradingView testing is pending (`docs/TESTS_CISD.md`).
-  * CISD is frozen only after a real TradingView Pine ↔ oracle capture parity with 0 DIFFERENCE (CISD-L10) and the user's labelled golden cases (CISD-L11).
-* Real golden cases come later. Once the Pine implementation runs in TradingView, the user marks real CISDs on the chart, and those become the first human-labelled golden cases. The oracle is validated without them: synthetic cases, real NQ statistical replay, random walks.
+  * CISD-L10 real parity: **0 DIFFERENCE** (v0.7.1-dev capture).
+  * CISD-L11 human / golden validation: **PASS**.
+  * CISD-L12: automated part **PASS**; the TradingView reload check is the user's (`docs/TESTS_CISD.md`).
+  * Tag `CISD_BASELINE_v0.7.1-dev` follows that check.
+* Human / reference goldens: `validation/golden/human/` (H1, H2 exact; H3, H4 supporting) and `docs/AUDIT_CISD_HUMAN.md`.
 * The frozen baselines `PHASE1_BASELINE_v0.3.2` and `PHASE2_BASELINE_v0.4.4-dev` are untouched. Phase 1, Phase 2, LRL and HTF FVG are untouched.
 
 **CISD detection ≠ CISD quality.**

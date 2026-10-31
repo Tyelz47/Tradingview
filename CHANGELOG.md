@@ -1,5 +1,37 @@
 # Changelog
 
+## CISD freeze prepared — v0.7.1-dev unchanged · validation 1.15.0 (2026-10-31, branch `cisd/pine`) — no indicator change
+
+**User (2026-10-31):** the real v0.7.1-dev capture passes with 0 DIFFERENCE. Complete CISD-L11 and CISD-L12, then prepare the CISD freeze, without changing CISD-R, LRL or styling.
+
+**RESULT**
+* **CISD-L10 PASS:** the real capture `pine-logs-IST_5040e.csv` (kept byte for byte as `parity/evidence/ist-v0.7.1-dev_mnq-1m-replay_capture-1000_2026-10-14.csv`) gives 67 MATCH · 0 DIFFERENCE · 9 NOT OBSERVABLE, in every module.
+* **CISD-L11 PASS:** human goldens H1 and H2 exact; H3 and H4 supporting; 0 mismatch; the approved rules pinned by name.
+* **CISD-L12:** automated **PASS** (determinism, view-independence, guard never retroactive); TradingView reload check pending (user).
+
+**Validation 1.15.0**
+* `tests/test_cisd_freeze.py`: the L11 rule list and the L12 automated requirements; existing proofs named in its docstring.
+* `tests/test_parity_v071_evidence.py`: the real capture's counts pinned.
+* The evidence SHA256SUMS now has 4 files.
+* The observed-capture test runs again (latest capture = current build) and passes.
+
+**Freeze package:**
+* `docs/CISD_FREEZE_REPORT.md`;
+* `docs/TESTS_CISD.md` with the final statuses and the manual reload procedure;
+* `releases/v0.7.1-dev/` (read-only copy, SHA256SUMS, MANIFEST).
+
+The tag `CISD_BASELINE_v0.7.1-dev` is not created yet; it waits for the manual CISD-L12 check and the user's go.
+
+**TEST:**
+* FULL: **PASS**, exit 0, 473.8 s, **780 passed, 1 skipped**:
+  * static 21/21;
+  * CISD 167/167;
+  * parity 119/120;
+  * golden 8/8;
+  * LRL 85/85, HTF 46/46;
+  * Phase 1 / 2 unchanged.
+* `src/IST.pine` unchanged since `b34a194` (SHA-256 29dd2bfd…afbbf).
+
 ## v0.7.1-dev — history reads moved out of functions: CISD bk and LRL τ / separation (2026-10-30, branch `cisd/pine`) — EXPERIMENTAL, not frozen · validation 1.14.0
 
 **User (2026-10-30):** the first valid real capture of v0.7.0-dev showed CISD differences on `bk` only and real LRL divergence (τ, boundaries, events, ends, candidate counts).
