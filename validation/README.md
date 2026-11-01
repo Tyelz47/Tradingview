@@ -49,8 +49,9 @@ validation/
     cisd.py             docs/CISD.md DEF-CISD1…CISD9: opt-in module "cisd" (UNKNOWN start, alternating
                         state, record facts); CisdStack = Pine's incremental formulation (no scan),
                         proven equal, restorable from the parity snapshot. Pine: v0.7.0-dev, ST-20
-    displacement.py     docs/DISPLACEMENT.md DEF-DISP1…DISP9 (DISPLACEMENT-R, proposed): opt-in module "disp"
-                        (one closed candle; FVG fact on the next bar). No Pine yet: its events are ORACLE_ONLY (ST-14)
+    displacement.py     docs/DISPLACEMENT.md DEF-DISP1…DISP9 (DISPLACEMENT-R, approved): opt-in module "disp"
+                        (one closed candle; FVG fact on the next bar); DispPine = Pine's formulation, proven
+                        equal. Pine: v0.8.0-dev, ST-22
     ist.py              all modules in the Pine engine order → events + state
   invariants.py         74 named invariants (10 LRL, 8 HTF, 8 CISD, 6 displacement, checked only when the module runs) + the per-bar Monitor
   static_checks.py      text checks of src/IST.pine

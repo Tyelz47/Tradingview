@@ -14,7 +14,7 @@ from validation import PINE_SOURCE, ROOT, VALIDATION_DIR
 # [calc] inputs: everything else declared with input.* is [view] or [alert] (ARCHITECTURE §2.2).
 CALC_INPUTS = {"confirmedOnly", "fvgMinTicks", "fvgMinTra", "fvgMinRng", "fvgLen", "fvgMemory", "sesTz",
                "s1Nm", "s2Nm", "s3Nm", "s4Nm", "s1Ss", "s2Ss", "s3Ss", "s4Ss", "liqOn", "liqPreset", "liqLeftIn",
-               "liqRightIn", "liqReactIn", "liqMemory", "eqTolTk", "eqMinTch", "lrlOn", "cisdOn"}
+               "liqRightIn", "liqReactIn", "liqMemory", "eqTolTk", "eqMinTch", "lrlOn", "cisdOn", "dispOn"}
 # Display policy accessors: they read fvgMitRule but are called only from L6/L7 (S-01 since v0.3.2).
 VIEW_READ_ALLOWED = {"policyBar", "policyTime"}
 CALC_SECTIONS = ("L1 · MARKET DATA", "L2 · DETECTION", "L5 · EVENT BUS", "L3 · STATE MANAGEMENT", "ENGINE RUN")
@@ -22,7 +22,7 @@ RENDER_SECTIONS = ("L6 · RENDERER (functions", "L6 · RENDERER (run)")
 DRAWING_TYPES = {"line", "box", "label", "linefill", "table", "polyline"}
 STATE_CALLS = re.compile(r"\.(step|register|take|takeEq|cluster|trigger|advance|dropCluster|pushExtreme|markFinal|supersede|"
                          r"advanceLrl|judge|grow|promote|seed|finish|trim|feedHtf|stepHtf|seedHtf|trimHtf|milestonesHtf|"
-                         r"pruneCisd|feedCisd|factsCisd|confirmCisd)\(|"
+                         r"pruneCisd|feedCisd|factsCisd|confirmCisd|factsDisp|confirmDisp)\(|"
                          r"\b(f_emit|f_emitHtf|f_roll|f_sesNew|f_sesStep|f_sesExtend|f_sesFinalize|f_sesSupersede|f_fvgStep)\(")
 
 
@@ -214,7 +214,7 @@ def st07_single_creation_paths():
 
 
 def st08_scope_no_later_phases():
-    pat = re.compile(r"\b(ifvg|smt|displacement|confluence|qualityscore)\b", re.I)   # CISD: in scope since v0.7.0-dev
+    pat = re.compile(r"\b(ifvg|smt|confluence|qualityscore)\b", re.I)   # in scope: CISD since v0.7.0-dev, displacement since v0.8.0-dev
     bad = [f"line {i + 1}: {m.group(0)}" for i, ln in enumerate(source()) if (m := pat.search(code(ln)))]
     return not bad, f"later-phase identifiers in code: {bad or 'none'}"
 
@@ -588,6 +588,93 @@ def st21_no_history_in_functions(src: str | None = None):
     return not hits, f"history reads of user series inside functions / methods: {hits or 'none'}"
 
 
+DISP_RULES = {
+    "own TR average, on every bar (M9)": r"^float\s+dispTra\s+=\s+ta\.sma\(ta\.tr\(true\), DISP_TRA_LEN\)\s*$",
+    "A = the closed bars BEFORE the candle, read at global scope": r"^float\s+dispTraPrv\s+=\s+dispTra\[1\]\s*$",
+    "the previous candle's extremes, read at global scope":
+        r"^float\s+dispPrvHi\s+=\s+high\[1\]\nfloat\s+dispPrvLo\s+=\s+low\[1\]\s*$",
+    "Phase 1 DEF-A1 geometry (frozen), reused for the FVG metadata":
+        r"^bool\s+rawBull = low > c1High\nbool\s+rawBear = high < c1Low\s*$",
+    "side coordinates (bearish: open and close negated, high ↔ −low)":
+        r"^\s+float o\s+=\s+s \* open\n\s+float h\s+=\s+s > 0 \? high : -low\n\s+float lo\s+=\s+s > 0 \? low : -high\n"
+        r"\s+float cl\s+=\s+s \* close\n\s+float rg\s+=\s+h - lo\s*$",
+    "DEF-DISP1…5: direction (no doji), body ≥ k × A, a range, close position, strictly beyond the previous extreme":
+        r"^\s+cl > o \+ EPS and cl - o >= DISP_K \* a and rg > 0 and cl - lo >= DISP_CLOSE \* rg and cl > pe \+ EPS\s*$",
+    "decided at bar close, independent of display": r"^\s+if dispOn and barstate\.isconfirmed\s*$",
+    "the FVG metadata first, from this bar's DEF-A1 geometry": r"^\s+dispBook\.factsDisp\(rawBull, rawBear\)\s*$",
+    "no decision while A warms up or is 0 (M8: no floor)": r"^\s+if not na\(dispTraPrv\) and dispTraPrv > 0\s*$",
+    "bullish, else bearish (one direction per candle); the previous extreme in side coordinates":
+        r"^\s+dispSide := f_dispHit\(1, dispTraPrv, dispPrvHi\) \? 1 : f_dispHit\(-1, dispTraPrv, -dispPrvLo\) \? -1 : 0\s*$",
+    "every confirmed side is recorded, whatever the FVG (M7: metadata only)": r"^\s+if dispSide != 0\s*$",
+    "the record of a confirmed side": r"^\s+dispBook\.confirmDisp\(dispSide, dispTraPrv, dispSide > 0 \? dispPrvHi : dispPrvLo\)\s*$",
+    "FVG metadata: once, for the previous bar's record, YES / NO":
+        r"^\s+if r\.fvg == 0 and r\.bar == bar_index - 1\n\s+r\.fvg := \(r\.side > 0 \? gapUp : gapDn\) \? 1 : -1\s*$",
+    "body and close position in the side's direction":
+        r"^\s+float bd = s \* \(close - open\)\n\s+float cp = \(s > 0 \? close - low : high - close\) / rg\s*$",
+    "the record: candle, A, body, range, body / A, range / A, close position, previous extreme":
+        r"^\s+Disp r = Disp\.new\(s, time, bar_index, open, high, low, close, a, bd, rg, bd / a, rg / a, cp, pe\)\s*$",
+    "FVG metadata starts UNKNOWN": r"^\s+int\s+fvg = 0\s*$",
+    "event: side, id, bar, close": r"^\s+f_emit\(EV_DISP_CONFIRMED, r\.side, r\.id, r\.bar, r\.c, f_dispTxt\(r\)\)\s*$",
+    "memory: the oldest record goes": r"^\s+if b\.recs\.size\(\) > DISP_MEM\n\s+Disp old = b\.recs\.shift\(\)\s*$",
+    "no displacement alert yet (M11)": r"^\s+EV_DISP_CONFIRMED => false\s*$",
+}
+# FVG metadata → detection → record, after the HTF engine; inside the record: event, then memory.
+DISP_ORDER = (("s.stepHtf()", "dispBook.factsDisp(rawBull, rawBear)", "dispSide := f_dispHit(", "dispBook.confirmDisp("),
+              ("f_emit(EV_DISP_CONFIRMED", "if b.recs.size() > DISP_MEM"))
+DISP_CONSTANTS = {"DISP_K": "k", "DISP_CLOSE": "clv", "DISP_TRA_LEN": "tra_len", "DISP_MEM": "memory"}
+# L7 values (Data Window, capture) the engine must never read.
+DISP_VIEW = r"\b(dispDir|dispBkNow|dispCpNow|dispFvgNow|f_dispBar|f_dispFvgPrev|dbgDisp)\b"
+
+
+def _disp_blocks(lines: list[str]) -> list[str]:
+    """The displacement engine's code: its L3 block and its ENGINE RUN block."""
+    out, on = [], False
+    for ln in lines:
+        if re.match(r"^\s*// ── Displacement \(DEF-DISP1", ln):
+            on = True
+        elif on and re.match(r"^\s*// (════|── )", ln):
+            on = False
+        if on:
+            out.append(code(ln))
+    return out
+
+
+def st22_disp_rules(src: str | None = None):
+    """DEF-DISP1…DISP9 DISPLACEMENT-R in IST.pine: the approved constants (= DispSettings), every
+    rule line, the per-bar order, every history read at global scope (none in the engine, ST-21),
+    no number but 0 / 1 in the engine, one call site per engine method, and no display, debug,
+    capture or alert value read by detection."""
+    from validation.models.types import DispSettings
+    raw = src.splitlines() if src is not None else list(source())
+    lines = [code(ln) for ln in raw]
+    text = "\n".join(lines)
+    bad = [name for name, rx in DISP_RULES.items() if len(re.findall(rx, text, re.M)) != 1]
+    want = DispSettings()
+    for name, field in DISP_CONSTANTS.items():
+        m = re.findall(rf"^{name}\s*=\s*([\d.]+)\s*$", text, re.M)
+        if len(m) != 1 or float(m[0]) != float(getattr(want, field)):
+            bad.append(f"{name} = {m or 'missing'} (oracle {getattr(want, field)})")
+    for seq in DISP_ORDER:
+        at = [next((i for i, ln in enumerate(lines) if s in ln), None) for s in seq]
+        if None in at or at != sorted(at) or len(set(at)) != len(at):
+            bad.append("order " + " → ".join(seq))
+    engine = "\n".join(_disp_blocks(raw))
+    hist = re.findall(r"\w+\[[^\]]*\]", engine)
+    nums = sorted({n for n in re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", engine) if float(n) not in (0, 1)})
+    if not engine or hist or nums or "max_bars_back" in engine:
+        bad.append(f"engine reads history {hist or ''} / numbers {nums or ''}")
+    for m in ("factsDisp", "confirmDisp"):
+        calls = [i for i, ln in enumerate(lines) if re.search(rf"\.{m}\(", ln)]
+        if len(calls) != 1 or calls[0] not in {i for i, _ in lines_of(("ENGINE RUN",))}:
+            bad.append(f"{m} called {len(calls)}× (once, in ENGINE RUN)")
+    calc = {i for i, _ in lines_of(CALC_SECTIONS)}
+    leaks = [i + 1 for i, ln in enumerate(lines) if i in calc and re.search(DISP_VIEW, ln)]
+    if leaks:
+        bad.append(f"Data Window / capture values read by detection: lines {leaks}")
+    return not bad, (f"{len(DISP_RULES)} rules, {len(DISP_CONSTANTS)} constants, {len(DISP_ORDER)} orders, no history in "
+                     f"the engine, view / capture outside detection; wrong or missing: {bad or 'none'}")
+
+
 def st18_no_overloaded_functions(src: str | None = None):
     """Pine forbids global variables inside an overloaded user function or method (CE10182:
     'Cannot use global variable … in the local scope of overloaded function'). Every
@@ -623,4 +710,6 @@ CHECKS = [
               "guard and display outside detection", st20_cisd_rules),
     ("ST-21", "No history read of a user series inside a function or method (Pine call history ≠ bar history)",
      st21_no_history_in_functions),
+    ("ST-22", "DEF-DISP1…DISP9 DISPLACEMENT-R: approved rules and constants, per-bar order, history at global scope "
+              "only, view / capture outside detection", st22_disp_rules),
 ]

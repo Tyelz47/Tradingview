@@ -39,7 +39,7 @@ KEYS = {"SYMBOL": "text", "TIMEFRAME": "text", "TIMEZONE": "text", "TICK_SIZE": 
         **{k: "int" for k in COUNTS}}
 FAMILIES = ("FVG", "SESSION", "LEVEL", "BSL", "SSL", "EQH", "EQL")
 
-_NAME = r"(?:FVG|SESSION|LEVEL|BSL|SSL|EQH|EQL|LRL|HTF|CISD)_[A-Z_]*[A-Z]"
+_NAME = r"(?:FVG|SESSION|LEVEL|BSL|SSL|EQH|EQL|LRL|HTF|CISD|DISPLACEMENT)_[A-Z_]*[A-Z]"
 _TF = re.compile(r"\btf=(15m|30m|1H|4H|1D|1W)\b")      # HTF FVG: the timeframe, first in the audit text
 _TF_CODE = {"15m": "15", "30m": "30", "1H": "60", "4H": "240", "1D": "D", "1W": "W"}
 _ANY_NAME = re.compile(rf"(?<![A-Z_]){_NAME}(?![A-Z_])", re.I)
@@ -224,7 +224,7 @@ def pine_text(e, tz: str, tick: float = 0.25) -> str:
     """An oracle event as IST prints it in Pine Logs (f_evText with the full date)."""
     fam = e.type.split("_")[0]
     side = "" if fam in ("BSL", "SSL", "EQH", "EQL") or not e.dir else \
-        (" BULL" if e.dir > 0 else " BEAR") if fam in ("FVG", "HTF", "CISD") else (" HIGH" if e.dir > 0 else " LOW")
+        (" BULL" if e.dir > 0 else " BEAR") if fam in ("FVG", "HTF", "CISD", "DISPLACEMENT") else (" HIGH" if e.dir > 0 else " LOW")
     ident = "" if e.type == "LEVEL_SET" else f" id={_fmt(e.sid, tz)}"
     px = "—" if e.price is None else pine_px(e.price, tick)
     return f"{_fmt(e.time, tz)}  {e.type}{side}{ident} px={px}" + (f" · {e.meta}" if e.meta else "")

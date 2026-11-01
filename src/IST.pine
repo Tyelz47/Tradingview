@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.7.1-dev · LRL + HTF fair value gaps + CISD development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.8.0-dev · LRL + HTF fair value gaps + CISD + displacement development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -14,6 +14,9 @@
 //                  candles (DEF-B0…B6 → docs/HTF_FVG.md); additive, Module B.
 //                  CISD: change in state of delivery, detection only (CISD-R,
 //                  DEF-CISD1…CISD9 → docs/CISD.md); additive, reads bars only.
+//                  Displacement: one closed candle that reprices aggressively, detection
+//                  only (DISPLACEMENT-R, DEF-DISP1…DISP9 → docs/DISPLACEMENT.md); additive,
+//                  reads bars only, no state machine, no renderer and no alert yet.
 //  Layers          L1 market data / time   L2 detection   L3 state management
 //                  L4 context / filtering  L5 event bus   L6 renderer
 //                  L7 alerts / diagnostics
@@ -86,6 +89,7 @@ G_EQ   = "EQH / EQL"
 G_LRL  = "LRL · DIAGONAL LIQUIDITY"
 G_HTF  = "HTF FAIR VALUE GAPS"
 G_CISD = "CISD · CHANGE IN STATE OF DELIVERY"
+G_DISP = "DISPLACEMENT"
 
 TT_CONF = "[calc] ON: every state change is evaluated once, at bar close. Realtime output is identical to the historical chart after reload.\nOFF (live): wick milestones update intrabar. Creation and invalidation still wait for the close."
 TT_MIN  = "[view] Hides secondary visuals: CE lines, FVG labels, faded FVGs, session boxes and midpoints, taken liquidity levels and liquidity labels."
@@ -112,6 +116,7 @@ TT_LRLH = "[view] Also draw ended LRLs (the last 10 per side), faded; the projec
 TT_LRLM = "[view] Where an ended LRL finished: D drift (the high crossed the projected boundary but not the boundary projected on the previous bar) · S sweep · B break (closed beyond the boundary) · E expired. Needs Show historical LRL."
 TT_CISD  = "[calc] CISD = change in state of delivery (docs/CISD.md, CISD-R; no tuning inputs). Bullish: the level L is the OPEN of the first candle of the down-close series that delivered price into the lowest down-close low of the current down leg (only down-close candles count; a doji ends a series; an equal low moves L to the later series). The CISD is the first close strictly above L (a wick, or a close exactly at L, is not; any candle colour). Bearish is the exact mirror. The state of delivery starts UNKNOWN, and bullish and bearish CISDs then strictly alternate. Decided at bar close. OFF: nothing is computed; every other module's output is the same either way."
 TT_CISDS = "[view] The current CISD only: a short 1 px line at L, from the first candle of the delivery series to the confirming candle, and a small CISD label. A CISD confirmed in the first 200 loaded bars is never drawn (chart-start guard; it is still part of the logical state)."
+TT_DISP  = "[calc] Displacement (docs/DISPLACEMENT.md, DISPLACEMENT-R; no tuning inputs): one closed candle that reprices aggressively. Bullish: close above the open, body ≥ 1.5 × A (A = the TR average of the 14 closed bars before the candle), close in the top quarter of the candle's range, close above the previous candle's high. Bearish is the exact mirror. Decided at the candle's close; a historical fact (no lifecycle). Whether the candle left a fair value gap (candle 2 of a Phase 1 FVG) is recorded on the next bar as metadata only. No drawing or alert yet (Debug mode and Pine Logs show it). OFF: nothing is computed; every other module's output is the same either way."
 TT_HTF  = "[view] Fair value gaps of the 15m, 30m, 1H, 4H, 1D and 1W candles (docs/HTF_FVG.md). Every timeframe above the chart timeframe is always computed; these switches only show or hide. Per timeframe: the nearest open zone above and below price. A zone exists from the first chart bar after its third HTF candle closed (no repaint); its box starts at its first HTF candle. Phase 1 FVG definition and thresholds; invalidated only by a close of its own timeframe; no longer drawn once fully filled."
 
 confirmedOnly = input.bool(true, "Confirmed only", tooltip = TT_CONF, group = G_GEN, display = display.none)
@@ -220,6 +225,8 @@ cisdShow  = input.bool(true, "Show CISD", tooltip = TT_CISDS, group = G_CISD, di
 cisdPrev  = input.bool(false, "Show previous CISD (faded)", tooltip = "[view] Also the CISD before the current one, faded. Same 200-bar guard.", group = G_CISD, display = display.none)
 cisdAlert = input.bool(false, "CISD alerts", tooltip = "[alert] One alert per CISD_CONFIRMED, at the close of the confirming bar. Never during the first 200 loaded bars. OFF by default.", group = G_CISD, display = display.none)
 
+dispOn    = input.bool(true, "Enable displacement engine", tooltip = TT_DISP, group = G_DISP, display = display.none)
+
 alTiming  = input.enum(AlertTiming.barClose, "Timing", tooltip = TT_ALT, group = G_ALR, display = display.none)
 alBullNew = input.bool(true, "FVG created · bull", inline = "a1", group = G_ALR, display = display.none)
 alBearNew = input.bool(true, "bear", inline = "a1", group = G_ALR, display = display.none)
@@ -247,7 +254,7 @@ dbgCisdIns = input.int(0, "Inspect CISD (0 = current, 1 = previous, …)", minva
 // ════ CONSTANTS ════════════════════════════════════════════════════════════════
 
 CLR_NONE   = color.new(color.black, 100)
-IST_BUILD  = "v0.7.1-dev"                // the build, written into every parity capture (= the header; ST-12)
+IST_BUILD  = "v0.8.0-dev"                // the build, written into every parity capture (= the header; ST-12)
 TF_MS      = timeframe.in_seconds() * 1000
 EPS        = syminfo.mintick * 0.01    // float tolerance for tick comparisons
 HALF_TICK  = syminfo.mintick * 0.5
@@ -344,6 +351,14 @@ EV_CISD_CONFIRMED = 32                 // CISD: dir +1 bullish / −1 bearish ·
 EV_CISD_DROPPED   = 33
 CISD_COL     = color.new(#4F473F, 0)   // [view] the CISD line and label (the HTF label tone, for the #C2BAAE background)
 CISD_PREV_T  = 60                      // [view] transparency of the previous CISD (Show previous CISD)
+// Displacement (DEF-DISP1…DISP9 → docs/DISPLACEMENT.md, DISPLACEMENT-R approved 2026-11-01, M1…M11):
+// definition constants, not inputs (M4). One closed candle; no state machine, no lifecycle.
+DISP_K       = 1.5                     // DEF-DISP3 body ≥ 1.5 × A (M1)
+DISP_CLOSE   = 0.75                    // DEF-DISP4 close position ≥ 0.75 of the candle's range (M2)
+DISP_TRA_LEN = 14                      // DEF-DISP2 A = TR average of the 14 closed bars before the candle (own series, M9)
+DISP_MEM     = 50                      // DEF-DISP8 records kept (both sides); the oldest goes first
+EV_DISP_CONFIRMED = 34                 // displacement: dir +1 bullish / −1 bearish · sid = the candle's open time
+EV_DISP_DROPPED   = 35
 
 f_lineStyle(LnStyle s) =>
     switch s
@@ -674,6 +689,32 @@ type CisdBook
     int         confirmed = 0
     int         dropped = 0
 
+// L3 · one displacement (DEF-DISP7): a historical fact once confirmed. Only the FVG metadata is
+// resolved later, once, on the next closed candle; it never changes whether the displacement exists.
+type Disp
+    int   side              // +1 bullish · −1 bearish
+    int   id                // the candle's open time (= its time; one record per candle)
+    int   bar               // the candle = its confirmation bar
+    float o
+    float h
+    float l
+    float c
+    float tra               // A: the TR average of the DISP_TRA_LEN closed bars before the candle
+    float body              // side × (close − open)
+    float rng               // high − low
+    float bodyK             // body / A
+    float rangeK            // rng / A
+    float clv               // close position, side coordinates: (close − low) / rng (bearish: (high − close) / rng)
+    float prevExt           // the previous candle's high (bullish) / low (bearish) that the close cleared
+    int   fvg = 0           // DEF-DISP7 metadata: 0 UNKNOWN · 1 YES (candle 2 of a Phase 1 DEF-A1 gap) · −1 NO
+
+// L3 · the displacement engine's own state (a function cannot assign a global): records (both
+// sides, confirmation order) and counters. No state machine.
+type DispBook
+    array<Disp> recs
+    int         confirmed = 0
+    int         dropped = 0
+
 // ════ STATE ════════════════════════════════════════════════════════════════════
 
 // L3 · logical state
@@ -726,6 +767,8 @@ var CisdBook cisdBook = CisdBook.new(recs = array.new<Cisd>())
 // L6 · CISD view, rebuilt on the last bar (dropping these never touches logical state)
 var array<line>  cisdLns  = array.new<line>()
 var array<label> cisdLbls = array.new<label>()
+// L3 · displacement (DEF-DISP1…DISP9)
+var DispBook dispBook = DispBook.new(recs = array.new<Disp>())
 // L1 · chart-side period trackers: anchors + source validation (DEF-G6)
 var float dHi     = na
 var int   dHiT    = na
@@ -808,6 +851,16 @@ f_lrlTraAt(int x) =>
 // before the confirming bar, read here, on every bar (not inside confirmCisd: see lrlTraBuf).
 float cisdTra    = ta.sma(ta.tr(true), CISD_TRA_LEN)
 float cisdTraPrv = cisdTra[1]
+
+// Displacement (DEF-DISP2, DEF-DISP5): its OWN TR average (M9; it never reads CISD's) and the
+// previous candle's extremes, all read HERE, on every bar, and passed into the engine as plain
+// values (no history read inside a function or method: ST-21). A = the TR average of the 14 closed
+// bars before the candle (ta.tr(true): high − low on the first bar). The FVG metadata uses Phase 1's
+// DEF-A1 geometry of the next bar (rawBull / rawBear, L2), not a second FVG definition.
+float dispTra    = ta.sma(ta.tr(true), DISP_TRA_LEN)
+float dispTraPrv = dispTra[1]
+float dispPrvHi  = high[1]
+float dispPrvLo  = low[1]
 
 // The single gate between "observe" and "change state" (ARCHITECTURE §5).
 bool engineTick = not confirmedOnly or barstate.isconfirmed
@@ -1049,6 +1102,8 @@ f_evName(int k, int dir) =>
         EV_HTF_DROPPED => "HTF_FVG_DROPPED_MEMORY"
         EV_CISD_CONFIRMED => "CISD_CONFIRMED"
         EV_CISD_DROPPED   => "CISD_DROPPED_MEMORY"
+        EV_DISP_CONFIRMED => "DISPLACEMENT_CONFIRMED"
+        EV_DISP_DROPPED   => "DISPLACEMENT_DROPPED_MEMORY"
         => "UNKNOWN"
 
 f_evText(Event e) =>
@@ -1866,6 +1921,52 @@ method confirmCisd(CisdBook b, CisdSide s, CisdSide op) =>
         f_emit(EV_CISD_DROPPED, old.side, old.id, old.origin, old.level, "ended record")
     r
 
+// ── Displacement (DEF-DISP1…DISP9 → docs/DISPLACEMENT.md; reference model validation/models/displacement.py) ──
+// Reads this bar and the plain values L1 / L2 took on every bar (A, the previous candle's extremes,
+// Phase 1's DEF-A1 geometry); never reads or writes CISD, FVG, session, level, BSL/SSL, EQ, LRL or
+// HTF FVG state, and no display, debug, capture or alert input. Decided at the candle's close.
+// Audit text of DISPLACEMENT_CONFIRMED (parsed by the parity tool): body / A, range / A, close
+// position and the previous extreme the close cleared.
+f_dispTxt(Disp r) =>
+    "close=" + f_x(r.c) + " · bk=" + f_x(r.bodyK) + " · rk=" + f_x(r.rangeK) + " · cp=" + f_x(r.clv) + " · prev=" + f_x(r.prevExt)
+
+// DEF-DISP1…DISP5 for side s on this bar, side coordinates (bullish as is; bearish: open and close
+// negated, high ↔ −low): direction (a doji never), body ≥ 1.5 × A, a range and a close in its outer
+// quarter, the close strictly beyond the previous candle's extreme (pe, side coordinates).
+f_dispHit(int s, float a, float pe) =>
+    float o  = s * open
+    float h  = s > 0 ? high : -low
+    float lo = s > 0 ? low : -high
+    float cl = s * close
+    float rg = h - lo
+    cl > o + EPS and cl - o >= DISP_K * a and rg > 0 and cl - lo >= DISP_CLOSE * rg and cl > pe + EPS
+
+// DEF-DISP7: the FVG metadata of the displacement on the previous bar, resolved once on this bar's
+// close: is it candle 2 of a Phase 1 DEF-A1 gap in its direction (gapUp = rawBull, gapDn = rawBear:
+// candle 1 = the bar before it, candle 3 = this bar)? It never changes the record's existence.
+method factsDisp(DispBook b, bool gapUp, bool gapDn) =>
+    if b.recs.size() > 0
+        Disp r = b.recs.last()
+        if r.fvg == 0 and r.bar == bar_index - 1
+            r.fvg := (r.side > 0 ? gapUp : gapDn) ? 1 : -1
+    b
+
+// DEF-DISP6 / DEF-DISP8: side s confirmed on this bar. The record, the event, then memory (the
+// oldest record goes).
+method confirmDisp(DispBook b, int s, float a, float pe) =>
+    float rg = high - low
+    float bd = s * (close - open)
+    float cp = (s > 0 ? close - low : high - close) / rg
+    Disp r = Disp.new(s, time, bar_index, open, high, low, close, a, bd, rg, bd / a, rg / a, cp, pe)
+    b.recs.push(r)
+    b.confirmed := b.confirmed + 1
+    f_emit(EV_DISP_CONFIRMED, r.side, r.id, r.bar, r.c, f_dispTxt(r))
+    if b.recs.size() > DISP_MEM
+        Disp old = b.recs.shift()
+        b.dropped := b.dropped + 1
+        f_emit(EV_DISP_DROPPED, old.side, old.id, old.bar, old.c, "oldest record")
+    r
+
 // ════ L6 · RENDERER (functions: read state, write drawing handles only) ═════════
 
 int rightT = time + rightOffset * TF_MS   // where "extends to now" ends
@@ -2319,6 +2420,7 @@ lvlNewNow.clear()
 lvlEndNow.clear()
 sesDirtyNow.clear()
 sesEndNow.clear()
+int dispSide = 0             // this bar's displacement verdict (+1 / −1 / 0), set by the engine below; read by L7
 
 if engineTick
     // ── Levels (DEF-G1…G6). Always computed; display inputs are read by L6 only. ──
@@ -2452,6 +2554,17 @@ if engineTick
     //    whatever is displayed; 15m → 1W. ──
     for s in htfTfs
         s.stepHtf()
+
+    // ── Displacement (DEF-DISP1…DISP9). Reads no Phase 1 / Phase 2 / LRL / HTF / CISD state: this
+    //    bar and the plain values L1 / L2 took on every bar. Decided at bar close in both modes: FIRST
+    //    the FVG metadata of the previous bar's displacement, THEN this candle (bullish, else bearish:
+    //    a candle has one direction). No decision while A is warming up or is 0 (M8: no floor). ──
+    if dispOn and barstate.isconfirmed
+        dispBook.factsDisp(rawBull, rawBear)
+        if not na(dispTraPrv) and dispTraPrv > 0
+            dispSide := f_dispHit(1, dispTraPrv, dispPrvHi) ? 1 : f_dispHit(-1, dispTraPrv, -dispPrvLo) ? -1 : 0
+            if dispSide != 0
+                dispBook.confirmDisp(dispSide, dispTraPrv, dispSide > 0 ? dispPrvHi : dispPrvLo)
 
     // ── CISD (DEF-CISD1…CISD9). Runs last and reads no Phase 1 / Phase 2 / LRL / HTF state: bars
     //    and its own TR average (metadata) only. Decided at bar close in both modes: FACTS of the
@@ -2609,6 +2722,7 @@ f_alertOn(Event e) =>
         EV_LIQ_BREAK   => alLiqBrk
         EV_EQ_TAKEN    => alEqTkn
         EV_CISD_CONFIRMED => cisdAlert and e.eventBar >= CISD_GUARD   // DEF-CISD9: never in the first 200 loaded bars
+        EV_DISP_CONFIRMED => false                                    // displacement alerts deferred (M11)
         => false
 
 varip int    firedBar  = -1
@@ -2895,6 +3009,31 @@ f_cisdActive() =>
             out := f_cisdKey(r)
     out
 
+// The FVG metadata resolved on this bar's close, i.e. of the previous bar's displacement: 1 YES ·
+// −1 NO · na (no displacement on the previous bar). Read-only.
+f_dispFvgPrev() =>
+    int n = dispBook.recs.size()
+    int f = na
+    if n > 0
+        Disp r1 = dispBook.recs.get(n - 1)
+        if r1.bar == bar_index - 1
+            f := r1.fvg
+        else if n > 1
+            Disp r2 = dispBook.recs.get(n - 2)
+            if r2.bar == bar_index - 1
+                f := r2.fvg
+    f
+
+// Displacement per bar, for the Data Window and the parity capture (read-only; the engine never reads
+// these): for a non-doji candle its body / A and close position in its own direction (na otherwise).
+int   dispDir    = close > open + EPS ? 1 : close < open - EPS ? -1 : 0
+float dispBkNow  = dispDir != 0 and not na(dispTraPrv) and dispTraPrv > 0 ? dispDir * (close - open) / dispTraPrv : na
+float dispCpNow  = dispDir != 0 ? (dispDir > 0 ? close - low : high - close) / (high - low) : na
+int   dispFvgNow = dispOn ? f_dispFvgPrev() : na
+
+f_dispBar() =>
+    "|DS=" + str.tostring(dispSide) + "|DA=" + f_cap(dispTraPrv) + "|DK=" + f_cap(dispBkNow) + "|DP=" + f_cap(dispCpNow) + "|DF=" + f_capInt(dispFvgNow)
+
 // A side's two stacks for the parity snapshot, side coordinates: d = bar:time:low:origin bar:origin
 // time:L;… and w = bar:low;…, bottom first.
 f_cisdStacks(CisdSide s) =>
@@ -2923,7 +3062,7 @@ var int capDone = 0
 bool capBar   = capOn and barstate.isconfirmed and bar_index > last_bar_index - capTotal and capDone < capTotal
 if capBar
     if capDone == 0
-        log.info("CAPTURE|build=" + IST_BUILD + "|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|cisd=" + (cisdOn ? "1" : "0") + "|cisdmem=" + str.tostring(CISD_MEM) + "|cisdtra=" + str.tostring(CISD_TRA_LEN) + "|cisdguard=" + str.tostring(CISD_GUARD) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+        log.info("CAPTURE|build=" + IST_BUILD + "|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|cisd=" + (cisdOn ? "1" : "0") + "|cisdmem=" + str.tostring(CISD_MEM) + "|cisdtra=" + str.tostring(CISD_TRA_LEN) + "|cisdguard=" + str.tostring(CISD_GUARD) + "|disp=" + (dispOn ? "1" : "0") + "|dispk=" + str.tostring(DISP_K) + "|dispclose=" + str.tostring(DISP_CLOSE) + "|disptr=" + str.tostring(DISP_TRA_LEN) + "|dispmem=" + str.tostring(DISP_MEM) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
         // HTF snapshot after this first captured bar: per active timeframe the last completed
         // HTF bars and the whole registry, which the oracle restores and replays (§10 (c)).
         for s in htfTfs
@@ -2939,12 +3078,18 @@ if capBar
                 log.info("CISDSIDE|side=" + str.tostring(s.sign) + "|armed=" + f_capBool(s.armed) + "|a=" + str.tostring(s.a) + "|since=" + str.tostring(s.since) + "|known=" + f_capInt(s.known) + "|run=" + f_capBool(s.inRun) + "|rb=" + f_capInt(s.runBar) + "|rt=" + f_capInt(s.runTime) + "|rl=" + f_cap(s.runL) + "|" + f_cisdStacks(s))
             for r in cisdBook.recs
                 log.info("CISDREC|side=" + str.tostring(r.side) + "|id=" + str.tostring(r.id) + "|before=" + str.tostring(r.before) + "|level=" + f_cap(r.level) + "|origin=" + str.tostring(r.origin) + "|eb=" + str.tostring(r.extBar) + "|et=" + str.tostring(r.extTime) + "|ext=" + f_cap(r.ext) + "|leg=" + f_cap(r.legExt) + "|known=" + f_capInt(r.known) + "|bar=" + str.tostring(r.cBar) + "|time=" + str.tostring(r.cTime) + "|close=" + f_cap(r.cClose) + "|bk=" + f_cap(r.bodyK) + "|end=" + f_capInt(r.endBar) + "|rt=" + f_capInt(r.retest) + "|rc=" + f_capInt(r.reclaim) + "|br=" + f_capInt(r.broken))
+    // Displacement snapshot after captured bar DISP_TRA_LEN + 1 (not the first): from there the oracle's
+    // A, rebuilt from the captured bars alone, equals Pine's, so it restores these records and replays the rest.
+    if dispOn and capDone == DISP_TRA_LEN + 1
+        log.info("DISPSTATE|at=" + str.tostring(bar_index) + "|confirmed=" + str.tostring(dispBook.confirmed) + "|dropped=" + str.tostring(dispBook.dropped))
+        for r in dispBook.recs
+            log.info("DISPREC|side=" + str.tostring(r.side) + "|id=" + str.tostring(r.id) + "|bar=" + str.tostring(r.bar) + "|O=" + f_cap(r.o) + "|H=" + f_cap(r.h) + "|L=" + f_cap(r.l) + "|C=" + f_cap(r.c) + "|tra=" + f_cap(r.tra) + "|body=" + f_cap(r.body) + "|rng=" + f_cap(r.rng) + "|bk=" + f_cap(r.bodyK) + "|rk=" + f_cap(r.rangeK) + "|cp=" + f_cap(r.clv) + "|prev=" + f_cap(r.prevExt) + "|fvg=" + str.tostring(r.fvg))
     capDone += 1
     for s in htfTfs
         if s.active and s.doneBar == bar_index
             log.info("HTFBAR|tf=" + s.tf + "|i=" + str.tostring(bar_index) + "|t=" + str.tostring(s.bT) + "|O=" + f_cap(s.bO) + "|H=" + f_cap(s.bH) + "|L=" + f_cap(s.bL) + "|C=" + f_cap(s.bC) + "|tra=" + f_cap(s.bTra) + "|rng=" + f_cap(s.bRng))
     int fv = bullCand ? 2 : rawBull ? 1 : bearCand ? -2 : rawBear ? -1 : 0
-    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : "") + "|HO=" + f_htfOpen() + (cisdOn ? "|CS=" + str.tostring(cisdBook.state) + "|CU=" + f_cisdCand(cisdUp) + "|CN=" + f_cisdCand(cisdDn) + "|CA=" + f_cisdActive() : ""))
+    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : "") + "|HO=" + f_htfOpen() + (cisdOn ? "|CS=" + str.tostring(cisdBook.state) + "|CU=" + f_cisdCand(cisdUp) + "|CN=" + f_cisdCand(cisdDn) + "|CA=" + f_cisdActive() : "") + (dispOn ? f_dispBar() : ""))
 if barstate.isconfirmed and (capOn ? capBar : dbgOn)
     for e in barEv
         log.info(str.format_time(e.eventTime, "yyyy-MM-dd HH:mm", sesTz) + "  " + f_evText(e))
@@ -3071,3 +3216,11 @@ plot(dbgLiq ? domHiRef : na, "dbg · LIQ dominance: highest high of the W bars b
 plot(dbgLiq ? domLoRef : na, "dbg · LIQ dominance: lowest low of the W bars before the swing (points)", color = #787B86, display = display.data_window, editable = false)
 plot(dbgLiq ? f_takeCode(1) : na, "dbg · LIQ BSL take on this bar (0 · 1 sweep · 2 break · 3 taken, bar open)", color = #787B86, display = display.data_window, editable = false)
 plot(dbgLiq ? f_takeCode(-1) : na, "dbg · LIQ SSL take on this bar (0 · 1 sweep · 2 break · 3 taken, bar open)", color = #787B86, display = display.data_window, editable = false)
+// Displacement (put the cursor on the candle; no drawing yet, M11): the verdict, A and the two
+// measured numbers in the candle's own direction, and the FVG metadata resolved on this bar.
+bool dbgDisp = dbgOn and dispOn
+plot(dbgDisp ? dispSide : na, "dbg · DISP verdict on this candle (1 bullish · −1 bearish · 0 none)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgDisp ? dispTraPrv : na, "dbg · DISP A = TR average of the 14 closed bars before (points)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgDisp ? dispBkNow : na, "dbg · DISP body / A in the candle's direction (needs ≥ 1.5)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgDisp ? dispCpNow : na, "dbg · DISP close position in the candle's direction (needs ≥ 0.75)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgDisp ? dispFvgNow : na, "dbg · DISP FVG metadata resolved here for the previous candle (1 YES · −1 NO)", color = #787B86, display = display.data_window, editable = false)

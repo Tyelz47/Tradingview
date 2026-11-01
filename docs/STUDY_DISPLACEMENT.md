@@ -1,7 +1,8 @@
 # Displacement research study
 
-**Status: RESEARCH + ORACLE, awaiting the user's approval (2026-11-01).** The recommendation is **DISPLACEMENT-R** (§H). Its specification is `docs/DISPLACEMENT.md` and its reference model is `validation/models/displacement.py` (validation 1.16.0). **There is no Pine code.**
-* No change to `src/IST.pine`, to CISD-R (frozen, `CISD_BASELINE_v0.7.1-dev`), to LRL, HTF FVG, Phase 1 or Phase 2.
+**Status: APPROVED by the user on 2026-11-01 (DISPLACEMENT-R, decisions M1…M11 as recommended in §M).** The specification is `docs/DISPLACEMENT.md`, the reference model `validation/models/displacement.py` (validation 1.16.0), and the Pine implementation IST v0.8.0-dev (validation 1.17.0). This study is kept as the research record.
+* **Wording correction (2026-11-01, no rule change).** §A item 4, §H and M3 first described "close beyond the previous candle" as the necessary condition for leaving an FVG. That was wrong. A standard bullish FVG is a three-candle condition: the low of candle 3 above the high of candle 1. The rule stays in DISPLACEMENT-R as a **displacement** criterion: it separates directional repricing from a large candle still contained within the previous candle. It is not the FVG definition.
+* At the time of the study: no change to `src/IST.pine`, to CISD-R (frozen, `CISD_BASELINE_v0.7.1-dev`), to LRL, HTF FVG, Phase 1 or Phase 2.
 * Harness: `validation/studies/displacement.py` (`python -m validation.studies.displacement` prints every table below).
 * Tests: `validation/tests/test_displacement_study.py` (report section `research.disp`); the oracle's tests are listed in §K.
 
@@ -31,7 +32,7 @@ Sources (secondary): [LuxAlgo, Displacement](https://www.luxalgo.com/library/con
 1. **Relative, not absolute, size.** A large-candle detector in points is a session clock: on these data it fires 11–69 × more often per hour in the NY AM session than in Asia. Measured against the local TR average, displacement fires at the same rate in every session (1.5–1.9 per hour; NY AM ÷ Asia = 1.2). Ordinary volatility is high TR everywhere; displacement is a candle that stands out **from its own neighbourhood**.
 2. **Body, not range.** Range-based candidates select wide two-sided candles. Their p10 travel is 0.81 × TR and their close location goes down to 0.60, so they leave fewer FVGs (68 % vs 85 %). Body-based ones select net one-way delivery.
 3. **Acceptance at the extreme.** Among bodies ≥ 1.5 × TR the median close location is 0.90, but 13 % have a closing-side wick above 25 % of the range: a push that was partly rejected inside the bar.
-4. **Repricing beyond the prior candle.** A close outside the previous candle's range is exactly the condition under which the candle **can** leave an FVG against it when the next bar opens at the close (an FVG needs the next low above the previous high).
+4. **Repricing beyond the prior candle.** A close outside the previous candle's range separates directional repricing from a large candle still contained within the previous candle (for example, a strong retrace inside a bigger news candle). It is a displacement criterion, not the FVG definition: a standard bullish FVG is a three-candle condition (the low of candle 3 above the high of candle 1).
 
 **Detection vs. contextual quality (the separation this study keeps).**
 * **Detection (this module).** One closed candle reprices aggressively against its own neighbourhood. It reads candles only.
@@ -229,7 +230,7 @@ Per candle t, at its close:
 * **Over the multi-bar candidates (D4 / D4r).** No windowing or run-ending choices, earliest confirmation, an unambiguous candle. The multi-bar candidates remain a different object (§J).
 * **Over FVG-required (D5).** Not one bar late, not tied to the next candle.
 * **Over the recent-range break (D7).** That is context.
-* **Over D2.** D6 adds the parameter-free "beyond the previous candle", the precondition for leaving an imbalance against it.
+* **Over D2.** D6 adds the parameter-free "beyond the previous candle": the close leaves the previous candle's range, so a large candle still contained within it is not displacement.
 
 ## I · Event and record schema
 
@@ -319,7 +320,7 @@ These are passed as arguments to the record methods, with no loops, no `request.
 |---|---|---|
 | M1 | k (body / A) | **1.5** (the Tukey fence, stable 1.40–1.52 on 1m–5m). Alternatives: 1.25 (3.2/h) or 2.0 (0.8/h) |
 | M2 | strong close | **0.75** (outer quarter; removes 12 %). Alternatives: 2/3 (+6 %), or none |
-| M3 | close beyond the previous candle | **keep** (parameter-free, the precondition of an imbalance; removes 2 %) |
+| M3 | close beyond the previous candle | **keep** (parameter-free; separates directional repricing from a large candle contained within the previous one; removes 2 %) |
 | M4 | constants or [calc] inputs | **constants**, like CISD-R (one definition, one parity) |
 | M5 | multi-candle "displacement leg" | **not in DISPLACEMENT-R**; a separate, later object or context class if wanted (34–58 % of fast multi-bar moves have no qualifying candle) |
 | M6 | events | **CONFIRMED + DROPPED_MEMORY**, memory 50; no lifecycle |

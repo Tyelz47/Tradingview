@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.8.0-dev — Displacement in Pine (DISPLACEMENT-R) · validation 1.17.0 (2026-11-01, branch `displacement/pine`) — EXPERIMENTAL, not frozen
+
+**User (2026-11-01):** the displacement research is approved (M1…M11). Implement DISPLACEMENT-R in Pine as an independent engine. Do not touch CISD-R or its baseline tag, Phase 1 / 2, LRL or HTF FVG; no IFVG, no multi-bar displacement, no final styling, no alerts.
+
+**CHANGE (src/IST.pine)**
+* **Constants (M4):** `DISP_K 1.5`, `DISP_CLOSE 0.75`, `DISP_TRA_LEN 14`, `DISP_MEM 50`; events 34 / 35 = `DISPLACEMENT_CONFIRMED` / `DISPLACEMENT_DROPPED_MEMORY`. One [calc] input: `dispOn` (group DISPLACEMENT, ON).
+* **L1, every bar, global scope:**
+  * its own `dispTra = ta.sma(ta.tr(true), 14)` (M9);
+  * `dispTraPrv = dispTra[1]` (A);
+  * `dispPrvHi / dispPrvLo = high[1] / low[1]`.
+  * The engine receives plain values; no history read inside a function (ST-21).
+* **L3:**
+  * `f_dispHit`: DEF-DISP1…5 in side coordinates;
+  * `factsDisp`: the FVG metadata of the previous bar's record, once. It uses Phase 1's DEF-A1 `rawBull` / `rawBear`, the frozen geometry, not a second FVG definition;
+  * `confirmDisp`: the record (candle, A, body, range, body / A, range / A, close position, previous extreme, FVG metadata UNKNOWN), the event, memory 50.
+* **ENGINE RUN:** at bar close, after HTF FVG and before CISD: FVG metadata first, then the candle (bullish, else bearish), no decision while A is warming up or 0.
+* **No renderer and no alert (M11):** `EV_DISP_CONFIRMED => false`. Debug: five Data-Window-only values (`dbg · DISP …`). The 52-row debug table is unchanged.
+* **Parity capture:**
+  * CAPTURE `disp / dispk / dispclose / disptr / dispmem`;
+  * `DISPSTATE` / `DISPREC` after captured bar 15;
+  * per-bar `DS / DA / DK / DP / DF`.
+  * Existing capture output is unchanged.
+
+**WHY.** The approved DISPLACEMENT-R in IST. The v0.7.0-dev call-history defect class is designed out: every history read is at global scope.
+
+**PHASE 1 / 2, LRL, HTF FVG, CISD IMPACT:** none. ST-15, ST-16, ST-17, ST-19 and ST-20 pass unchanged, and every frozen CISD test passes unchanged.
+
+**REPAINT IMPACT:** none. Decided at the candle's close. The FVG metadata is set once, one bar later, and is metadata only. Stateless, so reload-proof after bar 14.
+
+**Validation 1.17.0**
+* `DispPine` (`validation/models/displacement.py`, Pine's formulation, transliterated) = the oracle. The oracle itself is unchanged.
+* ST-22 (19 rules, 4 constants, 2 orders); ST-08 now allows displacement; `dispOn` is a [calc] input; `ORACLE_ONLY` is empty (ST-14 exact).
+* `tests/test_displacement_pine.py`: the approval's case list × 2 sides, real data, walks, 25 mutations, ST-21 regression, inputs / no renderer / capture.
+* `tests/test_parity_disp.py`: faithful captures exact; 15 corruption kinds detected.
+* `fuzz`: Pine formulation = oracle.
+* `parity/capture.py _compare_disp`; `manual.py` reads `DISPLACEMENT_*` lines.
+* **Docs:**
+  * `docs/DISPLACEMENT.md`: APPROVED, §5 Pine, §6 capture;
+  * `docs/TESTS_DISPLACEMENT.md`: DISP-L00…L12;
+  * `docs/STUDY_DISPLACEMENT.md`: approved; a wording correction ("close beyond the previous candle" is a displacement criterion, not the FVG definition; no rule change).
+
+**TEST:**
+* FULL: **PASS**, exit 0, 494.0 s, **947 passed, 2 skipped** (the long-standing parity skip, and the observed-capture test: the latest real capture was written by v0.7.1-dev):
+  * static 22/22 (ST-21, ST-22);
+  * displacement 106/106 (oracle 26 + Pine 80), displacement study 24/24;
+  * parity 139/141 (+21 displacement parity), property 37/37, long walks 19/19, invariant detectors 76/76;
+  * CISD 167/167, LRL 85/85, HTF 46/46, golden 8/8, regression 5/5;
+  * Phase 1 / 2 unchanged.
+* TradingView: DISP-L00 PENDING. A new real Pine Logs capture with v0.8.0-dev is needed for DISP-L10 (the existing captures were written by v0.7.1-dev and earlier).
+
 ## Displacement research + oracle — DISPLACEMENT-R proposed · validation 1.16.0 (2026-11-01, branch `research/displacement`) — no indicator change
 
 **User (2026-11-01):** start the research / specification phase of displacement as an independent module; compare candidate definitions on real NQ without tuning on outcomes; recommend one; implement it in the Python oracle with tests and invariants; no Pine; CISD-R, LRL and HTF untouched.

@@ -51,6 +51,26 @@ def test_disp_invariants_hold(candles, ds):
 
 
 @given(candles, disp_settings)
+def test_disp_pine_formulation_equals_oracle(candles, ds):
+    """IST.pine's formulation (DispPine: global-scope A and previous extremes, factsDisp →
+    f_dispHit → confirmDisp) = the approved DisplacementEngine: every record field, every event."""
+    from validation.models.displacement import DispPine, DisplacementEngine
+    from validation.models.events import EventLog
+    out = []
+    for cls in (DisplacementEngine, DispPine):
+        log = EventLog()
+        e = cls(ds, 0.25, log)
+        for t, c in enumerate(candles):
+            log.at(t, c.time)
+            e.step(t, c)
+        out.append(([(r.bar, r.side, r.id, r.tra, r.body_k, r.range_k, r.clv, r.prev_ext,
+                      r.fvg if cls is DispPine else {None: 0, True: 1, False: -1}[r.fvg]) for r in e.recs],
+                    [(x.bar, x.type, x.dir, x.sid, x.origin_bar, x.price) for x in log.events]))
+    assert out[0] == out[1]
+    stats.bump("property.examples")
+
+
+@given(candles, disp_settings)
 def test_disp_mirror_symmetry(candles, ds):
     """Reflecting prices (p → −p) swaps bullish and bearish displacements, prices negated."""
     assert _disp(run(mirror(candles, 0.0), _s(ds))) == _disp(run(candles, _s(ds)), lambda p: -p, -1)
