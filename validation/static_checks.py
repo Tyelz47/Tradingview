@@ -277,13 +277,15 @@ def st13_oracle_defaults_match_pine():
 
 
 def st14_event_names_match_oracle():
-    from validation.models.events import TYPES
+    from validation.models.events import ORACLE_ONLY, TYPES
     src = "\n".join(source())
     fixed = set(re.findall(r'EV_\w+\s*=>\s*"([A-Z_]+)"', src))
     sided = re.findall(r"EV_\w+\s*=>\s*([sq]) \+ \"([A-Z_]+)\"", src)
     names = fixed | {f"{p}{n}" for k, n in sided for p in (("BSL_", "SSL_") if k == "s" else ("EQH_", "EQL_"))}
-    ok = names == set(TYPES)
-    return ok, f"Pine names {len(names)}, oracle names {len(TYPES)}; only in Pine: {sorted(names - set(TYPES)) or 'none'}; only in oracle: {sorted(set(TYPES) - names) or 'none'}"
+    want = set(TYPES) - ORACLE_ONLY
+    ok = names == want
+    return ok, (f"Pine names {len(names)}, oracle names {len(want)} (+{len(ORACLE_ONLY)} oracle-only, not in Pine yet); "
+                f"only in Pine: {sorted(names - want) or 'none'}; only in oracle: {sorted(want - names) or 'none'}")
 
 
 def st15_phase1_baseline_guard():

@@ -49,8 +49,10 @@ validation/
     cisd.py             docs/CISD.md DEF-CISD1…CISD9: opt-in module "cisd" (UNKNOWN start, alternating
                         state, record facts); CisdStack = Pine's incremental formulation (no scan),
                         proven equal, restorable from the parity snapshot. Pine: v0.7.0-dev, ST-20
+    displacement.py     docs/DISPLACEMENT.md DEF-DISP1…DISP9 (DISPLACEMENT-R, proposed): opt-in module "disp"
+                        (one closed candle; FVG fact on the next bar). No Pine yet: its events are ORACLE_ONLY (ST-14)
     ist.py              all modules in the Pine engine order → events + state
-  invariants.py         68 named invariants (10 LRL, 8 HTF, 8 CISD, checked only when the module runs) + the per-bar Monitor
+  invariants.py         74 named invariants (10 LRL, 8 HTF, 8 CISD, 6 displacement, checked only when the module runs) + the per-bar Monitor
   static_checks.py      text checks of src/IST.pine
   regression.py         corpus, baseline snapshot, diff/classify, legacy models from git
   candles.py            builders, random walks, TradingView CSV loader, mirror/shift
@@ -66,7 +68,8 @@ validation/
   studies/              analyses before a definition is specified (never change the oracle):
                         liquidity_significance.py (reads the v0.4.3-dev evidence capture);
                         lrl.py (LRL research, docs/STUDY_LRL.md; both captures merged, charts → docs/study_lrl);
-                        cisd.py (CISD research, docs/STUDY_CISD.md; the oracle equals its CISD-R engine)
+                        cisd.py (CISD research, docs/STUDY_CISD.md; the oracle equals its CISD-R engine);
+                        displacement.py (displacement research, docs/STUDY_DISPLACEMENT.md; the oracle equals D6)
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```
@@ -101,7 +104,7 @@ python validation/validation_agent.py --mode deep
 ```
 
 **Options:**
-* `--phase 1|2|lrl|htf|cisd|all` runs one phase (or LRL detection, HTF FVG, CISD) plus the shared checks.
+* `--phase 1|2|lrl|htf|cisd|disp|all` runs one phase (or LRL detection, HTF FVG, CISD, displacement) plus the shared checks.
 * `--seed N` sets the Hypothesis seed. Walks and the regression corpus are fixed.
 * `--report PATH` writes the report elsewhere.
 * `--verbose` prints every test.

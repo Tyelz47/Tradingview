@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 LEVEL_KINDS = {"PDH": 0, "PDL": 1, "PWH": 2, "PWL": 3, "DO": 4, "MO": 5}
 
 # Canonical in-bar order: roughly Pine's engine order (levels, sessions, FVG, liquidity, LRL).
-# LRL, then HTF FVG, then CISD types come last so the ranks of every earlier type are unchanged.
+# LRL, then HTF FVG, CISD, then displacement types come last so the ranks of every earlier type are unchanged.
 TYPES = (
     "LEVEL_SET",
     "SESSION_END", "SESSION_START",
@@ -28,10 +28,14 @@ TYPES = (
     "HTF_FVG_INVALIDATED", "HTF_FVG_SEEDED", "HTF_FVG_CREATED", "HTF_FVG_DROPPED_MEMORY",
     "HTF_FVG_FIRST_TOUCH", "HTF_FVG_CE_TOUCH", "HTF_FVG_FULL_FILL",
     "CISD_CONFIRMED", "CISD_DROPPED_MEMORY",
+    "DISPLACEMENT_CONFIRMED", "DISPLACEMENT_DROPPED_MEMORY",
 )
 # The terminal LRL classes (docs/LRL.md DEF-LRL5): exactly one per LRL, never relabelled.
 LRL_TERMINAL = ("LRL_DRIFT", "LRL_SWEEP", "LRL_BREAK", "LRL_EXPIRED")
 RANK = {t: i for i, t in enumerate(TYPES)}
+# Types of opt-in oracle modules that src/IST.pine does not implement yet (ST-14 excludes
+# them; empty this set when Pine gains the module).
+ORACLE_ONLY = frozenset(t for t in TYPES if t.startswith("DISPLACEMENT_"))
 
 # Events that mark a one-time transition of one structure: at most once per (type, dir, sid).
 # LRL_EXTENDED repeats (4th, 5th, … point) and is keyed by its bar, like LEVEL_SET.

@@ -1,9 +1,11 @@
 """The whole reference model: one bar at a time, modules in the Pine engine order
 (levels → sessions → FVG → liquidity, src/IST.pine "ENGINE RUN"), then the opt-in LRL
-HTF FVG and CISD engines (docs/LRL.md, docs/HTF_FVG.md, docs/CISD.md). Confirmed mode: every candle is a closed bar."""
+HTF FVG, CISD and displacement engines (docs/LRL.md, docs/HTF_FVG.md, docs/CISD.md,
+docs/DISPLACEMENT.md). Confirmed mode: every candle is a closed bar."""
 from __future__ import annotations
 
 from validation.models.cisd import CisdEngine
+from validation.models.displacement import DisplacementEngine
 from validation.models.events import Event, EventLog, canonical
 from validation.models.fvg import FvgEngine
 from validation.models.htf_fvg import HtfEngine
@@ -27,6 +29,7 @@ class IstModel:
         self.lrl = LrlEngine(s.lrl, s.liq.tol_ticks, s.tick, self.log) if "lrl" in s.modules else None
         self.hfvg = HtfEngine(s.htf, s.fvg, s.tick, self.log, htf_pre, htf_external) if "htf" in s.modules else None
         self.cisd = CisdEngine(s.cisd, s.tick, self.log) if "cisd" in s.modules else None
+        self.disp = DisplacementEngine(s.disp, s.tick, self.log) if "disp" in s.modules else None
 
     @property
     def bar(self) -> int:
@@ -41,7 +44,7 @@ class IstModel:
         self.candles.append(c)
         self.log.at(bar, c.time)
         n = len(self.log.events)
-        for engine in (self.levels, self.sessions, self.fvg, self.liq, self.lrl, self.hfvg, self.cisd):
+        for engine in (self.levels, self.sessions, self.fvg, self.liq, self.lrl, self.hfvg, self.cisd, self.disp):
             if engine is not None:
                 engine.step(bar, c)
         return self.log.events[n:]
@@ -71,6 +74,8 @@ class IstModel:
             out["htf"] = self.hfvg.state()
         if self.cisd is not None:
             out["cisd"] = self.cisd.state()
+        if self.disp is not None:
+            out["disp"] = self.disp.state()
         return out
 
 

@@ -1,5 +1,41 @@
 # Changelog
 
+## Displacement research + oracle — DISPLACEMENT-R proposed · validation 1.16.0 (2026-11-01, branch `research/displacement`) — no indicator change
+
+**User (2026-11-01):** start the research / specification phase of displacement as an independent module; compare candidate definitions on real NQ without tuning on outcomes; recommend one; implement it in the Python oracle with tests and invariants; no Pine; CISD-R, LRL and HTF untouched.
+
+**RESULT**
+* `docs/STUDY_DISPLACEMENT.md` (A–M): nine candidates (body, range, strong close, relative median, 2- / 3-candle windows, directional run, FVG-required, hybrid, recent-range break) on 3,791 real 1m bars (≈ 63.2 h, three segments).
+  * Each threshold = the Tukey upper fence of its own statistic. Body / TR fence 1.47, stable 1.40–1.52 across segments and 1m–5m.
+* **DISPLACEMENT-R** (= D6):
+  * one closed candle with `body ≥ 1.5 × TR average (14 bars before)`;
+  * the close in the outer quarter of its range;
+  * the close beyond the previous candle's extreme.
+* **Numbers:**
+  * 110 events, 1.74/h (2.9 % of bars on every timeframe), the same rate in every session.
+  * A large-candle detector in points is 11–69 × denser in NY AM than in Asia.
+  * 85 % leave an FVG, but only 14 % of FVGs come from a displacement candle, so the FVG is metadata, not a requirement.
+  * 12 % of CISDs are confirmed by a displacement, and 25 % of displacements have no CISD within ±10 bars: distinct modules.
+  * Shuffled candles and random walks produce such candles too: descriptive only, no predictive claim.
+* **Known false negative:** fast multi-candle moves without a qualifying candle (34–58 %). This is open decision M5.
+
+**Validation 1.16.0**
+* `validation/studies/displacement.py` + `tests/test_displacement_study.py` (24).
+* Oracle `validation/models/displacement.py`: opt-in module `disp`, `DispSettings(k 1.5, clv 0.75, tra_len 14, memory 50)`.
+  * Events `DISPLACEMENT_CONFIRMED` / `DISPLACEMENT_DROPPED_MEMORY`, as `ORACLE_ONLY` (ST-14 excludes them until Pine).
+  * The record's FVG fact is stamped on the next bar. The oracle equals the study's D6 record-for-record (110).
+* `tests/test_displacement.py` (26), `fuzz/test_displacement_properties.py`, INV-DISP-01…06 with negative tests (74 invariants).
+* Report sections `disp` and `research.disp`; `--phase disp`.
+
+**TEST:**
+* FULL: **PASS**, exit 0, 620.8 s, **845 passed, 1 skipped** (the parity section's long-standing skip):
+  * static 21/21;
+  * displacement 26/26, displacement study 24/24;
+  * property 36/36, long walks 19/19, invariant detectors 76/76;
+  * CISD 167/167, LRL 85/85, HTF 46/46, parity 119/120, golden 8/8;
+  * Phase 1 / 2 unchanged.
+* `src/IST.pine` unchanged (SHA-256 29dd2bfd…afbbf); CISD frozen tag and release untouched; default modules and the regression baseline unchanged.
+
 ## CISD FROZEN — CISD-L12 manual PASS recorded (2026-10-31, branch `cisd/pine`) — documentation only
 
 **User (2026-10-31):** the CISD-L12 TradingView reload check passes. The same 3 historical CISDs kept their side, origin / id, L, confirmation bar and delivery state after a page refresh and after removing and re-adding the indicator; no historical CISD changed.

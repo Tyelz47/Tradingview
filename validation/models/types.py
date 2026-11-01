@@ -149,6 +149,16 @@ class CisdSettings:
 
 
 @dataclass(frozen=True)
+class DispSettings:
+    """docs/DISPLACEMENT.md DISPLACEMENT-R (recommended 2026-11-01, awaiting the user's approval).
+    k and clv are the definition's constants, variable here only so tests can exercise every rule."""
+    k: float = 1.5              # DEF-DISP3 body ≥ k × TR average (the Tukey fence of body / TR on NQ, §E of the study)
+    clv: float = 0.75           # DEF-DISP4 close in the outer quarter of the candle's range
+    tra_len: int = 14           # DEF-DISP2 TR average of the bars before the candle (Phase 1 DEF-A2 length)
+    memory: int = 50            # DEF-DISP8 records kept (≥ 1); the oldest goes first
+
+
+@dataclass(frozen=True)
 class SessionSettings:
     """DEF-F1…F6. Windows are `HHMM-HHMM` in `timezone`, every weekday."""
     timezone: str = "America/New_York"
@@ -186,9 +196,9 @@ class ViewSettings:
 
 
 MODULES = ("levels", "sessions", "fvg", "liq")
-# Opt-in modules: not in the default run (src/IST.pine has no CISD yet; baselines and parity
-# compare the default modules only).
-KNOWN_MODULES = MODULES + ("lrl", "htf", "cisd")
+# Opt-in modules: not in the default run (src/IST.pine has no displacement yet; baselines and
+# parity compare the default modules only).
+KNOWN_MODULES = MODULES + ("lrl", "htf", "cisd", "disp")
 
 
 @dataclass(frozen=True)
@@ -202,6 +212,7 @@ class Settings:
     lrl: LrlSettings = field(default_factory=LrlSettings)
     htf: HtfSettings = field(default_factory=HtfSettings)
     cisd: CisdSettings = field(default_factory=CisdSettings)
+    disp: DispSettings = field(default_factory=DispSettings)
     modules: tuple = MODULES
 
     @property
@@ -217,7 +228,7 @@ class Settings:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        for opt in ("lrl", "htf", "cisd"):
+        for opt in ("lrl", "htf", "cisd", "disp"):
             if opt not in self.modules:
                 del d[opt]               # opt-in module: absent cases keep their earlier definition (regression)
         if "htf" in d:
@@ -231,7 +242,7 @@ class Settings:
         d = dict(d or {})
         sub = {"fvg": FvgSettings, "liq": LiqSettings, "sessions": SessionSettings,
                "levels": LevelSettings, "view": ViewSettings, "lrl": LrlSettings, "htf": HtfSettings,
-               "cisd": CisdSettings}
+               "cisd": CisdSettings, "disp": DispSettings}
         kw = {}
         for name, typ in sub.items():
             if name in d:

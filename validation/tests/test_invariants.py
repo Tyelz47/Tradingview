@@ -590,6 +590,72 @@ def cisd08():
     mon.check()
 
 
+# ── displacement (opt-in module, docs/DISPLACEMENT.md) ──
+def disp_case(n=None):
+    """The merged NQ captures with the displacement module, the first n bars stepped and checked."""
+    from validation.studies.lrl import nq_candles
+    m = IstModel(Settings(modules=("disp",)))
+    mon = Monitor(m)
+    for c in nq_candles()[:n]:
+        m.step(c)
+        mon.check()
+    return m, mon
+
+
+def _disp_bar(i=4):
+    """Bar of the i-th displacement on the NQ captures."""
+    from validation.studies.lrl import nq_candles
+    return [e.bar for e in IstModel(Settings(modules=("disp",))).run(nq_candles()).events
+            if e.type == "DISPLACEMENT_CONFIRMED"][i]
+
+
+def disp_new(corrupt):
+    """The 5th displacement's bar is stepped, its new record corrupted, then checked."""
+    from validation.studies.lrl import nq_candles
+    t = _disp_bar()
+    m, mon = disp_case(t)
+    m.step(nq_candles()[t])
+    corrupt(m.disp)
+    mon.check()
+
+
+def disp01():
+    disp_new(lambda e: e.recs.pop())                      # a displacement candle without its record
+
+
+def disp02():
+    disp_new(lambda e: setattr(e.recs[-1], "body_k", e.recs[-1].body_k + 1))
+
+
+def disp03():
+    from validation.studies.lrl import nq_candles
+    t = _disp_bar()
+    m, mon = disp_case(t + 1)                             # the displacement bar, checked: no fact yet
+    m.step(nq_candles()[t + 1])
+    r = next(r for r in m.disp.recs if r.bar == t)
+    r.fvg = not r.fvg                                     # the wrong FVG fact
+    mon.check()
+
+
+def disp04():
+    m, mon = disp_case()
+    m.disp.recs[0].close += 0.25                          # an old record
+    mon.check()
+
+
+def disp05():
+    m, mon = disp_case()
+    r = m.disp.recs[-1]
+    m.log.events.append(ev_now(m, "DISPLACEMENT_DROPPED_MEMORY", r.side, r.id, r.close))   # still in memory
+    mon.check()
+
+
+def disp06():
+    m, mon = disp_case()
+    m.disp.s = replace(m.disp.s, memory=1)
+    mon.check()
+
+
 CASES = {
     "INV-EV-01": ev01, "INV-EV-02": ev02, "INV-EV-03": ev03, "INV-EV-04": ev04, "INV-EV-05": ev05,
     "INV-FVG-01": fvg01, "INV-FVG-02": fvg02, "INV-FVG-03": fvg03, "INV-FVG-04": fvg04, "INV-FVG-05": fvg05,
@@ -607,6 +673,8 @@ CASES = {
     "INV-HTF-06": htf06, "INV-HTF-07": htf07, "INV-HTF-08": htf08,
     "INV-CISD-01": cisd01, "INV-CISD-02": cisd02, "INV-CISD-03": cisd03, "INV-CISD-04": cisd04,
     "INV-CISD-05": cisd05, "INV-CISD-06": cisd06, "INV-CISD-07": cisd07, "INV-CISD-08": cisd08,
+    "INV-DISP-01": disp01, "INV-DISP-02": disp02, "INV-DISP-03": disp03, "INV-DISP-04": disp04,
+    "INV-DISP-05": disp05, "INV-DISP-06": disp06,
 }
 
 

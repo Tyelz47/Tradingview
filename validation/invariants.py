@@ -144,6 +144,18 @@ CISD_EVENTS = _inv("INV-CISD-07", "CISD", "events and records agree: CISD_CONFIR
                                           "L, origin); CISD_DROPPED_MEMORY iff a record left memory")
 CISD_MEM = _inv("INV-CISD-08", "CISD", "records ≤ memory; only the newest is ACTIVE; each older record ended on the "
                                        "next CISD's bar; a dropped record had ended")
+# ── displacement (docs/DISPLACEMENT.md, oracle only) ──
+DISP_RULE = _inv("INV-DISP-01", "DISP", "a record exists on a bar iff its candle is a displacement: close beyond the "
+                                        "open (> EPS), body ≥ k × the TR average of the bars before, close in the "
+                                        "outer clv of the range, close beyond the previous candle's extreme (> EPS)")
+DISP_FIELDS = _inv("INV-DISP-02", "DISP", "a record is the candle itself: id = its time, OHLC, TR average, body / TR, "
+                                          "range / TR, close location, the previous extreme; no FVG fact on its bar")
+DISP_FVG = _inv("INV-DISP-03", "DISP", "the FVG fact is stamped on the next bar: candle 2 of a raw FVG in its direction "
+                                       "(low of t+1 > high of t−1, bullish); never missed, never before")
+DISP_FROZEN = _inv("INV-DISP-04", "DISP", "a record never changes; its FVG fact, once stamped, never changes")
+DISP_EVENTS = _inv("INV-DISP-05", "DISP", "events and records agree: DISPLACEMENT_CONFIRMED on the candle (side, id, "
+                                          "close); DISPLACEMENT_DROPPED_MEMORY iff a record left memory")
+DISP_MEM = _inv("INV-DISP-06", "DISP", "records ≤ memory, in bar order; the oldest leaves first")
 
 LIQ_FACTS = ("taken_bar", "take_ext", "take_close", "take_gap", "cls")
 
@@ -181,6 +193,8 @@ class Monitor:
         self.lrl_ended: set = set()             # (dir, id) with a terminal event, for INV-LRL-10
         self.cisd_snap: dict = {}               # (side, id) → frozen facts
         self.cisd_last = None                   # the newest CISD seen: (side, ext_bar, bar)
+        self.disp_snap: dict = {}               # displacement id → frozen record fields
+        self.disp_tr: list = []                 # our own true ranges, for INV-DISP-01 / 02
         self.tol = model.settings.liq.tol_ticks * model.settings.tick
         self.eps = model.settings.eps
 
@@ -209,6 +223,8 @@ class Monitor:
             self._htf(bar, c, new)
         if getattr(m, "cisd", None) is not None:
             self._cisd(bar, new, full)
+        if getattr(m, "disp", None) is not None:
+            self._disp(bar, new, full)
         self.n_events = len(m.events)
         self.last_event = m.events[-1] if m.events else None
 
@@ -228,6 +244,8 @@ class Monitor:
             self._lrl(bar, [], True, final=True)
         if getattr(m, "cisd", None) is not None:
             self._cisd(bar, [], final=True)
+        if getattr(m, "disp", None) is not None:
+            self._disp(bar, [], final=True)
 
     # ── events ──
     def _events(self, bar, c, new, full=True):
@@ -250,7 +268,8 @@ class Monitor:
                 self.seen.add(e.ident())
             if fam in self.dropped:
                 self._fail(EV_AFTER_DROP, f"{e.type} id {e.sid} after its DROPPED_MEMORY")
-            if e.type.endswith("_CREATED") or e.type in ("SESSION_START", "LRL_CONFIRMED", "HTF_FVG_SEEDED", "CISD_CONFIRMED"):
+            if e.type.endswith("_CREATED") or e.type in ("SESSION_START", "LRL_CONFIRMED", "HTF_FVG_SEEDED", "CISD_CONFIRMED",
+                                                         "DISPLACEMENT_CONFIRMED"):
                 self.known.add(fam)
             elif e.type != "LEVEL_SET" and fam not in self.known:
                 self._fail(EV_KNOWN, f"{e.type} id {e.sid} refers to no known structure")
@@ -784,6 +803,72 @@ class Monitor:
         for k in gone:
             del self.cisd_snap[k]
         for k in (CISD_STATE, CISD_LEVEL, CISD_CONFIRM, CISD_TIMING, CISD_FACTS, CISD_FROZEN, CISD_EVENTS, CISD_MEM):
+            stats.INV_CHECKS[k] += 1
+
+    # ── displacement (docs/DISPLACEMENT.md) ──
+    def _disp(self, bar, new, full=True, final=False):
+        """Independent of the engine: the rule, the fields and the FVG fact are recomputed from the
+        candles with our own true ranges. A new record is checked on its bar, its FVG fact on the
+        next bar, every record on full sweeps (INV-DISP-04 freezes them). Constant work per bar."""
+        from validation.models.fvg import raw_gap, sma, true_range
+        e, cs, eps, s_ = self.m.disp, self.m.candles, self.eps, self.m.disp.s
+        while len(self.disp_tr) <= bar:                       # once per bar, even when a bar is re-checked
+            j = len(self.disp_tr)
+            self.disp_tr.append(true_range(cs[j], cs[j - 1] if j else None))
+        recs = e.recs
+        if len(recs) > s_.memory or any(a.bar >= b.bar for a, b in zip(recs, recs[1:])):
+            self._fail(DISP_MEM, f"{len(recs)} records (memory {s_.memory}), bars {[r.bar for r in recs]}")
+        tra = sma(self.disp_tr, bar - 1, s_.tra_len)
+        c = cs[bar]
+        v = lambda x, s: (x.open, x.high, x.low, x.close) if s > 0 else (-x.open, -x.low, -x.high, -x.close)
+        want = None
+        if tra:
+            for s in (1, -1):
+                o, h, lo, cl = v(c, s)
+                if cl > o + eps and cl - o >= s_.k * tra and cl - lo >= s_.clv * (h - lo) and cl > v(cs[bar - 1], s)[1] + eps:
+                    want = s
+        have = recs[-1] if recs and recs[-1].bar == bar else None
+        if (have.side if have else None) != want:
+            self._fail(DISP_RULE, f"candle {c}: the rule says {want}, the records {have.side if have else None}")
+        if have is not None and have.id not in self.disp_snap:
+            s = have.side
+            o, h, lo, cl = v(c, s)
+            exp = (c.time, s, bar, c.time, c.open, c.high, c.low, c.close, tra, s * (c.close - c.open) / tra,
+                   (c.high - c.low) / tra, (cl - lo) / (h - lo), cs[bar - 1].high if s > 0 else cs[bar - 1].low, None)
+            got = (have.id, have.side, have.bar, have.time, have.open, have.high, have.low, have.close, have.tra,
+                   have.body_k, have.range_k, have.clv, have.prev_ext, have.fvg)
+            if got != exp:
+                self._fail(DISP_FIELDS, f"record {got} vs candle {exp}")
+        sweep = recs if full else recs[-2:]                   # only the two newest can change on this bar
+        for r in sweep:
+            if r.bar == bar:
+                ok = r.fvg is None
+            else:
+                g = raw_gap(cs[r.bar - 1], cs[r.bar + 1])
+                ok = r.fvg == (g is not None and g[0] == r.side)
+            if not ok:
+                self._fail(DISP_FVG, f"{'BULL' if r.side > 0 else 'BEAR'} displacement {r.id} on bar {r.bar}: "
+                                     f"FVG fact {r.fvg}")
+        for r in sweep:
+            now = (r.side, r.bar, r.time, r.open, r.high, r.low, r.close, r.tra, r.body_k, r.range_k, r.clv,
+                   r.prev_ext, r.fvg)
+            old = self.disp_snap.get(r.id)
+            if old is not None and (old[:12] != now[:12] or (old[12] is not None and old[12] != now[12])):
+                self._fail(DISP_FROZEN, f"displacement {r.id}: {old} → {now}")
+            self.disp_snap[r.id] = now
+        seen = {r.id for r in recs}
+        gone = [k for k in self.disp_snap if k not in seen]
+        evs = sorted((x.type, x.dir, x.sid, x.price, x.origin_bar) for x in new if x.type.startswith("DISPLACEMENT_"))
+        want_ev = sorted([("DISPLACEMENT_CONFIRMED", r.side, r.id, r.close, r.bar) for r in recs if r.bar == bar] +
+                         [("DISPLACEMENT_DROPPED_MEMORY", self.disp_snap[k][0], k, self.disp_snap[k][6],
+                           self.disp_snap[k][1]) for k in gone])
+        if not final and evs != want_ev:
+            self._fail(DISP_EVENTS, f"events {evs} vs records {want_ev}")
+        if gone and recs and max(self.disp_snap[k][1] for k in gone) > recs[0].bar:
+            self._fail(DISP_MEM, f"dropped {gone} while an older record stays")
+        for k in gone:
+            del self.disp_snap[k]
+        for k in (DISP_RULE, DISP_FIELDS, DISP_FVG, DISP_FROZEN, DISP_EVENTS, DISP_MEM):
             stats.INV_CHECKS[k] += 1
 
 
