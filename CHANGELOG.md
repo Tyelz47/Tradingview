@@ -1,5 +1,36 @@
 # Changelog
 
+## DISP-L10 PASS · DISP-L11 human goldens PASS — IST v0.8.0-dev unchanged · validation 1.18.0 (2026-11-01, branch `displacement/pine`) — no indicator change
+
+**User (2026-11-01):** the real IST v0.8.0-dev capture passes with 0 DIFFERENCE (DISP-L10), the displacement section included (1,060 bar verdicts, 50 snapshot records, 22 + 22 events). Next: DISP-L11, human / golden validation of the approved DISPLACEMENT-R, with no threshold change and no tuning.
+
+**RESULT**
+* **DISP-L10 PASS.** The user's `pine-logs-IST_43f18.csv` is kept byte for byte as `parity/evidence/ist-v0.8.0-dev_mnq-1m-replay_capture-1000_2026-10-30.csv` (SHA-256 `8b64c99a…a9b6`). Its counts are pinned in `tests/test_parity_v080_evidence.py`, and the observed-capture test runs on it again and passes.
+* **DISP-L11 PASS.** `validation/golden/human/displacement/` holds 19 cases (22 candles) of real NQ1! / MNQ 1m candles copied exactly from the evidence captures:
+  * 6 clear displacements (3 bullish, 3 bearish);
+  * 5 clear non-displacements;
+  * 6 borderline cases (body / A 1.48–1.51, close position 0.74–0.76; both sides);
+  * 2 supporting / inconclusive cases.
+  * Every special case the task lists is covered, and each approved condition decides at least one case on its own.
+  * The verdicts: 0 mismatch with the oracle, Pine's formulation, the full history, and the real Pine log (4 cases inside the v0.8.0-dev capture). The bearish mirror holds.
+  * No systematic conflict. I1 (a two-candle push with large upper wicks) and I2 (a three-candle staircase) are approved exclusions (M2, M5), reported as inconclusive.
+* The classifications are the reviewer's, from the candle shape. The user's visual check is recommended (`docs/TESTS_DISPLACEMENT.md`).
+
+**Validation 1.18.0**
+* `tests/test_displacement_golden.py`: candles = evidence bars; the recorded numbers follow from them; oracle and `DispPine` verdicts on the window and on the full history; the real Pine log agrees; the mirror; the CISD relation (frozen CISD-R oracle); coverage; the thresholds are the approved ones.
+* `tests/test_parity_v080_evidence.py`; the evidence set now has 5 files (`test_evidence_captures_are_unchanged`).
+* Docs: `docs/TESTS_DISPLACEMENT.md` (L10 / L11 PASS, S-DISP-11 / 12, the DISP-L11 visual check and the DISP-L12 reload procedure), `docs/DISPLACEMENT.md` status, the golden README, the evidence README.
+
+**TEST:**
+* FULL: **PASS**, exit 0, 478.0 s, **1052 passed, 1 skipped** (the long-standing parity skip only; the observed-capture test runs again on the real v0.8.0-dev capture and passes):
+  * static 22/22 (ST-21, ST-22);
+  * golden 110/110 (8 earlier + 102 displacement);
+  * parity 142/143 (v0.8.0-dev evidence 2 + observed capture);
+  * displacement 106/106, displacement study 24/24;
+  * CISD 167/167, LRL 85/85, HTF 46/46, invariant detectors 76/76, regression 5/5;
+  * Phase 1 / 2 unchanged.
+* `src/IST.pine` unchanged since `1b54759` (SHA-256 740ebcf6…5862). DISPLACEMENT-R, CISD-R and its tag, LRL, HTF FVG and Phase 1 / 2 unchanged.
+
 ## v0.8.0-dev — Displacement in Pine (DISPLACEMENT-R) · validation 1.17.0 (2026-11-01, branch `displacement/pine`) — EXPERIMENTAL, not frozen
 
 **User (2026-11-01):** the displacement research is approved (M1…M11). Implement DISPLACEMENT-R in Pine as an independent engine. Do not touch CISD-R or its baseline tag, Phase 1 / 2, LRL or HTF FVG; no IFVG, no multi-bar displacement, no final styling, no alerts.

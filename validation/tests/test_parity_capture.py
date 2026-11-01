@@ -17,7 +17,8 @@ from validation import PINE_SOURCE, stats
 from validation.candles import random_walk
 from validation.models.ist import IstModel
 from validation.models.types import PRESETS, Settings
-from validation.parity import CAPTURE_V043, CAPTURE_V044, CAPTURE_V070, CAPTURE_V071, EVIDENCE, capture, manual, oracle_series
+from validation.parity import (CAPTURE_V043, CAPTURE_V044, CAPTURE_V070, CAPTURE_V071, CAPTURE_V080, EVIDENCE, capture, manual,
+                               oracle_series)
 from validation.parity.__main__ import main
 
 pytestmark = [pytest.mark.common, pytest.mark.section("parity")]
@@ -401,7 +402,7 @@ def test_v044_capture_parity_c1_frozen_baseline():
 def test_evidence_captures_are_unchanged():
     """The evidence files are byte-identical to the hashes recorded at the freeze."""
     sums = dict(reversed(ln.split(" *", 1)) for ln in (EVIDENCE / "SHA256SUMS.txt").read_text().splitlines() if ln)
-    assert set(sums) == {CAPTURE_V043.name, CAPTURE_V044.name, CAPTURE_V070.name, CAPTURE_V071.name}
+    assert set(sums) == {CAPTURE_V043.name, CAPTURE_V044.name, CAPTURE_V070.name, CAPTURE_V071.name, CAPTURE_V080.name}
     for name, digest in sums.items():
         assert hashlib.sha256((EVIDENCE / name).read_bytes()).hexdigest() == digest, name
 

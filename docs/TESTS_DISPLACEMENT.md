@@ -1,9 +1,10 @@
 # IST · Displacement tests — v0.8.0-dev (EXPERIMENTAL)
 
 **Status (2026-11-01).**
-* Automated: see the table below and the CHANGELOG entry of v0.8.0-dev.
-* TradingView DISP-L00 … L12: **PENDING**. They are recorded only from the user's results, never assumed.
-* Freeze gates (not before): DISP-L10 real capture parity 0 DIFFERENCE, DISP-L11 human golden cases (M10), DISP-L12 reload.
+* **DISP-L10 PASS** (user, real IST v0.8.0-dev capture, 0 DIFFERENCE).
+* **DISP-L11 PASS** (human / golden validation: 19 cases, 22 candles, 0 mismatch, no systematic conflict). The reviewer's classifications await the user's look on the chart (procedure below).
+* DISP-L12 (reload, freeze gate) and DISP-L01 … L05 are **PENDING**. TradingView results are recorded only from the user's results, never assumed.
+* Freeze gates: DISP-L10 PASS · DISP-L11 PASS · DISP-L12 pending.
 
 **Build:** `src/IST.pine` v0.8.0-dev (branch `displacement/pine`). Definition: `docs/DISPLACEMENT.md` (DISPLACEMENT-R, approved 2026-11-01).
 
@@ -21,6 +22,8 @@
 | S-DISP-8 | oracle: thresholds, edge cases, facts, memory, real data, independence, determinism | `tests/test_displacement.py` |
 | S-DISP-9 | invariants INV-DISP-01 … 06, each with a negative test | `invariants.py`, `tests/test_invariants.py` |
 | S-DISP-10 | the research harness (symmetry, no lookahead, fences, quoted numbers) | `tests/test_displacement_study.py` |
+| S-DISP-11 | DISP-L11 human goldens (19 cases, 22 candles). Checked: candles = evidence bars; the recorded numbers follow from them; the oracle and `DispPine` give the approved verdict on the window and on the full history; the real Pine log agrees where a case lies in the v0.8.0-dev capture (A3, A6, B5, C1); the bearish mirror; the CISD relation; required coverage | `golden/human/displacement/`, `tests/test_displacement_golden.py` |
+| S-DISP-12 | the real v0.8.0-dev capture (DISP-L10): 0 DIFFERENCE, with its counts pinned (displacement 1,060 bar verdicts, 22 + 22 events, 50 snapshot records) | `parity/evidence/`, `tests/test_parity_v080_evidence.py` |
 
 ## TradingView procedure (NQ1! or MNQ1! 1m; Confirmed only ON)
 
@@ -39,7 +42,7 @@ There is **no displacement drawing** in this build (M11). Developer → **Debug 
 | DISP-L04 | engine OFF / other modules | Enable displacement engine OFF, then ON | no DISPLACEMENT events and DISP values na while OFF; every drawing, Debug row and alert of the other modules identical either way |
 | DISP-L05 | no drawing, no alert | look at the chart; an "Any alert() function call" alert | nothing displacement-related drawn; no displacement alert message |
 | DISP-L10 | **real parity (freeze gate)** | Developer → Parity capture ON (N = 1000); save the Pine Logs into `validation/parity/`; run `python -m validation.parity --capture <file>` | **0 DIFFERENCE**, the displacement section included (per-bar verdict, A, body / A, close position, FVG metadata; events; snapshot records) |
-| DISP-L11 | **human golden cases (freeze gate, M10)** | the user's labelled displacement examples against DISPLACEMENT-R | every deterministic golden reproduced, or each difference explained |
+| DISP-L11 | **human golden cases (freeze gate, M10)** | the golden cases of `validation/golden/human/displacement/` (real candles), then the user's visual check (below) | every deterministic golden reproduced, or each difference explained |
 | DISP-L12 | **reload (freeze gate)** | note 3 displacements (id = time, side, close, body / A); refresh the page; remove and re-add the indicator | the same displacements, unchanged (any bar ≥ 14 from the history start) |
 
 ### DISP-L00 manual: compile + runtime (what you do)
@@ -58,8 +61,38 @@ There is **no displacement drawing** in this build (M11). Developer → **Debug 
 
 After DISP-L00, the next step is DISP-L10, the real Pine Logs capture with Parity capture ON. The capture tool already reads the displacement lines.
 
+### DISP-L11 visual check of the golden cases (recommended, what you do)
+
+`validation/golden/human/displacement/README.md` lists 19 cases with exact times:
+* NQ1! 2026-10-27 / 28;
+* MNQ (CME_MINI:MNQZ2026) 2026-10-13 / 14 and 10-29 / 30. Use Bar Replay if the history is no longer loaded.
+
+For each case, look at the candle and say whether you agree with its category: A clear displacement · B clear non-displacement · C borderline · S/I inconclusive. A disagreement is recorded as a conflict with DISPLACEMENT-R; the rule is not changed to absorb it.
+
+### DISP-L12 manual: TradingView reload (what you do)
+
+1. **Chart.** Use a 1m NQ1! or MNQ1! chart with IST v0.8.0-dev, default settings, Confirmed only ON. Turn **Debug mode** on (Developer).
+2. **Choose an area.** Pick a historical area at least 50 bars after the chart's first loaded bar (Debug row 34 shows the first loaded bar). A displacement only needs the 14 bars before it.
+3. **Note at least 3 displacements**, one of each side if you can.
+   * In the Data Window (cursor on the candle), a candle with `dbg · DISP verdict` = 1 or −1. Write down:
+     * its time (the id);
+     * the side;
+     * A;
+     * body / A;
+     * close position.
+   * On the next candle, write down `dbg · DISP FVG metadata` (1 or −1).
+   * The Pine Logs line `DISPLACEMENT_CONFIRMED … px=…` gives the close.
+   * Note one near-miss candle too (verdict 0).
+4. **Reload, two ways.** (a) Refresh the browser page. (b) Remove IST from the chart and add it again.
+5. **Compare** the same candles, by time.
+   * **Expected:** the same side, A, body / A, close position, close and FVG metadata; the near-miss stays 0.
+
 ## Results (user)
 
 | id | result | date | notes |
 |---|---|---|---|
-| DISP-L00 … L12 | PENDING | | |
+| DISP-L00 | not recorded separately | 2026-11-01 | the DISP-L10 capture was written by v0.8.0-dev in TradingView, so it compiled and ran |
+| DISP-L01 … L05 | PENDING | | |
+| DISP-L10 | **PASS** | 2026-11-01 | real capture of IST v0.8.0-dev (MNQ 1m Bar Replay, 2026-10-29 19:56 → 10-30 13:51; `pine-logs-IST_43f18.csv`, kept as `parity/evidence/ist-v0.8.0-dev_mnq-1m-replay_capture-1000_2026-10-30.csv`): 0 DIFFERENCE in every module. Displacement: 1,060 bar verdicts, 50 snapshot records consistent, 22 + 22 events |
+| DISP-L11 | **PASS** | 2026-11-01 | 19 cases / 22 candles from the evidence captures: 6 clear displacements (3 ▲, 3 ▼), 5 clear non-displacements, 6 borderline, 2 supporting / inconclusive (I1, I2: approved exclusions M2 / M5). 0 mismatch; the mirror holds; 4 cases agree with the real Pine log. Visual confirmation by the user recommended (above) |
+| DISP-L12 | PENDING | | the reload procedure above (freeze gate) |

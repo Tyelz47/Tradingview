@@ -1,0 +1,171 @@
+{
+ "id": "GOLD_DISP_A2",
+ "category": "A · clear displacement",
+ "special": [
+  "displacement without CISD",
+  "FVG = YES"
+ ],
+ "judgement": "Pre-London bullish expansion: large body, almost no wicks, closes well above the previous candle; no CISD of either side near it.",
+ "symbol": "CME_MINI:NQ1!",
+ "timeframe_sec": 60,
+ "timezone": "America/New_York",
+ "tick_size": 0.25,
+ "source": {
+  "evidence": [
+   "ist-v0.4.3-dev_nq1-1m_capture-1000_2026-10-27.csv",
+   "ist-v0.4.4-dev_nq1-1m_capture-1000_2026-10-28.csv"
+  ],
+  "bar_replay": false,
+  "note": "exact OHLC copied from the evidence capture(s); 15 bars before the first case bar, 1 after the last"
+ },
+ "start": "2026-10-28T05:00",
+ "case_bars": [
+  15
+ ],
+ "candles": [
+  [
+   "2026-10-28T05:00",
+   29925.75,
+   29928.0,
+   29921.5,
+   29923.25
+  ],
+  [
+   "2026-10-28T05:01",
+   29922.75,
+   29924.5,
+   29918.5,
+   29919.5
+  ],
+  [
+   "2026-10-28T05:02",
+   29919.5,
+   29923.75,
+   29919.5,
+   29923.0
+  ],
+  [
+   "2026-10-28T05:03",
+   29923.5,
+   29927.0,
+   29923.25,
+   29924.0
+  ],
+  [
+   "2026-10-28T05:04",
+   29923.75,
+   29926.0,
+   29921.0,
+   29923.75
+  ],
+  [
+   "2026-10-28T05:05",
+   29924.0,
+   29924.0,
+   29913.5,
+   29917.0
+  ],
+  [
+   "2026-10-28T05:06",
+   29916.75,
+   29924.75,
+   29915.5,
+   29920.0
+  ],
+  [
+   "2026-10-28T05:07",
+   29919.5,
+   29921.75,
+   29914.75,
+   29915.25
+  ],
+  [
+   "2026-10-28T05:08",
+   29914.75,
+   29919.0,
+   29912.25,
+   29918.5
+  ],
+  [
+   "2026-10-28T05:09",
+   29915.75,
+   29920.5,
+   29914.0,
+   29919.0
+  ],
+  [
+   "2026-10-28T05:10",
+   29918.5,
+   29924.75,
+   29917.5,
+   29923.5
+  ],
+  [
+   "2026-10-28T05:11",
+   29922.25,
+   29922.75,
+   29912.75,
+   29916.25
+  ],
+  [
+   "2026-10-28T05:12",
+   29917.25,
+   29923.0,
+   29916.5,
+   29916.5
+  ],
+  [
+   "2026-10-28T05:13",
+   29920.0,
+   29925.0,
+   29917.5,
+   29923.75
+  ],
+  [
+   "2026-10-28T05:14",
+   29923.0,
+   29924.25,
+   29921.25,
+   29922.25
+  ],
+  [
+   "2026-10-28T05:15",
+   29922.75,
+   29939.75,
+   29922.75,
+   29939.0
+  ],
+  [
+   "2026-10-28T05:16",
+   29939.25,
+   29942.75,
+   29937.75,
+   29939.75
+  ]
+ ],
+ "expected": [
+  {
+   "time": "2026-10-28T05:15",
+   "side": 1,
+   "open": 29922.75,
+   "high": 29939.75,
+   "low": 29922.75,
+   "close": 29939.0,
+   "prev_high": 29924.25,
+   "prev_low": 29921.25,
+   "A": 6.8214285714,
+   "body": 16.25,
+   "range": 17.0,
+   "body_k": 2.3821989529,
+   "range_k": 2.4921465969,
+   "close_position": 0.9558823529,
+   "beyond_prev": true,
+   "verdict": 1,
+   "fails": [],
+   "fvg_next": "YES",
+   "cisd_on_bar": 0,
+   "same_side_cisd_within_10": [],
+   "describe": "up-close; body 16.25 pts = 96 % of its 17-pt range; wicks 0.75 up / 0 down; range 2.6 × the median range of the 14 candles before; close +14.75 pts beyond the previous candle's high"
+  }
+ ]
+}
