@@ -1,6 +1,6 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════════
-//  ICT STRUCTURE TOOLKIT (IST) · v0.8.0-dev · LRL + HTF fair value gaps + CISD + displacement development build
+//  ICT STRUCTURE TOOLKIT (IST) · v0.9.0-dev · LRL + HTF fair value gaps + CISD + displacement + IFVG development build
 // ────────────────────────────────────────────────────────────────────────────────
 //  Baseline        Phase 1 = v0.3.2 (git tag PHASE1_BASELINE_v0.3.2). Phase 1
 //                  behaviour is unchanged; Phase 2 is an additional module.
@@ -17,6 +17,9 @@
 //                  Displacement: one closed candle that reprices aggressively, detection
 //                  only (DISPLACEMENT-R, DEF-DISP1…DISP9 → docs/DISPLACEMENT.md); additive,
 //                  reads bars only, no state machine, no renderer and no alert yet.
+//                  IFVG: inversion fair value gaps (IFVG-R, DEF-IFVG1…IFVG9 →
+//                  docs/IFVG.md); an observer of the frozen Phase 1 FVG engine (it
+//                  never writes it); additive, no renderer and no alert yet.
 //  Layers          L1 market data / time   L2 detection   L3 state management
 //                  L4 context / filtering  L5 event bus   L6 renderer
 //                  L7 alerts / diagnostics
@@ -90,6 +93,7 @@ G_LRL  = "LRL · DIAGONAL LIQUIDITY"
 G_HTF  = "HTF FAIR VALUE GAPS"
 G_CISD = "CISD · CHANGE IN STATE OF DELIVERY"
 G_DISP = "DISPLACEMENT"
+G_IFVG = "IFVG · INVERSION FAIR VALUE GAPS"
 
 TT_CONF = "[calc] ON: every state change is evaluated once, at bar close. Realtime output is identical to the historical chart after reload.\nOFF (live): wick milestones update intrabar. Creation and invalidation still wait for the close."
 TT_MIN  = "[view] Hides secondary visuals: CE lines, FVG labels, faded FVGs, session boxes and midpoints, taken liquidity levels and liquidity labels."
@@ -117,6 +121,7 @@ TT_LRLM = "[view] Where an ended LRL finished: D drift (the high crossed the pro
 TT_CISD  = "[calc] CISD = change in state of delivery (docs/CISD.md, CISD-R; no tuning inputs). Bullish: the level L is the OPEN of the first candle of the down-close series that delivered price into the lowest down-close low of the current down leg (only down-close candles count; a doji ends a series; an equal low moves L to the later series). The CISD is the first close strictly above L (a wick, or a close exactly at L, is not; any candle colour). Bearish is the exact mirror. The state of delivery starts UNKNOWN, and bullish and bearish CISDs then strictly alternate. Decided at bar close. OFF: nothing is computed; every other module's output is the same either way."
 TT_CISDS = "[view] The current CISD only: a short 1 px line at L, from the first candle of the delivery series to the confirming candle, and a small CISD label. A CISD confirmed in the first 200 loaded bars is never drawn (chart-start guard; it is still part of the logical state)."
 TT_DISP  = "[calc] Displacement (docs/DISPLACEMENT.md, DISPLACEMENT-R; no tuning inputs): one closed candle that reprices aggressively. Bullish: close above the open, body ≥ 1.5 × A (A = the TR average of the 14 closed bars before the candle), close in the top quarter of the candle's range, close above the previous candle's high. Bearish is the exact mirror. Decided at the candle's close; a historical fact (no lifecycle). Whether the candle left a fair value gap (candle 2 of a Phase 1 FVG) is recorded on the next bar as metadata only. No drawing or alert yet (Debug mode and Pine Logs show it). OFF: nothing is computed; every other module's output is the same either way."
+TT_IFVG  = "[calc] IFVG = inversion fair value gap (docs/IFVG.md, IFVG-R; no tuning inputs). A Phase 1 FVG that a candle closes strictly beyond (its existing invalidation: a bullish FVG's close below its bottom, a bearish FVG's close above its top) becomes an IFVG of the opposite side, with exactly the same top, bottom and CE, at that candle's close. From the next bar: first touch (retest), CE, full traversal; it ends on a close strictly beyond its far edge. It follows the Phase 1 FVG settings (which FVGs exist), never the FVG display. No drawing or alert yet (Debug mode and Pine Logs show it). OFF: nothing is computed; every other module's output is the same either way."
 TT_HTF  = "[view] Fair value gaps of the 15m, 30m, 1H, 4H, 1D and 1W candles (docs/HTF_FVG.md). Every timeframe above the chart timeframe is always computed; these switches only show or hide. Per timeframe: the nearest open zone above and below price. A zone exists from the first chart bar after its third HTF candle closed (no repaint); its box starts at its first HTF candle. Phase 1 FVG definition and thresholds; invalidated only by a close of its own timeframe; no longer drawn once fully filled."
 
 confirmedOnly = input.bool(true, "Confirmed only", tooltip = TT_CONF, group = G_GEN, display = display.none)
@@ -227,6 +232,8 @@ cisdAlert = input.bool(false, "CISD alerts", tooltip = "[alert] One alert per CI
 
 dispOn    = input.bool(true, "Enable displacement engine", tooltip = TT_DISP, group = G_DISP, display = display.none)
 
+ifvgOn    = input.bool(true, "Enable IFVG engine", tooltip = TT_IFVG, group = G_IFVG, display = display.none)
+
 alTiming  = input.enum(AlertTiming.barClose, "Timing", tooltip = TT_ALT, group = G_ALR, display = display.none)
 alBullNew = input.bool(true, "FVG created · bull", inline = "a1", group = G_ALR, display = display.none)
 alBearNew = input.bool(true, "bear", inline = "a1", group = G_ALR, display = display.none)
@@ -254,7 +261,7 @@ dbgCisdIns = input.int(0, "Inspect CISD (0 = current, 1 = previous, …)", minva
 // ════ CONSTANTS ════════════════════════════════════════════════════════════════
 
 CLR_NONE   = color.new(color.black, 100)
-IST_BUILD  = "v0.8.0-dev"                // the build, written into every parity capture (= the header; ST-12)
+IST_BUILD  = "v0.9.0-dev"                // the build, written into every parity capture (= the header; ST-12)
 TF_MS      = timeframe.in_seconds() * 1000
 EPS        = syminfo.mintick * 0.01    // float tolerance for tick comparisons
 HALF_TICK  = syminfo.mintick * 0.5
@@ -359,6 +366,13 @@ DISP_TRA_LEN = 14                      // DEF-DISP2 A = TR average of the 14 clo
 DISP_MEM     = 50                      // DEF-DISP8 records kept (both sides); the oldest goes first
 EV_DISP_CONFIRMED = 34                 // displacement: dir +1 bullish / −1 bearish · sid = the candle's open time
 EV_DISP_DROPPED   = 35
+// IFVG (DEF-IFVG1…IFVG9 → docs/IFVG.md, IFVG-R approved 2026-11-02): the inversion IS the frozen Phase 1
+// DEF-A5 invalidation, so the definition has no parameter; a bookkeeping constant only.
+IFVG_MEM     = 50                      // DEF-IFVG8 records kept per IFVG side; the oldest INVALIDATED one goes first
+EV_IFVG_INVERTED = 36                  // IFVG: dir +1 bullish / −1 bearish IFVG · sid = the original FVG's id (identity IFVG:<id>)
+EV_IFVG_TOUCH    = 37
+EV_IFVG_INVAL    = 38
+EV_IFVG_DROPPED  = 39
 
 f_lineStyle(LnStyle s) =>
     switch s
@@ -715,6 +729,42 @@ type DispBook
     int         confirmed = 0
     int         dropped = 0
 
+// L3 · one inversion FVG (DEF-IFVG3…IFVG7): a separate record whose identity and geometry are copied,
+// unchanged, from the original Phase 1 FVG at its DEF-A5 invalidation. Identity: IFVG:<id>.
+type Ifvg
+    int   id                // the original FVG's id (its candle-3 time): one IFVG per original FVG
+    int   side              // +1 bullish IFVG (from a bearish FVG) · −1 bearish IFVG (from a bullish FVG)
+    int   originBar         // the original FVG's candle 1
+    int   originTime
+    int   parentBar         // the original FVG's confirmation (candle 3)
+    int   parentTime
+    float top               // the original geometry, exactly
+    float bottom
+    float mid
+    int   invBar            // the inversion bar = the original's DEF-A5 invalidation bar
+    int   invTime
+    float invClose          // the inverting close
+    int   pre               // the original before the inversion bar: 0 UNTOUCHED · 1 TOUCHED · 2 CE · 3 FULL
+    int   touchBar          // facts, from the bar after the inversion, each stamped once (na = not yet)
+    int   touchTime
+    int   ceBar
+    int   ceTime
+    int   fullBar
+    int   fullTime
+    int   endBar            // INVALIDATED (terminal): the first close strictly beyond the far edge
+    int   endTime
+    float endClose
+
+// L3 · the IFVG engine's own state (a function cannot assign a global). `shadows` mirrors the Phase 1
+// logical FVG universe that can still invert: references to the open Phase 1 records (read only),
+// added on their confirmation bar, removed when Phase 1 drops them open or when they invert.
+type IfvgBook
+    array<Fvg>  shadows
+    array<Ifvg> bull                // bullish IFVGs, inversion order
+    array<Ifvg> bear
+    int         inverted = 0
+    int         dropped = 0
+
 // ════ STATE ════════════════════════════════════════════════════════════════════
 
 // L3 · logical state
@@ -769,6 +819,8 @@ var array<line>  cisdLns  = array.new<line>()
 var array<label> cisdLbls = array.new<label>()
 // L3 · displacement (DEF-DISP1…DISP9)
 var DispBook dispBook = DispBook.new(recs = array.new<Disp>())
+// L3 · IFVG (DEF-IFVG1…IFVG9)
+var IfvgBook ifvgBook = IfvgBook.new(shadows = array.new<Fvg>(), bull = array.new<Ifvg>(), bear = array.new<Ifvg>())
 // L1 · chart-side period trackers: anchors + source validation (DEF-G6)
 var float dHi     = na
 var int   dHiT    = na
@@ -1104,6 +1156,10 @@ f_evName(int k, int dir) =>
         EV_CISD_DROPPED   => "CISD_DROPPED_MEMORY"
         EV_DISP_CONFIRMED => "DISPLACEMENT_CONFIRMED"
         EV_DISP_DROPPED   => "DISPLACEMENT_DROPPED_MEMORY"
+        EV_IFVG_INVERTED => "IFVG_INVERTED"
+        EV_IFVG_TOUCH    => "IFVG_FIRST_TOUCH"
+        EV_IFVG_INVAL    => "IFVG_INVALIDATED"
+        EV_IFVG_DROPPED  => "IFVG_DROPPED_MEMORY"
         => "UNKNOWN"
 
 f_evText(Event e) =>
@@ -1446,6 +1502,123 @@ method register(LiqSide s, float px, int oBar, int oTime, float react, float req
             s.trig     := s.trigger()
         f_emit(EV_LIQ_DROPPED, d, old.id, old.originBar, old.price, fromHist ? "closed record" : "live record · tracking stopped")
     l
+
+// ── IFVG (DEF-IFVG1…IFVG9 → docs/IFVG.md; reference model validation/models/ifvg.py) ──
+// An observer of the frozen Phase 1 FVG engine: it reads the Phase 1 records (geometry, DEF-A4
+// milestones, the DEF-A5 invalidation bar) and Phase 1's own per-bar release list, and never writes
+// them. Reads this bar's high, low and close only; no CISD, displacement, liquidity, LRL, HTF FVG,
+// display, debug or capture state. Decided at bar close.
+
+// The original FVG's state before the inversion bar (metadata): 0 UNTOUCHED · 1 TOUCHED · 2 CE · 3 FULL.
+f_ifvgPre(Fvg z) =>
+    int p = 0
+    if not na(z.fullBar) and z.fullBar < bar_index
+        p := 3
+    else if not na(z.ceBar) and z.ceBar < bar_index
+        p := 2
+    else if not na(z.touchBar) and z.touchBar < bar_index
+        p := 1
+    p
+
+f_ifvgPreName(int p) =>
+    p == 3 ? "FULL" : p == 2 ? "CE" : p == 1 ? "TOUCHED" : "UNTOUCHED"
+
+// Audit text of IFVG_INVERTED (parsed by the parity tool): the inherited geometry and the prior state.
+f_ifvgTxt(Ifvg r) =>
+    "bottom=" + f_x(r.bottom) + " · top=" + f_x(r.top) + " · ce=" + f_x(r.mid) + " · pre=" + f_ifvgPreName(r.pre)
+
+// Did Phase 1 release the still-open FVG z from its memory on this bar (DEF-A6)? fvgDropNow is Phase 1's
+// own list of this bar's released records (read only). Such an FVG can never invert.
+f_ifvgDroppedOpen(Fvg z) =>
+    bool out = false
+    for old in fvgDropNow
+        if old.id == z.id and old.isBull == z.isBull and na(old.invBar)
+            out := true
+    out
+
+// DEF-IFVG6 / IFVG7 on a bar after the inversion. Wick facts first, each stamped once: retest = the near
+// edge (the inversion boundary), CE, full = the far edge. THEN the close: strictly beyond the far edge ends
+// the IFVG (INVALIDATED, terminal). A close back inside the zone is not an end. The DEF-A4 / A5 / A7 mirror.
+method advanceIfvg(Ifvg r) =>
+    if r.side < 0
+        if na(r.touchBar) and high >= r.bottom
+            r.touchBar  := bar_index
+            r.touchTime := time
+            f_emit(EV_IFVG_TOUCH, r.side, r.id, r.originBar, r.bottom, "high>=bottom")
+        if na(r.ceBar) and high >= r.mid
+            r.ceBar  := bar_index
+            r.ceTime := time
+        if na(r.fullBar) and high >= r.top
+            r.fullBar  := bar_index
+            r.fullTime := time
+        if close > r.top
+            r.endBar   := bar_index
+            r.endTime  := time
+            r.endClose := close
+            f_emit(EV_IFVG_INVAL, r.side, r.id, r.originBar, close, "close>top")
+    else
+        if na(r.touchBar) and low <= r.top
+            r.touchBar  := bar_index
+            r.touchTime := time
+            f_emit(EV_IFVG_TOUCH, r.side, r.id, r.originBar, r.top, "low<=top")
+        if na(r.ceBar) and low <= r.mid
+            r.ceBar  := bar_index
+            r.ceTime := time
+        if na(r.fullBar) and low <= r.bottom
+            r.fullBar  := bar_index
+            r.fullTime := time
+        if close < r.bottom
+            r.endBar   := bar_index
+            r.endTime  := time
+            r.endClose := close
+            f_emit(EV_IFVG_INVAL, r.side, r.id, r.originBar, close, "close<bottom")
+    r
+
+// DEF-IFVG2…IFVG5 / IFVG8: the original FVG z was invalidated (DEF-A5) on this bar. The IFVG record, its
+// identity and geometry copied unchanged; the event; then memory: the oldest INVALIDATED IFVG of that side
+// first, else the oldest active one (the DEF-A6 mirror).
+method invertIfvg(IfvgBook b, Fvg z) =>
+    int  s = z.isBull ? -1 : 1
+    Ifvg r = Ifvg.new(z.id, s, z.originBar, z.originTime, z.confirmBar, z.confirmTime, z.top, z.bottom, z.mid, bar_index, time, close, f_ifvgPre(z))
+    array<Ifvg> recs = s > 0 ? b.bull : b.bear
+    recs.push(r)
+    b.inverted := b.inverted + 1
+    f_emit(EV_IFVG_INVERTED, s, r.id, r.originBar, r.invClose, f_ifvgTxt(r))
+    if recs.size() > IFVG_MEM
+        int victim = 0
+        for i = 0 to recs.size() - 2
+            Ifvg x = recs.get(i)
+            if not na(x.endBar)
+                victim := i
+                break
+        Ifvg old = recs.remove(victim)
+        b.dropped := b.dropped + 1
+        f_emit(EV_IFVG_DROPPED, old.side, old.id, old.originBar, old.mid, na(old.endBar) ? "active record" : "invalidated record")
+    r
+
+// DEF-IFVG1 / IFVG2, once per bar after the active IFVGs advanced: the Phase 1 FVG created on this bar
+// joins the shadows; then, in creation order, a shadow that Phase 1 invalidated on this bar inverts (even
+// if Phase 1 released it later on this bar), and a shadow that Phase 1 released while open leaves.
+method observeIfvg(IfvgBook b) =>
+    if bullFvgs.size() > 0
+        Fvg nb = bullFvgs.last()
+        if nb.confirmBar == bar_index
+            b.shadows.push(nb)
+    if bearFvgs.size() > 0
+        Fvg ns = bearFvgs.last()
+        if ns.confirmBar == bar_index
+            b.shadows.push(ns)
+    int i = 0
+    while i < b.shadows.size()
+        Fvg z = b.shadows.get(i)
+        if not na(z.invBar) and z.invBar == bar_index
+            b.invertIfvg(z)
+            b.shadows.remove(i)
+        else if f_ifvgDroppedOpen(z)
+            b.shadows.remove(i)
+        else
+            i += 1
+    b
 
 // ── LRL (DEF-LRL1…LRL6 → docs/LRL.md; reference model validation/models/lrl.py) ──
 // Reads bars and its own TR average only: it never reads or writes FVG, session,
@@ -2555,6 +2728,19 @@ if engineTick
     for s in htfTfs
         s.stepHtf()
 
+    // ── IFVG (DEF-IFVG1…IFVG9). Observes the frozen Phase 1 FVG block above and never writes it; reads
+    //    no Phase 2 / LRL / HTF / CISD / displacement state. Decided at bar close in both modes: FIRST the
+    //    active IFVGs advance (from the bar after their inversion: wick facts, then the close), THEN the
+    //    observer (this bar's new FVG joins the shadows; this bar's DEF-A5 invalidations invert). ──
+    if ifvgOn and barstate.isconfirmed
+        for r in ifvgBook.bull
+            if na(r.endBar) and bar_index > r.invBar
+                r.advanceIfvg()
+        for r in ifvgBook.bear
+            if na(r.endBar) and bar_index > r.invBar
+                r.advanceIfvg()
+        ifvgBook.observeIfvg()
+
     // ── Displacement (DEF-DISP1…DISP9). Reads no Phase 1 / Phase 2 / LRL / HTF / CISD state: this
     //    bar and the plain values L1 / L2 took on every bar. Decided at bar close in both modes: FIRST
     //    the FVG metadata of the previous bar's displacement, THEN this candle (bullish, else bearish:
@@ -2723,6 +2909,7 @@ f_alertOn(Event e) =>
         EV_EQ_TAKEN    => alEqTkn
         EV_CISD_CONFIRMED => cisdAlert and e.eventBar >= CISD_GUARD   // DEF-CISD9: never in the first 200 loaded bars
         EV_DISP_CONFIRMED => false                                    // displacement alerts deferred (M11)
+        EV_IFVG_INVERTED  => false                                    // IFVG alerts deferred
         => false
 
 varip int    firedBar  = -1
@@ -3034,6 +3221,34 @@ int   dispFvgNow = dispOn ? f_dispFvgPrev() : na
 f_dispBar() =>
     "|DS=" + str.tostring(dispSide) + "|DA=" + f_cap(dispTraPrv) + "|DK=" + f_cap(dispBkNow) + "|DP=" + f_cap(dispCpNow) + "|DF=" + f_capInt(dispFvgNow)
 
+// IFVG per bar, for the Data Window and the parity capture (read-only): active IFVGs of one side.
+f_ifvgActive(array<Ifvg> recs) =>
+    int n = 0
+    for r in recs
+        if na(r.endBar)
+            n += 1
+    n
+
+// The CE / full facts stamped on this bar, C<id> / F<id>, both sides ("-": none).
+f_ifvgFacts() =>
+    string out = ""
+    for r in ifvgBook.bull
+        out += (not na(r.ceBar) and r.ceBar == bar_index ? "C" + str.tostring(r.id) + "," : "") + (not na(r.fullBar) and r.fullBar == bar_index ? "F" + str.tostring(r.id) + "," : "")
+    for r in ifvgBook.bear
+        out += (not na(r.ceBar) and r.ceBar == bar_index ? "C" + str.tostring(r.id) + "," : "") + (not na(r.fullBar) and r.fullBar == bar_index ? "F" + str.tostring(r.id) + "," : "")
+    out == "" ? "-" : out
+
+// One IFVG record for the parity snapshot.
+f_ifvgRec(Ifvg r) =>
+    "IFVGREC|side=" + str.tostring(r.side) + "|id=" + str.tostring(r.id) + "|ob=" + str.tostring(r.originBar) + "|ot=" + str.tostring(r.originTime) + "|pb=" + str.tostring(r.parentBar) + "|top=" + f_cap(r.top) + "|bottom=" + f_cap(r.bottom) + "|mid=" + f_cap(r.mid) + "|bar=" + str.tostring(r.invBar) + "|time=" + str.tostring(r.invTime) + "|close=" + f_cap(r.invClose) + "|pre=" + str.tostring(r.pre) + "|touch=" + f_capInt(r.touchBar) + "|ce=" + f_capInt(r.ceBar) + "|full=" + f_capInt(r.fullBar) + "|end=" + f_capInt(r.endBar) + "|endc=" + f_cap(r.endClose)
+
+// IS = the shadows (count : Σ id in seconds, an identity checksum) · IA = active IFVGs ▲ : ▼ · IX = facts.
+f_ifvgBar() =>
+    int sum = 0
+    for z in ifvgBook.shadows
+        sum += int(z.id / 1000)
+    "|IS=" + str.tostring(ifvgBook.shadows.size()) + ":" + str.tostring(sum) + "|IA=" + str.tostring(f_ifvgActive(ifvgBook.bull)) + ":" + str.tostring(f_ifvgActive(ifvgBook.bear)) + "|IX=" + f_ifvgFacts()
+
 // A side's two stacks for the parity snapshot, side coordinates: d = bar:time:low:origin bar:origin
 // time:L;… and w = bar:low;…, bottom first.
 f_cisdStacks(CisdSide s) =>
@@ -3062,7 +3277,7 @@ var int capDone = 0
 bool capBar   = capOn and barstate.isconfirmed and bar_index > last_bar_index - capTotal and capDone < capTotal
 if capBar
     if capDone == 0
-        log.info("CAPTURE|build=" + IST_BUILD + "|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|cisd=" + (cisdOn ? "1" : "0") + "|cisdmem=" + str.tostring(CISD_MEM) + "|cisdtra=" + str.tostring(CISD_TRA_LEN) + "|cisdguard=" + str.tostring(CISD_GUARD) + "|disp=" + (dispOn ? "1" : "0") + "|dispk=" + str.tostring(DISP_K) + "|dispclose=" + str.tostring(DISP_CLOSE) + "|disptr=" + str.tostring(DISP_TRA_LEN) + "|dispmem=" + str.tostring(DISP_MEM) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
+        log.info("CAPTURE|build=" + IST_BUILD + "|sym=" + syminfo.tickerid + "|tf=" + timeframe.period + "|tick=" + str.tostring(syminfo.mintick) + "|tz=" + sesTz + "|confirmed=" + (confirmedOnly ? "1" : "0") + "|liq=" + (liqOn ? "1" : "0") + "|preset=" + f_presetName() + "|left=" + str.tostring(LIQ_L) + "|right=" + str.tostring(LIQ_R) + "|k=" + str.tostring(LIQ_K) + "|w=" + str.tostring(LIQ_W) + "|eqtol=" + str.tostring(eqTolTk) + "|eqmin=" + str.tostring(eqMinTch) + "|liqmem=" + str.tostring(liqMemory) + "|fvgticks=" + str.tostring(fvgMinTicks) + "|fvgtra=" + str.tostring(fvgMinTra) + "|fvgrng=" + str.tostring(fvgMinRng) + "|fvglen=" + str.tostring(fvgLen) + "|fvgmem=" + str.tostring(fvgMemory) + "|ses=" + s1Nm + "@" + s1Ss + "," + s2Nm + "@" + s2Ss + "," + s3Nm + "@" + s3Ss + "," + s4Nm + "@" + s4Ss + "|lrl=" + (lrlOn ? "1" : "0") + "|lrlleft=" + str.tostring(LRL_L) + "|lrlright=" + str.tostring(LRL_R) + "|lrltol=" + str.tostring(LRL_TOL_K) + "|lrlgap=" + str.tostring(LRL_GAP) + "|lrlsep=" + str.tostring(LRL_SEP_K) + "|lrldrop=" + str.tostring(LRL_DROP_K) + "|lrltra=" + str.tostring(LRL_TRA_LEN) + "|lrlcand=" + str.tostring(LRL_CANDS) + "|lrlmem=" + str.tostring(LRL_MEM) + "|htf=1|htftfs=" + f_htfList() + "|htfmem=" + str.tostring(HTF_MEM) + "|htfseeds=" + str.tostring(HTF_SEEDS) + "|htfseedmem=" + str.tostring(HTF_SEED_MEM) + "|cisd=" + (cisdOn ? "1" : "0") + "|cisdmem=" + str.tostring(CISD_MEM) + "|cisdtra=" + str.tostring(CISD_TRA_LEN) + "|cisdguard=" + str.tostring(CISD_GUARD) + "|disp=" + (dispOn ? "1" : "0") + "|dispk=" + str.tostring(DISP_K) + "|dispclose=" + str.tostring(DISP_CLOSE) + "|disptr=" + str.tostring(DISP_TRA_LEN) + "|dispmem=" + str.tostring(DISP_MEM) + "|ifvg=" + (ifvgOn ? "1" : "0") + "|ifvgmem=" + str.tostring(IFVG_MEM) + "|bars=" + str.tostring(capN) + "|warmup=" + str.tostring(capWarm))
         // HTF snapshot after this first captured bar: per active timeframe the last completed
         // HTF bars and the whole registry, which the oracle restores and replays (§10 (c)).
         for s in htfTfs
@@ -3078,6 +3293,22 @@ if capBar
                 log.info("CISDSIDE|side=" + str.tostring(s.sign) + "|armed=" + f_capBool(s.armed) + "|a=" + str.tostring(s.a) + "|since=" + str.tostring(s.since) + "|known=" + f_capInt(s.known) + "|run=" + f_capBool(s.inRun) + "|rb=" + f_capInt(s.runBar) + "|rt=" + f_capInt(s.runTime) + "|rl=" + f_cap(s.runL) + "|" + f_cisdStacks(s))
             for r in cisdBook.recs
                 log.info("CISDREC|side=" + str.tostring(r.side) + "|id=" + str.tostring(r.id) + "|before=" + str.tostring(r.before) + "|level=" + f_cap(r.level) + "|origin=" + str.tostring(r.origin) + "|eb=" + str.tostring(r.extBar) + "|et=" + str.tostring(r.extTime) + "|ext=" + f_cap(r.ext) + "|leg=" + f_cap(r.legExt) + "|known=" + f_capInt(r.known) + "|bar=" + str.tostring(r.cBar) + "|time=" + str.tostring(r.cTime) + "|close=" + f_cap(r.cClose) + "|bk=" + f_cap(r.bodyK) + "|end=" + f_capInt(r.endBar) + "|rt=" + f_capInt(r.retest) + "|rc=" + f_capInt(r.reclaim) + "|br=" + f_capInt(r.broken))
+    // IFVG snapshot after captured bar fvgLen + 2: from there the oracle's FVG detector, rebuilt from the
+    // captured bars, is exact (its TR average at t − 2). The whole Phase 1 FVG memory (both directions, in
+    // order), the IFVG shadows and records, which the parity tool restores and replays.
+    if ifvgOn and capDone == fvgLen + 2
+        string sh = ""
+        for z in ifvgBook.shadows
+            sh += (sh == "" ? "" : ";") + str.tostring(z.id) + ":" + (z.isBull ? "1" : "-1")
+        log.info("IFVGSTATE|at=" + str.tostring(bar_index) + "|inverted=" + str.tostring(ifvgBook.inverted) + "|dropped=" + str.tostring(ifvgBook.dropped) + "|sh=" + sh)
+        for z in bullFvgs
+            log.info("FVGREC|dir=1|id=" + str.tostring(z.id) + "|ob=" + str.tostring(z.originBar) + "|ot=" + str.tostring(z.originTime) + "|cb=" + str.tostring(z.confirmBar) + "|top=" + f_cap(z.top) + "|bottom=" + f_cap(z.bottom) + "|mid=" + f_cap(z.mid) + "|ext=" + f_cap(z.extreme) + "|touch=" + f_capInt(z.touchBar) + "|ce=" + f_capInt(z.ceBar) + "|full=" + f_capInt(z.fullBar) + "|inv=" + f_capInt(z.invBar))
+        for z in bearFvgs
+            log.info("FVGREC|dir=-1|id=" + str.tostring(z.id) + "|ob=" + str.tostring(z.originBar) + "|ot=" + str.tostring(z.originTime) + "|cb=" + str.tostring(z.confirmBar) + "|top=" + f_cap(z.top) + "|bottom=" + f_cap(z.bottom) + "|mid=" + f_cap(z.mid) + "|ext=" + f_cap(z.extreme) + "|touch=" + f_capInt(z.touchBar) + "|ce=" + f_capInt(z.ceBar) + "|full=" + f_capInt(z.fullBar) + "|inv=" + f_capInt(z.invBar))
+        for r in ifvgBook.bull
+            log.info(f_ifvgRec(r))
+        for r in ifvgBook.bear
+            log.info(f_ifvgRec(r))
     // Displacement snapshot after captured bar DISP_TRA_LEN + 1 (not the first): from there the oracle's
     // A, rebuilt from the captured bars alone, equals Pine's, so it restores these records and replays the rest.
     if dispOn and capDone == DISP_TRA_LEN + 1
@@ -3089,7 +3320,7 @@ if capBar
         if s.active and s.doneBar == bar_index
             log.info("HTFBAR|tf=" + s.tf + "|i=" + str.tostring(bar_index) + "|t=" + str.tostring(s.bT) + "|O=" + f_cap(s.bO) + "|H=" + f_cap(s.bH) + "|L=" + f_cap(s.bL) + "|C=" + f_cap(s.bC) + "|tra=" + f_cap(s.bTra) + "|rng=" + f_cap(s.bRng))
     int fv = bullCand ? 2 : rawBull ? 1 : bearCand ? -2 : rawBear ? -1 : 0
-    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : "") + "|HO=" + f_htfOpen() + (cisdOn ? "|CS=" + str.tostring(cisdBook.state) + "|CU=" + f_cisdCand(cisdUp) + "|CN=" + f_cisdCand(cisdDn) + "|CA=" + f_cisdActive() : "") + (dispOn ? f_dispBar() : ""))
+    log.info("BAR|" + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ssZ", sesTz) + "|i=" + str.tostring(bar_index) + "|O=" + f_cap(open) + "|H=" + f_cap(high) + "|L=" + f_cap(low) + "|C=" + f_cap(close) + "|FV=" + str.tostring(fv) + "|FR=" + f_cap(reqGap) + "|SH=" + str.tostring(sigHi ? 2 : pivHi ? 1 : 0) + "|SL=" + str.tostring(sigLo ? 2 : pivLo ? 1 : 0) + "|RH=" + f_cap(pivHi ? reactHi : na) + "|RL=" + f_cap(pivLo ? reactLo : na) + "|RQ=" + f_cap(reactReq) + "|DH=" + f_cap(domHiRef) + "|DL=" + f_cap(domLoRef) + (lrlOn ? "|LH=" + f_lrlBar(lrlHi) + "|LL=" + f_lrlBar(lrlLo) + "|KH=" + str.tostring(lrlHi.cands.size()) + "|KL=" + str.tostring(lrlLo.cands.size()) : "") + "|HO=" + f_htfOpen() + (cisdOn ? "|CS=" + str.tostring(cisdBook.state) + "|CU=" + f_cisdCand(cisdUp) + "|CN=" + f_cisdCand(cisdDn) + "|CA=" + f_cisdActive() : "") + (dispOn ? f_dispBar() : "") + (ifvgOn ? f_ifvgBar() : ""))
 if barstate.isconfirmed and (capOn ? capBar : dbgOn)
     for e in barEv
         log.info(str.format_time(e.eventTime, "yyyy-MM-dd HH:mm", sesTz) + "  " + f_evText(e))
@@ -3224,3 +3455,10 @@ plot(dbgDisp ? dispTraPrv : na, "dbg · DISP A = TR average of the 14 closed bar
 plot(dbgDisp ? dispBkNow : na, "dbg · DISP body / A in the candle's direction (needs ≥ 1.5)", color = #787B86, display = display.data_window, editable = false)
 plot(dbgDisp ? dispCpNow : na, "dbg · DISP close position in the candle's direction (needs ≥ 0.75)", color = #787B86, display = display.data_window, editable = false)
 plot(dbgDisp ? dispFvgNow : na, "dbg · DISP FVG metadata resolved here for the previous candle (1 YES · −1 NO)", color = #787B86, display = display.data_window, editable = false)
+// IFVG (no drawing yet): the Phase 1 FVGs that can still invert, the active IFVGs per side, and the
+// inversions on this candle.
+bool dbgIfvg = dbgOn and ifvgOn
+plot(dbgIfvg ? ifvgBook.shadows.size() : na, "dbg · IFVG eligible Phase 1 FVGs (shadows)", color = #787B86, display = display.data_window, editable = false)
+plot(dbgIfvg ? f_ifvgActive(ifvgBook.bull) : na, "dbg · IFVG active bullish", color = #787B86, display = display.data_window, editable = false)
+plot(dbgIfvg ? f_ifvgActive(ifvgBook.bear) : na, "dbg · IFVG active bearish", color = #787B86, display = display.data_window, editable = false)
+plot(dbgIfvg ? ifvgBook.inverted : na, "dbg · IFVG inversions so far (loaded history)", color = #787B86, display = display.data_window, editable = false)

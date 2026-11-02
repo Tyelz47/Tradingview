@@ -1,9 +1,9 @@
 # IST · Inversion fair value gap (DEF-IFVG1 … IFVG9)
 
-**Status: PROPOSED (2026-11-02), awaiting the user's approval.**
-* This is the recommendation IFVG-R of `docs/STUDY_IFVG.md` §I. The open decisions are N1…N11 of the study.
-* Reference model: `validation/models/ifvg.py`, the opt-in module `ifvg` of the oracle (validation 1.19.0). It needs the Phase 1 module `fvg`. Default runs, the regression baseline and parity do not include it.
-* **Not implemented in Pine.** `src/IST.pine` is unchanged (v0.8.0-dev).
+**Status: APPROVED (2026-11-02), with two clarifications (§6). In Pine since v0.9.0-dev (EXPERIMENTAL, not frozen; TradingView tests IFVG-L00… pending, `docs/TESTS_IFVG.md`).**
+* This is the recommendation IFVG-R of `docs/STUDY_IFVG.md` §I.
+* Reference model: `validation/models/ifvg.py`, the opt-in module `ifvg` of the oracle. It needs the Phase 1 module `fvg`. Default runs and the regression baseline do not include it.
+* Pine: `src/IST.pine` v0.9.0-dev (§7), transliterated in `validation/models/ifvg.py` `IfvgPine` and proven equal to the oracle.
 * An independent observer: the frozen Phase 1 FVG (DEF-A1…A7), Phase 2, LRL, HTF FVG, CISD-R and DISPLACEMENT-R are untouched.
 
 ## 1 · Definitions
@@ -39,16 +39,70 @@ CE and full traversal are record facts, not events (decision N3).
 * The inversion bar is the parent's DEF-A5 bar, which Phase 1 already logs and parity already verifies.
 * Prefix invariance and reload: an IFVG depends on its parent's existence, which is a Phase 1 property (reload behaviour as Phase 1), and on later bars only.
 
-## 4 · Validation (oracle, validation 1.19.0)
+## 4 · Validation (validation 1.20.0)
 
-* `tests/test_ifvg.py` (deterministic).
-* `fuzz/test_ifvg_properties.py` (invariants, mirror, translation, no lookahead, other modules unchanged, long walks).
+* `tests/test_ifvg.py` (oracle, deterministic).
+* `tests/test_ifvg_pine.py` (Pine's formulation = the oracle on the approval's cases 1–35 and the real data; ST-23 and its mutations; the Pine diff against the frozen baseline only adds lines).
+* `tests/test_parity_ifvg.py` (bounded parity on synthetic captures, corruption kinds).
+* `fuzz/test_ifvg_properties.py` (invariants, Pine = oracle, mirror, translation, no lookahead, other modules unchanged, long walks).
 * `tests/test_ifvg_study.py` (the research harness).
-* Invariants INV-IFVG-01…07, each with a negative test.
+* Invariants INV-IFVG-01…08, each with a negative test.
+* The full list: `docs/TESTS_IFVG.md`.
 
 ## 5 · Not started (by instruction)
 
-* Pine.
 * HTF IFVG (N8).
-* Renderer and alerts.
-* Context / quality / confluence.
+* Final styling: drawing and alerts.
+* Context / quality scoring / confluence.
+
+## 6 · Approval clarifications (2026-11-02)
+
+**Eligibility.** An original FVG is IFVG-eligible if it is in the Phase 1 logical FVG universe immediately before its DEF-A5 invalidation.
+* It is invalidated and released by the Phase 1 memory on the same bar: it inverts.
+* It was released earlier without an inversion: it never inverts.
+* Visibility (Show FVGs, the display policy, caps) is irrelevant.
+
+The registry of FVGs that may still invert has no retention of its own. After every bar it equals the open Phase 1 FVGs in memory (INV-IFVG-08).
+
+**One close rule.** The inversion is Phase 1's DEF-A5 bar itself, read from the Phase 1 record (`invBar`). The IFVG module never evaluates a second close-through rule.
+* DEF-A5 compares strictly, without EPS (`close < bottom`).
+* On the tick grid this equals `close < bottom − EPS`: prices are multiples of the tick and EPS is 0.01 tick.
+* The IFVG end is the mirror, `close > top` (bearish IFVG), with the same equivalence.
+
+## 7 · Pine (v0.9.0-dev)
+
+One input: `ifvgOn` ("Enable IFVG engine", [calc], ON). One constant: `IFVG_MEM = 50`.
+
+**Architecture.** An observer placed in ENGINE RUN after the frozen Phase 1 FVG block (milestones, creation, release) and before displacement.
+
+The state is `IfvgBook`:
+* `shadows`: references to the Phase 1 `Fvg` records that may still invert;
+* `bull` and `bear`: the IFVG records;
+* the counters.
+
+Per confirmed bar, when ON:
+1. **advanceIfvg** runs on every active IFVG, from the bar after its inversion, bullish IFVGs then bearish. First the wick facts, each stamped once: retest, CE, full. Then the close: strictly beyond the far edge means INVALIDATED.
+2. **observeIfvg** runs next:
+   * The Phase 1 FVG created on this bar joins `shadows` (`bullFvgs.last()` / `bearFvgs.last()` when its `confirmBar` is this bar).
+   * Then, in shadow (creation) order:
+     * a shadow whose `invBar` is this bar inverts (**invertIfvg**: record, `IFVG_INVERTED`, then memory) and leaves;
+     * a shadow that Phase 1 released while open (its own `fvgDropNow` list) leaves.
+
+The shadow reference survives Phase 1's same-bar release, so clarification 1 holds. The observer reads Phase 1 records and lists and never writes them (ST-23).
+
+**Memory (DEF-IFVG8).** On overflow, the oldest INVALIDATED IFVG of the side goes first; if all 50 are active, the oldest ACTIVE one goes.
+* On the real data this fallback never happens.
+* On 20,000-bar random walks with gaps it happens (about 95 to 215 active drops per walk). It is flagged for review; it is not new semantics, because it is the approved DEF-IFVG8 text.
+
+**Diagnostics** (read only):
+* Data Window, Debug mode: shadows, active bullish IFVGs, active bearish IFVGs, inversions so far.
+* Events in Pine Logs. No drawing, no alert.
+
+**Parity capture.**
+* CAPTURE carries `ifvg=1|ifvgmem=50`.
+* After captured bar `fvglen + 2`: one `IFVGSTATE` line (`at`, the counters, the shadows as `id:dir`), the whole Phase 1 memory as `FVGREC` lines, and the IFVG records as `IFVGREC` lines.
+* Every BAR line carries:
+  * `IS` = shadows count : Σ id/1000;
+  * `IA` = active bullish : bearish;
+  * `IX` = the CE / full facts stamped on the bar.
+* The parity tool restores the snapshot into the oracles and replays the rest (`validation/parity/capture.py` `_compare_ifvg`).

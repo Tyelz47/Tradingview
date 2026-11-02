@@ -156,7 +156,7 @@ DISP_FROZEN = _inv("INV-DISP-04", "DISP", "a record never changes; its FVG fact,
 DISP_EVENTS = _inv("INV-DISP-05", "DISP", "events and records agree: DISPLACEMENT_CONFIRMED on the candle (side, id, "
                                           "close); DISPLACEMENT_DROPPED_MEMORY iff a record left memory")
 DISP_MEM = _inv("INV-DISP-06", "DISP", "records ≤ memory, in bar order; the oldest leaves first")
-# ── IFVG (docs/IFVG.md, oracle only) ──
+# ── IFVG (docs/IFVG.md; Pine since v0.9.0-dev) ──
 IFVG_TRIGGER = _inv("INV-IFVG-01", "IFVG", "an IFVG is created on a bar iff a tracked Phase 1 FVG is invalidated there "
                                            "(DEF-A5): its first close strictly beyond the far edge since confirmation + 1")
 IFVG_GEOM = _inv("INV-IFVG-02", "IFVG", "an IFVG copies its parent: id, origin, confirmation, top, bottom, CE; its side "
@@ -172,6 +172,8 @@ IFVG_EVENTS = _inv("INV-IFVG-06", "IFVG", "events and records agree: IFVG_INVERT
                                           "left memory")
 IFVG_MEM = _inv("INV-IFVG-07", "IFVG", "records per side ≤ memory, in inversion order; an active record leaves only when "
                                        "no ended one of its side is left")
+IFVG_ELIG = _inv("INV-IFVG-08", "IFVG", "the FVGs that may still invert are exactly the Phase 1 FVGs open in its memory "
+                                        "after the bar: no longer retention, none missing")
 
 LIQ_FACTS = ("taken_bar", "take_ext", "take_close", "take_gap", "cls")
 
@@ -968,7 +970,10 @@ class Monitor:
             del self.ifvg_snap[k], self.ifvg_obj[k]
         if any(ended(k) for k in born_gone):
             self._fail(IFVG_MEM, f"IFVGs {sorted(born_gone)} dropped on their bar while an ended one of their side stays")
-        for k in (IFVG_TRIGGER, IFVG_GEOM, IFVG_FACTS, IFVG_END, IFVG_FROZEN, IFVG_EVENTS, IFVG_MEM):
+        if set(e.parents) != {z.id for z in self.m.fvg.records() if z.is_open}:
+            self._fail(IFVG_ELIG, f"registry {sorted(e.parents)} vs open Phase 1 FVGs "
+                                  f"{sorted(z.id for z in self.m.fvg.records() if z.is_open)}")
+        for k in (IFVG_TRIGGER, IFVG_GEOM, IFVG_FACTS, IFVG_END, IFVG_FROZEN, IFVG_EVENTS, IFVG_MEM, IFVG_ELIG):
             stats.INV_CHECKS[k] += 1
 
 

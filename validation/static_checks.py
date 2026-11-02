@@ -14,7 +14,7 @@ from validation import PINE_SOURCE, ROOT, VALIDATION_DIR
 # [calc] inputs: everything else declared with input.* is [view] or [alert] (ARCHITECTURE §2.2).
 CALC_INPUTS = {"confirmedOnly", "fvgMinTicks", "fvgMinTra", "fvgMinRng", "fvgLen", "fvgMemory", "sesTz",
                "s1Nm", "s2Nm", "s3Nm", "s4Nm", "s1Ss", "s2Ss", "s3Ss", "s4Ss", "liqOn", "liqPreset", "liqLeftIn",
-               "liqRightIn", "liqReactIn", "liqMemory", "eqTolTk", "eqMinTch", "lrlOn", "cisdOn", "dispOn"}
+               "liqRightIn", "liqReactIn", "liqMemory", "eqTolTk", "eqMinTch", "lrlOn", "cisdOn", "dispOn", "ifvgOn"}
 # Display policy accessors: they read fvgMitRule but are called only from L6/L7 (S-01 since v0.3.2).
 VIEW_READ_ALLOWED = {"policyBar", "policyTime"}
 CALC_SECTIONS = ("L1 · MARKET DATA", "L2 · DETECTION", "L5 · EVENT BUS", "L3 · STATE MANAGEMENT", "ENGINE RUN")
@@ -22,7 +22,7 @@ RENDER_SECTIONS = ("L6 · RENDERER (functions", "L6 · RENDERER (run)")
 DRAWING_TYPES = {"line", "box", "label", "linefill", "table", "polyline"}
 STATE_CALLS = re.compile(r"\.(step|register|take|takeEq|cluster|trigger|advance|dropCluster|pushExtreme|markFinal|supersede|"
                          r"advanceLrl|judge|grow|promote|seed|finish|trim|feedHtf|stepHtf|seedHtf|trimHtf|milestonesHtf|"
-                         r"pruneCisd|feedCisd|factsCisd|confirmCisd|factsDisp|confirmDisp)\(|"
+                         r"pruneCisd|feedCisd|factsCisd|confirmCisd|factsDisp|confirmDisp|advanceIfvg|invertIfvg|observeIfvg)\(|"
                          r"\b(f_emit|f_emitHtf|f_roll|f_sesNew|f_sesStep|f_sesExtend|f_sesFinalize|f_sesSupersede|f_fvgStep)\(")
 
 
@@ -214,7 +214,7 @@ def st07_single_creation_paths():
 
 
 def st08_scope_no_later_phases():
-    pat = re.compile(r"\b(ifvg|smt|confluence|qualityscore)\b", re.I)   # in scope: CISD since v0.7.0-dev, displacement since v0.8.0-dev
+    pat = re.compile(r"\b(smt|confluence|qualityscore)\b", re.I)   # in scope: CISD v0.7.0-dev, displacement v0.8.0-dev, IFVG v0.9.0-dev
     bad = [f"line {i + 1}: {m.group(0)}" for i, ln in enumerate(source()) if (m := pat.search(code(ln)))]
     return not bad, f"later-phase identifiers in code: {bad or 'none'}"
 
@@ -675,6 +675,105 @@ def st22_disp_rules(src: str | None = None):
                      f"the engine, view / capture outside detection; wrong or missing: {bad or 'none'}")
 
 
+IFVG_RULES = {
+    "decided at bar close, independent of display": r"^\s+if ifvgOn and barstate\.isconfirmed\s*$",
+    "active IFVGs advance first, from the bar after their inversion (both sides)":
+        r"^\s+for r in ifvgBook\.bull\n\s+if na\(r\.endBar\) and bar_index > r\.invBar\n\s+r\.advanceIfvg\(\)\n"
+        r"\s+for r in ifvgBook\.bear\n\s+if na\(r\.endBar\) and bar_index > r\.invBar\n\s+r\.advanceIfvg\(\)\n"
+        r"\s+ifvgBook\.observeIfvg\(\)\s*$",
+    "the Phase 1 FVG created on this bar joins the shadows (both directions)":
+        r"^\s+if bullFvgs\.size\(\) > 0\n\s+Fvg nb = bullFvgs\.last\(\)\n\s+if nb\.confirmBar == bar_index\n\s+b\.shadows\.push\(nb\)\n"
+        r"\s+if bearFvgs\.size\(\) > 0\n\s+Fvg ns = bearFvgs\.last\(\)\n\s+if ns\.confirmBar == bar_index\n\s+b\.shadows\.push\(ns\)\s*$",
+    "inversion = Phase 1's own DEF-A5 invalidation bar (no second close rule), in creation order":
+        r"^\s+if not na\(z\.invBar\) and z\.invBar == bar_index\n\s+b\.invertIfvg\(z\)\n\s+b\.shadows\.remove\(i\)\s*$",
+    "a shadow Phase 1 released while open leaves (never inverts later)":
+        r"^\s+else if f_ifvgDroppedOpen\(z\)\n\s+b\.shadows\.remove\(i\)\s*$",
+    "released while open = Phase 1's own release list of this bar":
+        r"^\s+for old in fvgDropNow\n\s+if old\.id == z\.id and old\.isBull == z\.isBull and na\(old\.invBar\)\s*$",
+    "the IFVG side is the opposite of the original FVG's": r"^\s+int\s+s = z\.isBull \? -1 : 1\s*$",
+    "identity and geometry copied unchanged": r"^\s+Ifvg r = Ifvg\.new\(z\.id, s, z\.originBar, z\.originTime, z\.confirmBar, "
+                                              r"z\.confirmTime, z\.top, z\.bottom, z\.mid, bar_index, time, close, f_ifvgPre\(z\)\)\s*$",
+    "bearish facts: retest = high ≥ bottom": r"^\s+if na\(r\.touchBar\) and high >= r\.bottom\s*$",
+    "bearish facts: CE": r"^\s+if na\(r\.ceBar\) and high >= r\.mid\s*$",
+    "bearish facts: full = high ≥ top": r"^\s+if na\(r\.fullBar\) and high >= r\.top\s*$",
+    "bearish end: close strictly beyond the far edge (the DEF-A5 mirror)": r"^\s+if close > r\.top\s*$",
+    "bullish facts: retest = low ≤ top": r"^\s+if na\(r\.touchBar\) and low <= r\.top\s*$",
+    "bullish facts: CE": r"^\s+if na\(r\.ceBar\) and low <= r\.mid\s*$",
+    "bullish facts: full = low ≤ bottom": r"^\s+if na\(r\.fullBar\) and low <= r\.bottom\s*$",
+    "bullish end: close strictly beyond the far edge": r"^\s+if close < r\.bottom\s*$",
+    "memory: the oldest INVALIDATED IFVG of the side first, else the oldest active":
+        r"^\s+if recs\.size\(\) > IFVG_MEM\n\s+int victim = 0\n\s+for i = 0 to recs\.size\(\) - 2\n\s+Ifvg x = recs\.get\(i\)\n"
+        r"\s+if not na\(x\.endBar\)\n\s+victim := i\n\s+break\n\s+Ifvg old = recs\.remove\(victim\)\s*$",
+    "event: inverted (side, id, origin, close)": r"^\s+f_emit\(EV_IFVG_INVERTED, s, r\.id, r\.originBar, r\.invClose, f_ifvgTxt\(r\)\)\s*$",
+    "event: bearish retest at the near edge": r"^\s+f_emit\(EV_IFVG_TOUCH, r\.side, r\.id, r\.originBar, r\.bottom, \"\"\)\s*$",
+    "event: bullish retest at the near edge": r"^\s+f_emit\(EV_IFVG_TOUCH, r\.side, r\.id, r\.originBar, r\.top, \"\"\)\s*$",
+    "event: dropped from memory": r"^\s+f_emit\(EV_IFVG_DROPPED, old\.side, old\.id, old\.originBar, old\.mid, ",
+    "no IFVG alert yet": r"^\s+EV_IFVG_INVERTED\s+=> false\s*$",
+}
+# within a bar: Phase 1 advances and releases, then the IFVG observer; inside an IFVG bar the facts,
+# then the close; inside an inversion the event, then memory.
+IFVG_ORDER = (("f_fvgStep(bearFvgs)", "fvgDropNow.push(old)", "if ifvgOn and barstate.isconfirmed", "ifvgBook.observeIfvg()"),
+              ("if na(r.touchBar) and high >= r.bottom", "if na(r.ceBar) and high >= r.mid", "if na(r.fullBar) and high >= r.top",
+               "if close > r.top"),
+              ("if na(r.touchBar) and low <= r.top", "if na(r.ceBar) and low <= r.mid", "if na(r.fullBar) and low <= r.bottom",
+               "if close < r.bottom"),
+              ("f_emit(EV_IFVG_INVERTED", "if recs.size() > IFVG_MEM"))
+IFVG_CONSTANTS = {"IFVG_MEM": "memory"}
+IFVG_VIEW = r"\b(f_ifvgBar|f_ifvgFacts|f_ifvgActive|f_ifvgRec|dbgIfvg)\b"
+
+
+def _ifvg_blocks(lines: list[str]) -> list[str]:
+    """The IFVG engine's code: its L3 block and its ENGINE RUN block."""
+    out, on = [], False
+    for ln in lines:
+        if re.match(r"^\s*// ── IFVG \(DEF-IFVG1", ln):
+            on = True
+        elif on and re.match(r"^\s*// (════|── )", ln):
+            on = False
+        if on:
+            out.append(code(ln))
+    return out
+
+
+def st23_ifvg_rules(src: str | None = None):
+    """DEF-IFVG1…IFVG9 IFVG-R in IST.pine: the inversion is Phase 1's own DEF-A5 bar (no second close
+    rule), the observer never writes a Phase 1 record or list, every rule line and the per-bar order,
+    no history read in the engine, the approved constant, one call site per engine method, and no Data
+    Window / capture value read by detection."""
+    from validation.models.types import IfvgSettings
+    raw = src.splitlines() if src is not None else list(source())
+    lines = [code(ln) for ln in raw]
+    text = "\n".join(lines)
+    bad = [name for name, rx in IFVG_RULES.items() if len(re.findall(rx, text, re.M)) != 1]
+    for name, field in IFVG_CONSTANTS.items():
+        m = re.findall(rf"^{name}\s*=\s*([\d.]+)\s*$", text, re.M)
+        if len(m) != 1 or float(m[0]) != float(getattr(IfvgSettings(), field)):
+            bad.append(f"{name} = {m or 'missing'} (oracle {getattr(IfvgSettings(), field)})")
+    for seq in IFVG_ORDER:
+        at = [next((i for i, ln in enumerate(lines) if s in ln), None) for s in seq]
+        if None in at or at != sorted(at) or len(set(at)) != len(at):
+            bad.append("order " + " → ".join(seq))
+    engine = "\n".join(_ifvg_blocks(raw))
+    hist = re.findall(r"\w+\[[^\]]*\]", engine)
+    nums = sorted({n for n in re.findall(r"(?<![\w.])\d+(?:\.\d+)?(?![\w.])", engine) if float(n) not in (0, 1, 2, 3)})
+    if not engine or hist or nums or "max_bars_back" in engine:
+        bad.append(f"engine reads history {hist or ''} / numbers {nums or ''}")
+    if re.search(r"\b(z|nb|ns|old)\.\w+\s*:=", engine) or \
+            re.search(r"\b(bullFvgs|bearFvgs|fvgDropNow)\.(push|remove|shift|pop|clear|set|insert|unshift)\(", engine):
+        bad.append("the observer writes a Phase 1 record or list")
+    run = {i for i, _ in lines_of(("ENGINE RUN",))}
+    for m, n, where in (("advanceIfvg", 2, run), ("observeIfvg", 1, run), ("invertIfvg", 1, None)):
+        calls = [i for i, ln in enumerate(lines) if re.search(rf"\.{m}\(", ln)]
+        if len(calls) != n or (where is not None and not set(calls) <= where):
+            bad.append(f"{m} called {len(calls)}× (expected {n})")
+    calc = {i for i, _ in lines_of(CALC_SECTIONS)}
+    leaks = [i + 1 for i, ln in enumerate(lines) if i in calc and re.search(IFVG_VIEW, ln)]
+    if leaks:
+        bad.append(f"Data Window / capture values read by detection: lines {leaks}")
+    return not bad, (f"{len(IFVG_RULES)} rules, {len(IFVG_CONSTANTS)} constant, {len(IFVG_ORDER)} orders, observer never "
+                     f"writes Phase 1, no history in the engine; wrong or missing: {bad or 'none'}")
+
+
 def st18_no_overloaded_functions(src: str | None = None):
     """Pine forbids global variables inside an overloaded user function or method (CE10182:
     'Cannot use global variable … in the local scope of overloaded function'). Every
@@ -712,4 +811,6 @@ CHECKS = [
      st21_no_history_in_functions),
     ("ST-22", "DEF-DISP1…DISP9 DISPLACEMENT-R: approved rules and constants, per-bar order, history at global scope "
               "only, view / capture outside detection", st22_disp_rules),
+    ("ST-23", "DEF-IFVG1…IFVG9 IFVG-R: an observer of Phase 1 (inversion = its DEF-A5 bar, never writes it), rule "
+              "lines, per-bar order, no history in the engine", st23_ifvg_rules),
 ]

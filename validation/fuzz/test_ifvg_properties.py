@@ -52,6 +52,32 @@ def test_ifvg_invariants_hold(candles, fs, ifs):
 
 
 @given(candles, fvg_settings, ifvg_settings)
+def test_ifvg_pine_formulation_equals_oracle(candles, fs, ifs):
+    """IST.pine's formulation (IfvgPine: advanceIfvg, then observeIfvg over the shadows) = the approved
+    IfvgEngine: every record field, every event, the shadows = the oracle's registry."""
+    from validation.models.events import EventLog
+    from validation.models.fvg import FvgEngine
+    from validation.models.ifvg import PRE, IfvgEngine, IfvgPine
+    out = []
+    for cls in (IfvgEngine, IfvgPine):
+        log = EventLog()
+        f = FvgEngine(fs, 0.25, log)
+        e = cls(ifs, 0.25, log, f)
+        for t, c in enumerate(candles):
+            log.at(t, c.time)
+            f.step(t, c)
+            e.step(t, c)
+        pine = cls is IfvgPine
+        out.append(([(r.id, r.side, r.top, r.bottom, r.mid, r.bar, r.close, PRE[r.pre] if pine else r.pre,
+                      *((r.touch_bar, r.ce_bar, r.full_bar, r.end_bar) if pine else (r.retest, r.ce, r.full, r.end)))
+                     for r in e.records()],
+                    [(x.bar, x.type, x.dir, x.sid, x.origin_bar, x.price) for x in log.events],
+                    [z.id for z in e.shadows] if pine else list(e.parents)))
+    assert out[0] == out[1]
+    stats.bump("property.examples")
+
+
+@given(candles, fvg_settings, ifvg_settings)
 def test_ifvg_mirror_symmetry(candles, fs, ifs):
     """Reflecting prices (p → −p) swaps bullish and bearish IFVGs, prices negated."""
     assert _ifvg(run(mirror(candles, 0.0), _s(fs, ifs))) == _ifvg(run(candles, _s(fs, ifs)), lambda p: -p, -1)

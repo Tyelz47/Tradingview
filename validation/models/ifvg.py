@@ -1,5 +1,6 @@
 """IFVG — reference model of docs/IFVG.md DEF-IFVG1…IFVG9 (IFVG-R, recommended by
-docs/STUDY_IFVG.md on 2026-11-02, awaiting the user's approval).
+docs/STUDY_IFVG.md, approved 2026-11-02; in src/IST.pine since v0.9.0-dev, transliterated below
+as IfvgPine).
 
 An inversion fair value gap is a frozen Phase 1 FVG whose far edge was closed through: the same
 zone, now acting from the opposite side. The module OBSERVES the Phase 1 FVG engine and never
@@ -32,6 +33,7 @@ from dataclasses import asdict, dataclass
 
 from validation.models.events import EventLog
 from validation.models.fvg import Fvg, FvgEngine
+from validation.models.lrl import fx
 from validation.models.types import Candle, IfvgSettings
 
 SIDE = {1: "BULL", -1: "BEAR"}
@@ -131,3 +133,112 @@ class IfvgEngine:
 
     def state(self) -> list[dict]:
         return [{**asdict(r), "side": SIDE[r.side], "status": r.status} for r in sorted(self.records(), key=lambda r: (r.side, r.id))]
+
+
+# ── IST.pine's formulation (v0.9.0-dev) ──
+PRE = ("UNTOUCHED", "TOUCHED", "CE", "FULL")          # Pine's `pre` code is the index
+
+
+@dataclass
+class PineIfvg:
+    """IST.pine `type Ifvg`."""
+    id: int
+    side: int
+    origin_bar: int
+    origin_time: int
+    parent_bar: int
+    parent_time: int
+    top: float
+    bottom: float
+    mid: float
+    bar: int
+    time: int
+    close: float
+    pre: int
+    touch_bar: int | None = None
+    touch_time: int | None = None
+    ce_bar: int | None = None
+    ce_time: int | None = None
+    full_bar: int | None = None
+    full_time: int | None = None
+    end_bar: int | None = None
+    end_time: int | None = None
+    end_close: float | None = None
+
+
+def pine_txt(r: PineIfvg) -> str:
+    """f_ifvgTxt: the audit text of IFVG_INVERTED in Pine Logs."""
+    return f"bottom={fx(r.bottom)} · top={fx(r.top)} · ce={fx(r.mid)} · pre={PRE[r.pre]}"
+
+
+class IfvgPine:
+    """Per bar, as IST.pine runs it after the Phase 1 FVG block: advanceIfvg on every active record from
+    the bar after its inversion (bullish IFVGs, then bearish), then observeIfvg: the FVG Phase 1 created
+    on this bar joins `shadows` (bullish first); in shadow order a shadow Phase 1 invalidated on this bar
+    inverts (invertIfvg), one Phase 1 released while open leaves. `fvg` is the Phase 1 engine, read only;
+    its `last_drop` is Pine's fvgDropNow (one gap per bar, so at most one release per bar)."""
+
+    def __init__(self, s: IfvgSettings, tick: float, log: EventLog, fvg: FvgEngine):
+        self.s, self.log, self.fvg = s, log, fvg
+        self.shadows: list[Fvg] = []
+        self.bull: list[PineIfvg] = []
+        self.bear: list[PineIfvg] = []
+        self.inverted = self.dropped = 0
+
+    def records(self) -> list[PineIfvg]:
+        return self.bull + self.bear
+
+    def step(self, t: int, c: Candle) -> None:
+        for r in self.records():
+            if r.end_bar is None and t > r.bar:
+                self._advance(r, t, c)
+        for recs in (self.fvg.bull, self.fvg.bear):
+            if recs and recs[-1].confirm_bar == t:
+                self.shadows.append(recs[-1])
+        d, i = self.fvg.last_drop, 0
+        while i < len(self.shadows):
+            z = self.shadows[i]
+            if z.inv_bar == t:
+                self._invert(z, t, c)
+                self.shadows.pop(i)
+            elif d is not None and d["was_open"] and d["id"] == z.id:
+                self.shadows.pop(i)
+            else:
+                i += 1
+
+    def _advance(self, r: PineIfvg, t: int, c: Candle) -> None:          # advanceIfvg
+        reach = (lambda lv: c.high >= lv) if r.side < 0 else (lambda lv: c.low <= lv)
+        near, far = (r.bottom, r.top) if r.side < 0 else (r.top, r.bottom)
+        if r.touch_bar is None and reach(near):
+            r.touch_bar, r.touch_time = t, c.time
+            self.log.emit("IFVG_FIRST_TOUCH", r.side, r.id, r.origin_bar, near, "high>=bottom" if r.side < 0 else "low<=top")
+        if r.ce_bar is None and reach(r.mid):
+            r.ce_bar, r.ce_time = t, c.time
+        if r.full_bar is None and reach(far):
+            r.full_bar, r.full_time = t, c.time
+        if (c.close > r.top) if r.side < 0 else (c.close < r.bottom):
+            r.end_bar, r.end_time, r.end_close = t, c.time, c.close
+            self.log.emit("IFVG_INVALIDATED", r.side, r.id, r.origin_bar, c.close, "close>top" if r.side < 0 else "close<bottom")
+
+    def _invert(self, z: Fvg, t: int, c: Candle) -> None:                # invertIfvg
+        s = -1 if z.is_bull else 1
+        r = PineIfvg(z.id, s, z.origin_bar, z.origin_time, z.confirm_bar, z.confirm_time, z.top, z.bottom, z.mid,
+                     t, c.time, c.close, PRE.index(pre_state(z, t)))
+        recs = self.bull if s > 0 else self.bear
+        recs.append(r)
+        self.inverted += 1
+        self.log.emit("IFVG_INVERTED", s, r.id, r.origin_bar, r.close, pine_txt(r))
+        if len(recs) > self.s.memory:
+            victim = next((i for i in range(len(recs) - 1) if recs[i].end_bar is not None), 0)
+            old = recs.pop(victim)
+            self.dropped += 1
+            self.log.emit("IFVG_DROPPED_MEMORY", old.side, old.id, old.origin_bar, old.mid,
+                          "active record" if old.end_bar is None else "invalidated record")
+
+    def bar_values(self, t: int) -> dict:
+        """The capture's IS / IA / IX of bar t (the last stepped bar), as f_ifvgBar prints them."""
+        facts = "".join(("C" + str(r.id) + "," if r.ce_bar == t else "") + ("F" + str(r.id) + "," if r.full_bar == t else "")
+                        for r in self.records())
+        return {"is": (len(self.shadows), sum(z.id // 1000 for z in self.shadows)),
+                "ia": (sum(r.end_bar is None for r in self.bull), sum(r.end_bar is None for r in self.bear)),
+                "ix": facts or "-"}

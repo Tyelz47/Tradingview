@@ -738,6 +738,11 @@ def ifvg07():   # more records than memory
             lambda m, r: setattr(m.ifvg, "s", replace(m.ifvg.s, memory=1)))
 
 
+def ifvg08():   # an open Phase 1 FVG missing from the registry: it could never invert
+    ifvg_at(lambda m, c: next(iter(m.ifvg.parents.values()), None) if m.bar > 100 else None,
+            lambda m, z: m.ifvg.parents.pop(z.id))
+
+
 CASES = {
     "INV-EV-01": ev01, "INV-EV-02": ev02, "INV-EV-03": ev03, "INV-EV-04": ev04, "INV-EV-05": ev05,
     "INV-FVG-01": fvg01, "INV-FVG-02": fvg02, "INV-FVG-03": fvg03, "INV-FVG-04": fvg04, "INV-FVG-05": fvg05,
@@ -758,7 +763,7 @@ CASES = {
     "INV-DISP-01": disp01, "INV-DISP-02": disp02, "INV-DISP-03": disp03, "INV-DISP-04": disp04,
     "INV-DISP-05": disp05, "INV-DISP-06": disp06,
     "INV-IFVG-01": ifvg01, "INV-IFVG-02": ifvg02, "INV-IFVG-03": ifvg03, "INV-IFVG-04": ifvg04,
-    "INV-IFVG-05": ifvg05, "INV-IFVG-06": ifvg06, "INV-IFVG-07": ifvg07,
+    "INV-IFVG-05": ifvg05, "INV-IFVG-06": ifvg06, "INV-IFVG-07": ifvg07, "INV-IFVG-08": ifvg08,
 }
 
 

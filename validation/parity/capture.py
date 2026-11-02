@@ -22,17 +22,18 @@ from validation import PINE_SOURCE, VALIDATION_DIR
 from validation.models.cisd import Cisd, CisdEngine, CisdStack
 from validation.models.displacement import Disp, DisplacementEngine
 from validation.models.events import LRL_TERMINAL, EventLog
-from validation.models.fvg import sma
+from validation.models.fvg import Fvg, FvgEngine, sma
 from validation.models.htf_fvg import NAMES, HtfBar, HtfEngine, HtfFvg
+from validation.models.ifvg import PRE, Ifvg, IfvgEngine
 from validation.models.ist import IstModel
-from validation.models.types import (MODULES, PRESETS, Candle, CisdSettings, DispSettings, HtfSettings, LrlSettings,
-                                     Settings)
+from validation.models.types import (MODULES, PRESETS, Candle, CisdSettings, DispSettings, HtfSettings, IfvgSettings,
+                                     LrlSettings, Settings)
 from validation.parity import oracle_series
 from validation.parity.manual import DIFF, MATCH, NOBS, _ANY_NAME, _event, _fmt, _same_px, _tf_seconds, pine_text
 
 PARITY_DIR = VALIDATION_DIR / "parity"
 TOL = 1e-6                     # Pine prints these values with 8 decimals
-SECTIONS = ("settings", "bars", "events", "lrl", "htf", "cisd", "disp")
+SECTIONS = ("settings", "bars", "events", "lrl", "htf", "cisd", "disp", "ifvg")
 # CAPTURE key → (LrlSettings field, type): the frozen LRL constants Pine ran with (v0.5.0-dev+).
 LRL_HEAD = {"lrlleft": ("left", int), "lrlright": ("right", int), "lrltol": ("tol_k", float), "lrlgap": ("gap", int),
             "lrlsep": ("sep_k", float), "lrldrop": ("drop_k", float), "lrltra": ("tra_len", int),
@@ -49,9 +50,11 @@ LABELS = {"fvg_verdict": "FVG verdict", "fvg_required": "FVG required gap", "bsl
           "bsl_dominance": "dominance reference high", "ssl_dominance": "dominance reference low"}
 HEAD = ("tick", "tz", "confirmed", "liq", "preset", "left", "right", "k", "eqtol", "eqmin", "liqmem",
         "fvgticks", "fvgtra", "fvgrng", "fvglen", "fvgmem", "ses", "bars", "warmup")
-_TOKEN = re.compile(r"\b(CAPTURE|BAR|END|HTFSTATE|HTFREC|HTFBAR|CISDSTATE|CISDSIDE|CISDREC|DISPSTATE|DISPREC)\|(.*)$")
+_TOKEN = re.compile(r"\b(CAPTURE|BAR|END|HTFSTATE|HTFREC|HTFBAR|CISDSTATE|CISDSIDE|CISDREC|DISPSTATE|DISPREC|"
+                    r"IFVGSTATE|FVGREC|IFVGREC)\|(.*)$")
 CISD_LINES = ("CISDSTATE", "CISDSIDE", "CISDREC")
 DISP_LINES = ("DISPSTATE", "DISPREC")
+IFVG_LINES = ("IFVGSTATE", "FVGREC", "IFVGREC")
 _CSV_ROW = re.compile(r'^\s*\d{4}-\d\d-\d\d[^,"|]*,"')   # a `date,"message"` row without its header
 
 
@@ -101,7 +104,10 @@ def _bar(parts: list[str], tick: float | None) -> dict:
             if "CS" in kv else None,
             "disp": {"side": int(kv["DS"]), "a": _num("DA", kv["DA"]), "bk": _num("DK", kv["DK"]),
                      "cp": _num("DP", kv["DP"]), "fvg": None if kv["DF"] == "na" else int(kv["DF"])}
-            if "DS" in kv else None}
+            if "DS" in kv else None,
+            "ifvg": {"is": tuple(int(x) for x in kv["IS"].split(":")), "ia": tuple(int(x) for x in kv["IA"].split(":")),
+                     "ix": kv["IX"]}
+            if "IS" in kv else None}
 
 
 def _cand(v: str):
@@ -148,6 +154,23 @@ def _disp_line(kind: str, parts: list[str]) -> dict:
     return {"side": int(kv["side"]), "id": int(kv["id"]), "bar": int(kv["bar"]),
             **{k: _num(k, kv[k]) for k in ("O", "H", "L", "C", "tra", "body", "rng", "bk", "rk", "cp", "prev")},
             "fvg": int(kv["fvg"])}
+
+
+def _ifvg_line(kind: str, parts: list[str]) -> dict:
+    """IFVGSTATE (`at`, counters, the shadows as id:dir in order), FVGREC (one Phase 1 FVG of its
+    memory) or IFVGREC (one IFVG; pre 0 UNTOUCHED · 1 TOUCHED · 2 CE · 3 FULL). Bars are Pine bar indices."""
+    kv = _pairs(parts)
+    opt = lambda k: None if kv[k] == "na" else int(kv[k])
+    if kind == "IFVGSTATE":
+        return {**{k: int(kv[k]) for k in ("at", "inverted", "dropped")},
+                "sh": [tuple(int(x) for x in p.split(":")) for p in kv["sh"].split(";") if p]}
+    if kind == "FVGREC":
+        return {**{k: int(kv[k]) for k in ("dir", "id", "ob", "ot", "cb")},
+                **{k: _num(k, kv[k]) for k in ("top", "bottom", "mid", "ext")},
+                **{k: opt(k) for k in ("touch", "ce", "full", "inv")}}
+    return {**{k: int(kv[k]) for k in ("side", "id", "ob", "ot", "pb", "bar", "time", "pre")},
+            **{k: _num(k, kv[k]) for k in ("top", "bottom", "mid", "close", "endc")},
+            **{k: opt(k) for k in ("touch", "ce", "full", "end")}}
 
 
 def _htf_line(kind: str, parts: list[str]) -> dict:
@@ -288,6 +311,7 @@ def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
     htf = {"HTFSTATE": [], "HTFREC": [], "HTFBAR": []}
     cisd = {k: [] for k in CISD_LINES}
     disp = {k: [] for k in DISP_LINES}
+    ifvg = {k: [] for k in IFVG_LINES}
     for n, line in lines[1:]:
         m = _TOKEN.search(line)
         try:
@@ -299,6 +323,8 @@ def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
                 cisd[m[1]].append(_cisd_line(m[1], [p.strip() for p in m[2].split("|") if p.strip()]))
             elif m and m[1] in disp:
                 disp[m[1]].append(_disp_line(m[1], [p.strip() for p in m[2].split("|") if p.strip()]))
+            elif m and m[1] in ifvg:
+                ifvg[m[1]].append(_ifvg_line(m[1], [p.strip() for p in m[2].split("|") if p.strip()]))
             elif m and m[1] == "END":
                 end = int(_pairs([m[2]])["bars"])
             elif not m and _ANY_NAME.search(line):
@@ -336,7 +362,7 @@ def _parse_run(lines: list[tuple[int, str]]) -> tuple[dict | None, list[str]]:
     if errors:
         return None, errors
     return {"head": head, "bars": bars, "events": events, "end": end, "ignored": ignored, "htf": htf, "cisd": cisd,
-            "disp": disp}, []
+            "disp": disp, "ifvg": ifvg}, []
 
 
 def parse(text: str) -> dict:
@@ -478,7 +504,7 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     t0, t_end = bars[0]["time"], bars[-1]["time"]
     t_fvg = bars[w_fvg]["time"] if len(bars) > w_fvg else None
     t_swing = bars[w_swing]["time"] if len(bars) > w_swing else None
-    own_section = lambda typ: typ.startswith(("LRL_", "HTF_", "CISD_", "DISPLACEMENT_"))   # compared in _compare_lrl / …
+    own_section = lambda typ: typ.startswith(("LRL_", "HTF_", "CISD_", "DISPLACEMENT_", "IFVG_"))   # _compare_lrl / …
     oracle = [{"time": e.time, "type": e.type, "dir": e.dir, "sid": e.sid, "price": e.price, "e": e} for e in m.events
               if not own_section(e.type)]
     pine_events = [e for e in cap["events"] if not own_section(e["type"])]
@@ -542,12 +568,13 @@ def compare(cap: dict, preset: str | None = None) -> dict:
     htf = _compare_htf(cap, s, add, fmt) if h.get("htf") == "1" else None
     cisd = _compare_cisd(cap, s, add, fmt) if h.get("cisd") == "1" else None
     disp = _compare_disp(cap, s, add, fmt) if h.get("disp") == "1" else None
+    ifvg = _compare_ifvg(cap, s, add, fmt) if h.get("ifvg") == "1" else None
     sym = re.search(r'"symbol"\s*:\s*"([^"]+)"', h.get("sym", ""))       # extended tickerid: a JSON object
     cnt = Counter(c["status"] for c in checks)
     return {"status": "COMPARED", "mode": "BOUNDED PINE-LOG BAR-BY-BAR PARITY", "checks": checks, "counts": cnt,
             "capture_build": cap_build, "current_build": cur_build,
             "differences": cnt[DIFF], "notes": notes, "totals": tot, "bars": len(bars), "lrl": lrl, "htf": htf, "cisd": cisd,
-            "disp": disp,
+            "disp": disp, "ifvg": ifvg,
             "compared_bars": max(0, len(bars) - max(w_fvg, w_liq)), "warmup": max(w_fvg, w_liq),
             "series": sum(1 for k in FIELDS.values() if compared[k]),
             "matched_events": sum(matched.values()), "window": f"{fmt(t0)} → {fmt(t_end)}",
@@ -1052,6 +1079,132 @@ def _compare_disp(cap: dict, s: Settings, add, fmt) -> dict:
     return out
 
 
+def _compare_ifvg(cap: dict, s: Settings, add, fmt) -> dict:
+    """IFVG in the captured window (docs/IFVG.md, IST v0.9.0-dev).
+
+    Pine logs after captured bar fvglen + 2 (IFVGSTATE / FVGREC / IFVGREC): the whole Phase 1 FVG
+    memory, the shadows and the IFVG records. From there the Phase 1 detector, rebuilt from the
+    captured bars alone, is exact (its TR average at t − 2), so the approved oracles (FvgEngine,
+    IfvgEngine) take Pine's records and replay the rest. Compared: the shadows = the open restored
+    FVGs (the eligibility rule on Pine's own state); per bar the shadows (count, Σ id), the active
+    IFVGs per side and the CE / full facts stamped there (exact); every IFVG event (side, id, time,
+    price; IFVG_INVERTED also its geometry and prior state); each snapshot record's own numbers and,
+    where captured, its inversion candle.
+
+    NOT OBSERVABLE: the bars up to the snapshot and their events."""
+    h, bars, raw = cap["head"], cap["bars"], cap["ifvg"]
+    approved = IfvgSettings()
+    ok = "ifvgmem" in h and int(h["ifvgmem"]) == approved.memory
+    add("settings", MATCH if ok else DIFF, f"IFVG memory: Pine {h.get('ifvgmem', 'missing')} · approved {approved.memory}")
+    out, nobs = {"bars": 0, "events": 0, "records": 0, "not_observable": 0}, Counter()
+    if len(raw["IFVGSTATE"]) != 1:
+        add("ifvg", DIFF, "no IFVG snapshot (one IFVGSTATE line)")
+        return out
+    i0, st = bars[0]["i"], raw["IFVGSTATE"][0]
+    k0 = st["at"] - i0
+    if not s.fvg.lookback <= k0 < len(bars):
+        add("ifvg", DIFF, f"snapshot after captured bar {k0}: the replay needs it after bar {s.fvg.lookback - 1}")
+        return out
+    candles = [b["candle"] for b in bars]
+    log = EventLog()
+    fvg = FvgEngine(s.fvg, s.tick, log)
+    for t in range(k0 + 1):
+        log.at(t, candles[t].time)
+        fvg.step(t, candles[t])
+    rel = lambda b: None if b is None else b - i0
+    restored = [Fvg(z["id"], z["dir"] > 0, z["ob"] - i0, z["ot"], z["cb"] - i0, z["id"], z["top"], z["bottom"], z["mid"],
+                    None, 0.0, None, None, z["ext"], rel(z["touch"]), None, rel(z["ce"]), None, rel(z["full"]), None,
+                    rel(z["inv"]), None) for z in raw["FVGREC"]]
+    fvg.bull, fvg.bear = [z for z in restored if z.is_bull], [z for z in restored if not z.is_bull]
+    e = IfvgEngine(IfvgSettings(memory=int(h.get("ifvgmem", approved.memory))), s.tick, log, fvg)
+    bad = [z.id for z in restored if not (z.top > z.bottom and abs(z.mid - (z.top + z.bottom) / 2) <= TOL)]
+    if bad:
+        add("ifvg", DIFF, f"snapshot Phase 1 FVGs {bad}: top, bottom and CE do not hold")
+    by_id = {(z.dir, z.id): z for z in restored}
+    if sorted(st["sh"]) != sorted((z.id, z.dir) for z in restored if z.is_open) or \
+            any((d, i) not in by_id for i, d in st["sh"]):
+        add("ifvg", DIFF, f"shadows {st['sh']} ≠ the open Phase 1 FVGs of the snapshot (eligibility)")
+        return out
+    e.parents = {i: by_id[(d, i)] for i, d in st["sh"]}
+    recs = [Ifvg(r["id"], r["side"], r["ob"] - i0, r["pb"] - i0, r["top"], r["bottom"], r["mid"], r["bar"] - i0, r["time"],
+                 r["close"], PRE[r["pre"]], rel(r["touch"]), rel(r["ce"]), rel(r["full"]), rel(r["end"]))
+            for r in raw["IFVGREC"]]
+    e.bull, e.bear = [r for r in recs if r.side > 0], [r for r in recs if r.side < 0]
+    e.inverted, e.dropped = st["inverted"], st["dropped"]
+    for r, x in zip(recs, raw["IFVGREC"]):                # each snapshot record: its own numbers, its candle
+        after = [b for b in (r.retest, r.ce, r.full, r.end) if b is not None]
+        ok = (r.side in (-1, 1) and r.top > r.bottom and abs(r.mid - (r.top + r.bottom) / 2) <= TOL and 0 <= x["pre"] < 4
+              and ((r.close < r.bottom) if r.side < 0 else (r.close > r.top)) and all(b > r.bar for b in after)
+              and (r.end is None) == (x["endc"] is None)
+              and (r.end is None or ((x["endc"] > r.top) if r.side < 0 else (x["endc"] < r.bottom))))
+        if ok and r.bar >= 0:
+            ok = (candles[r.bar].time, round(candles[r.bar].close, 6)) == (r.time, round(r.close, 6))
+        elif r.bar < 0:
+            nobs["inversion candles of snapshot records older than the captured window (their own numbers checked)"] += 1
+        if ok:
+            out["records"] += 1
+        else:
+            add("ifvg", DIFF, f"snapshot record {r.side}:{r.id} (i={x['bar']}): its numbers or its candle do not hold")
+    nobs["bars up to the snapshot (the Phase 1 detector needs the true ranges before them)"] += k0 + 1
+    made, bar_diff = {}, 0
+    for t in range(k0 + 1, len(bars)):
+        c = candles[t]
+        log.at(t, c.time)
+        fvg.step(t, c)
+        e.step(t, c)
+        made.update({(r.side, r.id): r for r in e.records() if r.bar == t})
+        got = bars[t]["ifvg"]
+        if got is None:
+            continue
+        want = {"is": (len(e.parents), sum(i // 1000 for i in e.parents)),
+                "ia": (sum(r.end is None for r in e.bull), sum(r.end is None for r in e.bear)),
+                "ix": "".join(("C" + str(r.id) + "," if r.ce == t else "") + ("F" + str(r.id) + "," if r.full == t else "")
+                              for r in e.records()) or "-"}
+        if got != want:
+            bar_diff += 1
+            add("ifvg", DIFF, f"{fmt(bars[t]['time'])} (i={bars[t]['i']}) shadows · active ▲:▼ · facts: Pine {got['is']} · "
+                              f"{got['ia']} · {got['ix']} — oracle {want['is']} · {want['ia']} · {want['ix']}")
+        else:
+            out["bars"] += 1
+    t_snap = bars[k0]["time"]
+    oracle = {(x.type, x.dir, x.sid, x.time): x for x in log.events if x.type.startswith("IFVG_") and x.time > t_snap}
+    matched = Counter()
+    for o in (x for x in cap["events"] if x["type"].startswith("IFVG_")):
+        if o["time"] is None or o["time"] <= t_snap:
+            nobs["events up to the snapshot"] += 1
+            continue
+        x = oracle.pop((o["type"], o["dir"], o["sid"], o["time"]), None)
+        if x is None:
+            add("ifvg", DIFF, f"line {o['line']}: {o['text']}: not in the oracle (an extra Pine event, or logged twice)")
+            continue
+        bad = [] if _same_px(o["price"], x.price, s.tick) else [f"price Pine {o['price']} · oracle {x.price}"]
+        r = made.get((x.dir, x.sid)) if o["type"] == "IFVG_INVERTED" else None
+        if r is not None:
+            got = _kv(o["text"])
+            for k, want in (("bottom", r.bottom), ("top", r.top), ("ce", r.mid)):
+                if k not in got or abs(float(got[k]) - want) > TOL:
+                    bad.append(f"{k} Pine {got.get(k, 'missing')} · oracle {want}")
+            if got.get("pre") != r.pre:
+                bad.append(f"pre Pine {got.get('pre', 'missing')} · oracle {r.pre}")
+        if bad:
+            add("ifvg", DIFF, f"line {o['line']}: {o['text']}: {'; '.join(bad)}")
+        else:
+            matched[o["type"]] += 1
+    for x in sorted(oracle.values(), key=lambda x: x.time):
+        add("ifvg", DIFF, f"missing in Pine: {pine_text(x, h['tz'], s.tick)} (oracle)")
+    if out["bars"] and not bar_diff:
+        add("ifvg", MATCH, f"per bar: shadows, active IFVGs per side, CE / full facts: {out['bars']} bars (restored records)")
+    if out["records"]:
+        add("ifvg", MATCH, f"snapshot records: {out['records']} consistent; shadows = the open Phase 1 FVGs")
+    for typ, n in sorted(matched.items()):
+        add("ifvg", MATCH, f"{typ}: {n} (restored records)")
+    out["events"] = sum(matched.values())
+    for why, n in nobs.most_common():
+        add("ifvg", NOBS, f"{n} not compared: {why}")
+    out["not_observable"] = sum(nobs.values())
+    return out
+
+
 def latest_capture() -> Path | None:
     """The most recently saved validation/parity/pine_capture*.csv / .txt, or pine-logs-*.csv
     (the name TradingView gives the file it saves; it may also append .csv to yours)."""
@@ -1072,7 +1225,7 @@ def run(path=None, preset: str | None = None) -> dict:
 
 def verdict(r: dict) -> str:
     c = r["counts"]
-    lrl, htf, cisd, disp = r.get("lrl"), r.get("htf"), r.get("cisd"), r.get("disp")
+    lrl, htf, cisd, disp, ifvg = r.get("lrl"), r.get("htf"), r.get("cisd"), r.get("disp"), r.get("ifvg")
     tally = (f"{r['compared_bars']} bars × {r['series']} series and {r['matched_events']} events compared"
              + (f" + LRL: {lrl['events']} events, {lrl['boundaries']} boundaries, {lrl['cand_bars']} candidate counts"
                 if lrl else "")
@@ -1080,6 +1233,7 @@ def verdict(r: dict) -> str:
              + (f" + CISD: {cisd['bars']} bar states, {cisd['events']} events, {cisd['cold']} CISDs by the definition oracle"
                 if cisd else "")
              + (f" + DISP: {disp['bars']} bar verdicts, {disp['events']} events" if disp else "")
+             + (f" + IFVG: {ifvg['bars']} bar states, {ifvg['events']} events" if ifvg else "")
              + f"; {c[MATCH]} MATCH · {c[DIFF]} DIFFERENCE · {c[NOBS]} NOT OBSERVABLE")
     return f"BOUNDED PINE-LOG BAR-BY-BAR PARITY: {'FAIL' if r['differences'] else 'PASS'} — {tally}"
 

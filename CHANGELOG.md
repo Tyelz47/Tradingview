@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.9.0-dev — IFVG in Pine (IFVG-R) · validation 1.20.0 (2026-11-02, branch `ifvg/pine`) — EXPERIMENTAL, not frozen
+
+**User (2026-11-02):** the IFVG research / oracle phase is approved, with two clarifications.
+* **Eligibility:** an FVG is IFVG-eligible if it is in the Phase 1 logical FVG universe immediately before its DEF-A5 invalidation. Invalidated and released on the same bar: eligible. Released earlier without an inversion: never. Visibility is irrelevant.
+* **One close rule:** the exact Phase 1 DEF-A5 semantics, no second close-through rule.
+
+Implement IFVG-R in Pine as an observer after the frozen Phase 1 FVG block. No frozen baseline, LRL or HTF semantics change; no HTF IFVG, final styling, alerts or quality scoring.
+
+**CHANGE (src/IST.pine)**
+* **Constants:** `IFVG_MEM 50`; events 36…39 = `IFVG_INVERTED` / `IFVG_FIRST_TOUCH` / `IFVG_INVALIDATED` / `IFVG_DROPPED_MEMORY`. One [calc] input: `ifvgOn` (group IFVG, ON).
+* **Types:**
+  * `Ifvg`: identity and geometry copied from the original FVG; inversion bar / time / close; `pre`; fact bars and times; end bar / time / close.
+  * `IfvgBook`: `shadows` (references to Phase 1 `Fvg` records), `bull`, `bear`, counters.
+* **L3:**
+  * `advanceIfvg`: wick facts (retest at the near edge, CE, full at the far edge), then a strict close beyond the far edge = INVALIDATED;
+  * `invertIfvg`: the record, `IFVG_INVERTED`, then memory (the oldest INVALIDATED of the side first, else the oldest active);
+  * `observeIfvg`: the Phase 1 FVG created on this bar joins the shadows. In creation order, a shadow whose Phase 1 `invBar` is this bar inverts; one that Phase 1 released while open (its own `fvgDropNow`) leaves.
+* **ENGINE RUN:** at bar close, after the Phase 1 FVG block (milestones, creation, release) and before displacement: advance, then observe. The Phase 1 block is not modified: against `DISPLACEMENT_BASELINE_v0.8.0-dev` the diff only adds lines, except the four build lines (header, `IST_BUILD`, CAPTURE, BAR).
+* **No renderer and no alert:** `EV_IFVG_INVERTED => false`. Debug: four Data-Window-only values (`dbg · IFVG …`). The 52-row debug table is unchanged.
+* **Parity capture:**
+  * CAPTURE `ifvg / ifvgmem`;
+  * after captured bar `fvglen + 2`: `IFVGSTATE` (counters, shadows), the Phase 1 memory as `FVGREC`, the IFVGs as `IFVGREC`;
+  * per bar `IS` (shadows count : Σ id) / `IA` (active ▲ : ▼) / `IX` (CE / full facts).
+  * Existing capture output is unchanged.
+
+**WHY.** The approved IFVG-R in IST, as an observer: the inversion is Phase 1's own DEF-A5 bar, so there is exactly one close-through rule, and the parent stays INVALIDATED in Phase 1.
+
+**PHASE 1 / 2, LRL, HTF FVG, CISD, DISPLACEMENT IMPACT:** none. ST-15…ST-22 pass unchanged, and every frozen CISD and displacement test passes unchanged.
+
+**REPAINT IMPACT:** none. Decided at the bar close from that bar and the frozen Phase 1 state. Reload behaviour is Phase 1's (an IFVG exists iff its parent exists).
+
+**Validation 1.20.0**
+* `IfvgPine` (`validation/models/ifvg.py`, Pine's formulation, transliterated) = the oracle. The oracle's logic is unchanged; the two clarifications were already its behaviour (documentation only).
+* ST-23 (22 rules, 1 constant, 4 orders; the observer never writes Phase 1; no history in the engine). ST-08 now allows IFVG; `ifvgOn` is a [calc] input; `ORACLE_ONLY` is empty (ST-14 exact).
+* INV-IFVG-08: the registry of FVGs that may still invert = the open Phase 1 FVGs after every bar (no longer retention, none missing), with a negative test.
+* `tests/test_ifvg_pine.py`: the approval's cases 1–35 (14 cases × 2 sides, geometry and identity, ordering, real data 652 / 566 / 272 / 294 / median 9, memory 50 per side and the fallback on walks, determinism, module and view independence, the additive diff, ST-21 / ST-23, 29 mutations).
+* `tests/test_parity_ifvg.py`: faithful captures exact; 17 corruption kinds detected.
+* `fuzz`: Pine formulation = oracle.
+* `parity/capture.py _compare_ifvg`; `manual.py` reads `IFVG_*` lines.
+* **Docs:**
+  * `docs/IFVG.md`: APPROVED, §6 the clarifications, §7 Pine and capture;
+  * `docs/TESTS_IFVG.md`: S-IFVG, IFVG-L00…L12.
+
+**OPEN FOR REVIEW.** DEF-IFVG8's fallback: when all 50 IFVGs of a side are active, the oldest ACTIVE one is dropped (the approved text, the DEF-A6 mirror). It never happens on the real data. It happens on 20,000-bar random walks with gaps (about 95 to 215 drops per walk).
+
+**TEST:**
+* FULL: **PASS**, exit 0, 627.3 s, **1201 passed, 2 skipped** (the long-standing parity skip, and the observed-capture test: the latest real capture was written by v0.8.0-dev):
+  * static 23/23 (ST-21, ST-23);
+  * IFVG 102/102 (oracle 26 + Pine 76), IFVG study 8/8;
+  * parity 163/165 (+22 IFVG parity), property 43/43, long walks 22/22, invariant detectors 84/84;
+  * CISD 167/167, displacement 106/106, LRL 85/85, HTF 46/46, golden 110/110, regression 5/5;
+  * Phase 1 / 2 unchanged.
+* TradingView: IFVG-L00 PENDING. A new real Pine Logs capture with v0.9.0-dev is needed for IFVG-L10 (the existing captures were written by v0.8.0-dev and earlier and carry no IFVG lines).
+
 ## IFVG research + oracle — IFVG-R proposed · validation 1.19.0 (2026-11-02, branch `research/ifvg`) — no indicator change
 
 **User (2026-11-02):** start the research / specification of IFVG (inversion fair value gap) as an independent module. Audit `docs/IFVG_REQUIREMENTS.md`, compare inversion triggers on real NQ, recommend one definition, and implement it in the Python oracle. No Pine; nothing frozen changes.
