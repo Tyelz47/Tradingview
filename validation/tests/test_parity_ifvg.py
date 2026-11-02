@@ -1,4 +1,4 @@
-"""Bounded Pine-Log parity for IFVG (IST v0.9.0-dev): the capture lines IST.pine writes (ifvg=1 and
+"""Bounded Pine-Log parity for IFVG (IST v0.9.1-dev): the capture lines IST.pine writes (ifvg=1 and
 ifvgmem in CAPTURE; IFVGSTATE / FVGREC / IFVGREC after captured bar fvglen + 2; IS / IA / IX per bar;
 IFVG_* events with their audit text) and the comparison, on synthetic captures written from Pine's
 formulation (IfvgPine over the Phase 1 FVG engine) run over the WHOLE history (what Pine knows when it
@@ -21,7 +21,7 @@ pytestmark = [pytest.mark.ifvg, pytest.mark.section("parity")]
 TZ = "America/New_York"
 S = Settings.from_dict({"liq": {"preset": "balanced"}})
 W = max(S.fvg.lookback, S.liq.lookback + S.liq.right)
-HEAD = ("CAPTURE|build=v0.9.0-dev|sym=CME_MINI:NQ1!|tf=1|tick=0.25|tz=America/New_York|confirmed=1|liq=1|preset=Balanced"
+HEAD = ("CAPTURE|build=v0.9.1-dev|sym=CME_MINI:NQ1!|tf=1|tick=0.25|tz=America/New_York|confirmed=1|liq=1|preset=Balanced"
         "|left=5|right=3|k=1|w=30|eqtol=4|eqmin=2|liqmem=100|fvgticks=2|fvgtra=0.1|fvgrng=0|fvglen=14|fvgmem=50"
         "|ses=Asia@2000-0000,London@0200-0500,NY AM@0930-1200,NY PM@1330-1600"
         "|lrl=0|htf=0|cisd=0|disp=0{ifvg}|bars={n}|warmup={w}")

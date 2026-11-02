@@ -53,7 +53,7 @@ SECTIONS = [  # key, report title, group
     ("htf", "HTF FVG (oracle + Pine v0.6.2-dev)", "HTF"),
     ("cisd", "CISD (oracle + Pine v0.7.1-dev)", "CISD"),
     ("disp", "Displacement (oracle + Pine v0.8.0-dev)", "DISP"),
-    ("ifvg", "IFVG (oracle + Pine v0.9.0-dev)", "IFVG"),
+    ("ifvg", "IFVG (oracle + Pine v0.9.1-dev)", "IFVG"),
     ("research.lrl", "LRL research study (no indicator change)", "RESEARCH"),
     ("research.cisd", "CISD research study (no indicator change)", "RESEARCH"),
     ("research.disp", "Displacement study (no indicator change)", "RESEARCH"),

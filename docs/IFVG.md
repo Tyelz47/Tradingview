@@ -1,9 +1,9 @@
 # IST · Inversion fair value gap (DEF-IFVG1 … IFVG9)
 
-**Status: APPROVED (2026-11-02), with two clarifications (§6). In Pine since v0.9.0-dev (EXPERIMENTAL, not frozen; TradingView tests IFVG-L00… pending, `docs/TESTS_IFVG.md`).**
+**Status: APPROVED (2026-11-02), with two clarifications and the revised memory rule (§6). In Pine since v0.9.0-dev; the current build is v0.9.1-dev (EXPERIMENTAL, not frozen; TradingView tests IFVG-L00… pending, `docs/TESTS_IFVG.md`).**
 * This is the recommendation IFVG-R of `docs/STUDY_IFVG.md` §I.
 * Reference model: `validation/models/ifvg.py`, the opt-in module `ifvg` of the oracle. It needs the Phase 1 module `fvg`. Default runs and the regression baseline do not include it.
-* Pine: `src/IST.pine` v0.9.0-dev (§7), transliterated in `validation/models/ifvg.py` `IfvgPine` and proven equal to the oracle.
+* Pine: `src/IST.pine` v0.9.1-dev (§7), transliterated in `validation/models/ifvg.py` `IfvgPine` and proven equal to the oracle.
 * An independent observer: the frozen Phase 1 FVG (DEF-A1…A7), Phase 2, LRL, HTF FVG, CISD-R and DISPLACEMENT-R are untouched.
 
 ## 1 · Definitions
@@ -19,7 +19,7 @@ Written for a **bearish IFVG from a bullish Phase 1 FVG** (`bottom` = candle 1 h
 | DEF-IFVG5 identity | the parent's id (its candle-3 time) and the IFVG side. A parent inverts at most once, so the key is unique; the inversion bar, time and close are stored |
 | DEF-IFVG6 facts | from the bar after the inversion, each stamped once, by wick reach as DEF-A4: **retest** = `high ≥ bottom` (the near edge, the inversion boundary), **CE** = `high ≥ mid`, **full** = `high ≥ top` (the zone traversed). `pre` = the parent's state before the inversion bar (UNTOUCHED / TOUCHED / CE / FULL), metadata |
 | DEF-IFVG7 end | **INVALIDATED** on the first later close strictly beyond the far edge: `close > top` (the DEF-A5 mirror). A close back inside the zone is mitigation, not an end. There is no second inversion. Same-bar order: retest → CE → full → invalidation |
-| DEF-IFVG8 memory | 50 records per side; on overflow the oldest INVALIDATED record of that side goes, else the oldest ACTIVE one (the DEF-A6 mirror). Several inversions on one bar are recorded in parent creation order |
+| DEF-IFVG8 memory | `IFVG_MEM = 50` is the **retention target** per IFVG side, not a cap on logical state (revised and approved 2026-11-02, §6). An ACTIVE IFVG is never dropped. While a side holds more than 50 records, its oldest INVALIDATED record leaves (inversion order), one at a time, each with `IFVG_DROPPED_MEMORY`. When every record of the side is ACTIVE, nothing leaves: the side may hold more than 50 (temporary overflow) until ends let it compact. One routine runs after the bar's ends (bullish side, then bearish) and after each inversion. Several inversions on one bar are recorded in parent creation order |
 | DEF-IFVG9 independence | reads the bars and the Phase 1 FVG records only, and never writes them: the parent stays historically INVALIDATED in Phase 1. No CISD, displacement, liquidity, LRL, HTF FVG, session or display input. Context is a later layer |
 
 ## 2 · Events
@@ -43,10 +43,11 @@ CE and full traversal are record facts, not events (decision N3).
 
 * `tests/test_ifvg.py` (oracle, deterministic).
 * `tests/test_ifvg_pine.py` (Pine's formulation = the oracle on the approval's cases 1–35 and the real data; ST-23 and its mutations; the Pine diff against the frozen baseline only adds lines).
+* `tests/test_ifvg_memory.py` (DEF-IFVG8: temporary overflow, compaction, lifecycles unchanged, walks).
 * `tests/test_parity_ifvg.py` (bounded parity on synthetic captures, corruption kinds).
 * `fuzz/test_ifvg_properties.py` (invariants, Pine = oracle, mirror, translation, no lookahead, other modules unchanged, long walks).
 * `tests/test_ifvg_study.py` (the research harness).
-* Invariants INV-IFVG-01…08, each with a negative test.
+* Invariants INV-IFVG-01…09, each with a negative test.
 * The full list: `docs/TESTS_IFVG.md`.
 
 ## 5 · Not started (by instruction)
@@ -69,7 +70,12 @@ The registry of FVGs that may still invert has no retention of its own. After ev
 * On the tick grid this equals `close < bottom − EPS`: prices are multiples of the tick and EPS is 0.01 tick.
 * The IFVG end is the mirror, `close > top` (bearish IFVG), with the same equivalence.
 
-## 7 · Pine (v0.9.0-dev)
+**Memory (review of v0.9.0-dev, 2026-11-02).** The v0.9.0-dev fallback (when all 50 records of a side are ACTIVE, the oldest ACTIVE one goes) is **not approved**: an ACTIVE IFVG is logical market state and never disappears to enforce a storage cap. DEF-IFVG8 above is the approved rule (v0.9.1-dev).
+* Only an INVALIDATED record is ever dropped, and `IFVG_DROPPED_MEMORY` is emitted only for one.
+* Example: 52 ACTIVE → all 52 kept. One becomes INVALIDATED → `IFVG_INVALIDATED`, then the memory routine: the side holds 52 > 50 and a terminal record exists, so the oldest INVALIDATED record leaves (`IFVG_DROPPED_MEMORY`). An older INVALIDATED record, if one exists, leaves first.
+* So the future facts and end of every ACTIVE IFVG are always observed: every IFVG event but the drops is the same as with an unlimited memory (INV-IFVG-09, `tests/test_ifvg_memory.py`).
+
+## 7 · Pine (v0.9.1-dev)
 
 One input: `ifvgOn` ("Enable IFVG engine", [calc], ON). One constant: `IFVG_MEM = 50`.
 
@@ -82,17 +88,19 @@ The state is `IfvgBook`:
 
 Per confirmed bar, when ON:
 1. **advanceIfvg** runs on every active IFVG, from the bar after its inversion, bullish IFVGs then bearish. First the wick facts, each stamped once: retest, CE, full. Then the close: strictly beyond the far edge means INVALIDATED.
-2. **observeIfvg** runs next:
+2. **compactIfvg** (memory) runs on the bullish side, then on the bearish side: an end on this bar may let an over-full side compact.
+3. **observeIfvg** runs next:
    * The Phase 1 FVG created on this bar joins `shadows` (`bullFvgs.last()` / `bearFvgs.last()` when its `confirmBar` is this bar).
    * Then, in shadow (creation) order:
-     * a shadow whose `invBar` is this bar inverts (**invertIfvg**: record, `IFVG_INVERTED`, then memory) and leaves;
+     * a shadow whose `invBar` is this bar inverts (**invertIfvg**: record, `IFVG_INVERTED`, then **compactIfvg** of its side) and leaves;
      * a shadow that Phase 1 released while open (its own `fvgDropNow` list) leaves.
 
 The shadow reference survives Phase 1's same-bar release, so clarification 1 holds. The observer reads Phase 1 records and lists and never writes them (ST-23).
 
-**Memory (DEF-IFVG8).** On overflow, the oldest INVALIDATED IFVG of the side goes first; if all 50 are active, the oldest ACTIVE one goes.
-* On the real data this fallback never happens.
-* On 20,000-bar random walks with gaps it happens (about 95 to 215 active drops per walk). It is flagged for review; it is not new semantics, because it is the approved DEF-IFVG8 text.
+**Memory (DEF-IFVG8, `compactIfvg`).** One routine: while the side holds more than `IFVG_MEM` records, scan from the oldest; skip an ACTIVE record, remove an INVALIDATED one (`IFVG_DROPPED_MEMORY`); stop at the cap or at the end of the side.
+* On the real data the sides never exceed 50, and the drops are the same as in v0.9.0-dev.
+* On trending random walks a side holds many ACTIVE IFVGs at times: on 20,000-bar walks up to 93, 248 and 180 (seeds 1–3), all kept. Their ACTIVE IFVGs and every lifecycle event equal those of an unlimited memory.
+* There is no hard bound: the number of ACTIVE IFVGs is what the market leaves open. A Pine array holds up to 100,000 elements.
 
 **Diagnostics** (read only):
 * Data Window, Debug mode: shadows, active bullish IFVGs, active bearish IFVGs, inversions so far.

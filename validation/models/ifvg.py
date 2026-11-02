@@ -20,12 +20,16 @@ separate record that copies the parent's identity and geometry.
                     (bearish IFVG: high ≥ bottom / mid / top; bullish mirrored) (DEF-IFVG6)
   terminal          the first close strictly beyond the far edge (bearish IFVG: close > top), the
                     mirror of DEF-A5: ACTIVE → INVALIDATED; no second inversion (DEF-IFVG7)
-  memory            per side; the oldest ended record first, else the oldest active (DEF-IFVG8)
+  memory            per side, retention target `memory` (DEF-IFVG8, approved 2026-11-02): while a side
+                    holds more records, its oldest INVALIDATED record leaves (inversion order). An
+                    ACTIVE IFVG is never dropped: a side whose records are all ACTIVE keeps them all
+                    (temporary overflow) and compacts once ends allow it
 
-Per bar t: 1. active IFVGs advance (touch → CE → full → invalidation, DEF-A7 order); 2. the Phase 1
-FVGs created on t join the registry, and those the FVG engine invalidated on t become IFVGs;
-3. memory. Detection reads bars and the Phase 1 FVG records only (DEF-IFVG9): no CISD,
-displacement, liquidity, LRL or HTF state; no display input.
+Per bar t: 1. active IFVGs advance (touch → CE → full → invalidation, DEF-A7 order); 2. memory, bullish
+side then bearish; 3. the Phase 1 FVGs created on t join the registry, and those the FVG engine
+invalidated on t become IFVGs, each followed by memory of its side. Detection reads bars and the
+Phase 1 FVG records only (DEF-IFVG9): no CISD, displacement, liquidity, LRL or HTF state; no display
+input.
 """
 from __future__ import annotations
 
@@ -92,7 +96,9 @@ class IfvgEngine:
         for r in self.records():                      # 1. advance, from the bar after the inversion
             if r.end is None and t > r.bar:
                 self._advance(r, t, c)
-        for z in self.fvg.records():                  # 2. the FVGs created on this bar join the registry
+        self._compact(self.bull)                      # 2. memory: an end may let an over-full side compact
+        self._compact(self.bear)
+        for z in self.fvg.records():                  # 3. the FVGs created on this bar join the registry
             if z.confirm_bar == t:
                 self.parents[z.id] = z
         tracked = {z.id for z in self.fvg.records() if z.is_open}
@@ -109,12 +115,19 @@ class IfvgEngine:
         recs.append(r)
         self.inverted += 1
         self.log.emit("IFVG_INVERTED", r.side, r.id, r.origin_bar, r.close, f"{r.bottom}-{r.top} · from {r.pre}")
-        if len(recs) > self.s.memory:                 # 3. the oldest ended record first, else the oldest active
-            i = next((i for i, x in enumerate(recs[:-1]) if x.end is not None), 0)
+        self._compact(recs)
+
+    def _compact(self, recs: list[Ifvg]) -> None:
+        """DEF-IFVG8: while the side holds more than `memory` records, its oldest INVALIDATED record
+        leaves. ACTIVE records never leave, so a side of ACTIVE records only may hold more."""
+        i = 0
+        while len(recs) > self.s.memory and i < len(recs):
+            if recs[i].end is None:
+                i += 1
+                continue
             old = recs.pop(i)
             self.dropped += 1
-            self.log.emit("IFVG_DROPPED_MEMORY", old.side, old.id, old.origin_bar, old.mid,
-                          "active record" if old.end is None else "invalidated record")
+            self.log.emit("IFVG_DROPPED_MEMORY", old.side, old.id, old.origin_bar, old.mid, "invalidated record")
 
     def _advance(self, r: Ifvg, t: int, c: Candle) -> None:
         """DEF-IFVG6 / IFVG7, the DEF-A4 / A7 mirror: touch → CE → full → invalidation on one bar."""
@@ -173,10 +186,11 @@ def pine_txt(r: PineIfvg) -> str:
 
 class IfvgPine:
     """Per bar, as IST.pine runs it after the Phase 1 FVG block: advanceIfvg on every active record from
-    the bar after its inversion (bullish IFVGs, then bearish), then observeIfvg: the FVG Phase 1 created
-    on this bar joins `shadows` (bullish first); in shadow order a shadow Phase 1 invalidated on this bar
-    inverts (invertIfvg), one Phase 1 released while open leaves. `fvg` is the Phase 1 engine, read only;
-    its `last_drop` is Pine's fvgDropNow (one gap per bar, so at most one release per bar)."""
+    the bar after its inversion (bullish IFVGs, then bearish), compactIfvg on the bullish then the
+    bearish side, then observeIfvg: the FVG Phase 1 created on this bar joins `shadows` (bullish first);
+    in shadow order a shadow Phase 1 invalidated on this bar inverts (invertIfvg, then compactIfvg of
+    its side), one Phase 1 released while open leaves. `fvg` is the Phase 1 engine, read only; its
+    `last_drop` is Pine's fvgDropNow (one gap per bar, so at most one release per bar)."""
 
     def __init__(self, s: IfvgSettings, tick: float, log: EventLog, fvg: FvgEngine):
         self.s, self.log, self.fvg = s, log, fvg
@@ -192,6 +206,8 @@ class IfvgPine:
         for r in self.records():
             if r.end_bar is None and t > r.bar:
                 self._advance(r, t, c)
+        self._compact(self.bull)
+        self._compact(self.bear)
         for recs in (self.fvg.bull, self.fvg.bear):
             if recs and recs[-1].confirm_bar == t:
                 self.shadows.append(recs[-1])
@@ -228,12 +244,18 @@ class IfvgPine:
         recs.append(r)
         self.inverted += 1
         self.log.emit("IFVG_INVERTED", s, r.id, r.origin_bar, r.close, pine_txt(r))
-        if len(recs) > self.s.memory:
-            victim = next((i for i in range(len(recs) - 1) if recs[i].end_bar is not None), 0)
-            old = recs.pop(victim)
-            self.dropped += 1
-            self.log.emit("IFVG_DROPPED_MEMORY", old.side, old.id, old.origin_bar, old.mid,
-                          "active record" if old.end_bar is None else "invalidated record")
+        self._compact(recs)
+
+    def _compact(self, recs: list[PineIfvg]) -> None:                  # compactIfvg
+        i = 0
+        while len(recs) > self.s.memory and i < len(recs):
+            x = recs[i]
+            if x.end_bar is None:
+                i += 1
+            else:
+                recs.pop(i)
+                self.dropped += 1
+                self.log.emit("IFVG_DROPPED_MEMORY", x.side, x.id, x.origin_bar, x.mid, "invalidated record")
 
     def bar_values(self, t: int) -> dict:
         """The capture's IS / IA / IX of bar t (the last stepped bar), as f_ifvgBar prints them."""

@@ -733,9 +733,18 @@ def ifvg06():   # a drop event for a record still in memory
             lambda m, r: m.log.events.append(ev_now(m, "IFVG_DROPPED_MEMORY", r.side, r.id, r.mid)))
 
 
-def ifvg07():   # more records than memory
-    ifvg_at(lambda m, c: next(iter(m.ifvg.bull), None) if len(m.ifvg.bull) > 1 else None,
+def ifvg07():   # more records than memory while an INVALIDATED one could leave
+    ifvg_at(lambda m, c: next(iter(m.ifvg.bull), None) if len(m.ifvg.bull) > 1 and
+            any(r.end is not None for r in m.ifvg.bull) else None,
             lambda m, r: setattr(m.ifvg, "s", replace(m.ifvg.s, memory=1)))
+
+
+def ifvg09():   # memory drops an ACTIVE IFVG (with its drop event)
+    def drop(m, r):
+        (m.ifvg.bull if r.side > 0 else m.ifvg.bear).remove(r)
+        m.log.events.append(Event(m.bar, m.candles[-1].time, "IFVG_DROPPED_MEMORY", r.side, r.id, r.mid, r.origin_bar))
+    ifvg_at(lambda m, c: next((r for r in m.ifvg.records() if r.end is None and r.bar < m.bar - 1), None)
+            if m.bar > 100 else None, drop)
 
 
 def ifvg08():   # an open Phase 1 FVG missing from the registry: it could never invert
@@ -764,6 +773,7 @@ CASES = {
     "INV-DISP-05": disp05, "INV-DISP-06": disp06,
     "INV-IFVG-01": ifvg01, "INV-IFVG-02": ifvg02, "INV-IFVG-03": ifvg03, "INV-IFVG-04": ifvg04,
     "INV-IFVG-05": ifvg05, "INV-IFVG-06": ifvg06, "INV-IFVG-07": ifvg07, "INV-IFVG-08": ifvg08,
+    "INV-IFVG-09": ifvg09,
 }
 
 

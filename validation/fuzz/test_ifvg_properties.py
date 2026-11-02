@@ -78,6 +78,18 @@ def test_ifvg_pine_formulation_equals_oracle(candles, fs, ifs):
 
 
 @given(candles, fvg_settings, ifvg_settings)
+def test_ifvg_memory_never_changes_a_lifecycle(candles, fs, ifs):
+    """DEF-IFVG8 (revised): memory drops INVALIDATED records only, so with any memory the ACTIVE IFVGs
+    and every IFVG event but the drops equal those of an unlimited memory."""
+    small, big = run(candles, _s(fs, ifs)), run(candles, _s(fs, IfvgSettings(memory=10 ** 6)))
+    life = lambda m: [x for x in _ifvg(m) if x[1] != "IFVG_DROPPED_MEMORY"]
+    active = lambda m: {(r.side, r.id) for r in m.ifvg.records() if r.end is None}
+    assert life(small) == life(big) and active(small) == active(big)
+    assert all(e.meta == "invalidated record" for e in small.events if e.type == "IFVG_DROPPED_MEMORY")
+    stats.bump("property.examples")
+
+
+@given(candles, fvg_settings, ifvg_settings)
 def test_ifvg_mirror_symmetry(candles, fs, ifs):
     """Reflecting prices (p → −p) swaps bullish and bearish IFVGs, prices negated."""
     assert _ifvg(run(mirror(candles, 0.0), _s(fs, ifs))) == _ifvg(run(candles, _s(fs, ifs)), lambda p: -p, -1)

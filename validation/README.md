@@ -54,9 +54,9 @@ validation/
                         equal. Pine: v0.8.0-dev, ST-22
     ifvg.py             docs/IFVG.md DEF-IFVG1…IFVG9 (IFVG-R, approved): opt-in module "ifvg", an observer of
                         the Phase 1 FVG engine (needs "fvg"); IfvgPine = Pine's formulation (shadows), proven
-                        equal. Pine: v0.9.0-dev, ST-23
+                        equal. Pine: v0.9.1-dev (revised memory), ST-23
     ist.py              all modules in the Pine engine order → events + state
-  invariants.py         82 named invariants (10 LRL, 8 HTF, 8 CISD, 6 displacement, 8 IFVG, checked only when the module runs) + the per-bar Monitor
+  invariants.py         83 named invariants (10 LRL, 8 HTF, 8 CISD, 6 displacement, 9 IFVG, checked only when the module runs) + the per-bar Monitor
   static_checks.py      text checks of src/IST.pine
   regression.py         corpus, baseline snapshot, diff/classify, legacy models from git
   candles.py            builders, random walks, TradingView CSV loader, mirror/shift

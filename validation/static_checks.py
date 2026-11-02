@@ -22,7 +22,7 @@ RENDER_SECTIONS = ("L6 · RENDERER (functions", "L6 · RENDERER (run)")
 DRAWING_TYPES = {"line", "box", "label", "linefill", "table", "polyline"}
 STATE_CALLS = re.compile(r"\.(step|register|take|takeEq|cluster|trigger|advance|dropCluster|pushExtreme|markFinal|supersede|"
                          r"advanceLrl|judge|grow|promote|seed|finish|trim|feedHtf|stepHtf|seedHtf|trimHtf|milestonesHtf|"
-                         r"pruneCisd|feedCisd|factsCisd|confirmCisd|factsDisp|confirmDisp|advanceIfvg|invertIfvg|observeIfvg)\(|"
+                         r"pruneCisd|feedCisd|factsCisd|confirmCisd|factsDisp|confirmDisp|advanceIfvg|invertIfvg|observeIfvg|compactIfvg)\(|"
                          r"\b(f_emit|f_emitHtf|f_roll|f_sesNew|f_sesStep|f_sesExtend|f_sesFinalize|f_sesSupersede|f_fvgStep)\(")
 
 
@@ -677,9 +677,10 @@ def st22_disp_rules(src: str | None = None):
 
 IFVG_RULES = {
     "decided at bar close, independent of display": r"^\s+if ifvgOn and barstate\.isconfirmed\s*$",
-    "active IFVGs advance first, from the bar after their inversion (both sides)":
+    "active IFVGs advance first, from the bar after their inversion (both sides), then memory, then the observer":
         r"^\s+for r in ifvgBook\.bull\n\s+if na\(r\.endBar\) and bar_index > r\.invBar\n\s+r\.advanceIfvg\(\)\n"
         r"\s+for r in ifvgBook\.bear\n\s+if na\(r\.endBar\) and bar_index > r\.invBar\n\s+r\.advanceIfvg\(\)\n"
+        r"\s+ifvgBook\.compactIfvg\(ifvgBook\.bull\)\n\s+ifvgBook\.compactIfvg\(ifvgBook\.bear\)\n"
         r"\s+ifvgBook\.observeIfvg\(\)\s*$",
     "the Phase 1 FVG created on this bar joins the shadows (both directions)":
         r"^\s+if bullFvgs\.size\(\) > 0\n\s+Fvg nb = bullFvgs\.last\(\)\n\s+if nb\.confirmBar == bar_index\n\s+b\.shadows\.push\(nb\)\n"
@@ -701,23 +702,25 @@ IFVG_RULES = {
     "bullish facts: CE": r"^\s+if na\(r\.ceBar\) and low <= r\.mid\s*$",
     "bullish facts: full = low ≤ bottom": r"^\s+if na\(r\.fullBar\) and low <= r\.bottom\s*$",
     "bullish end: close strictly beyond the far edge": r"^\s+if close < r\.bottom\s*$",
-    "memory: the oldest INVALIDATED IFVG of the side first, else the oldest active":
-        r"^\s+if recs\.size\(\) > IFVG_MEM\n\s+int victim = 0\n\s+for i = 0 to recs\.size\(\) - 2\n\s+Ifvg x = recs\.get\(i\)\n"
-        r"\s+if not na\(x\.endBar\)\n\s+victim := i\n\s+break\n\s+Ifvg old = recs\.remove\(victim\)\s*$",
-    "event: inverted (side, id, origin, close)": r"^\s+f_emit\(EV_IFVG_INVERTED, s, r\.id, r\.originBar, r\.invClose, f_ifvgTxt\(r\)\)\s*$",
+    "memory: while over IFVG_MEM, the oldest INVALIDATED IFVG of the side leaves; an ACTIVE one never":
+        r"^\s+int i = 0\n\s+while recs\.size\(\) > IFVG_MEM and i < recs\.size\(\)\n\s+Ifvg x = recs\.get\(i\)\n"
+        r"\s+if na\(x\.endBar\)\n\s+i \+= 1\n\s+else\n\s+recs\.remove\(i\)\n\s+b\.dropped := b\.dropped \+ 1\n"
+        r"\s+f_emit\(EV_IFVG_DROPPED, x\.side, x\.id, x\.originBar, x\.mid, \"\"\)\s*$",
+    "event: inverted (side, id, origin, close), then memory of its side":
+        r"^\s+f_emit\(EV_IFVG_INVERTED, s, r\.id, r\.originBar, r\.invClose, f_ifvgTxt\(r\)\)\n\s+b\.compactIfvg\(recs\)\s*$",
     "event: bearish retest at the near edge": r"^\s+f_emit\(EV_IFVG_TOUCH, r\.side, r\.id, r\.originBar, r\.bottom, \"\"\)\s*$",
     "event: bullish retest at the near edge": r"^\s+f_emit\(EV_IFVG_TOUCH, r\.side, r\.id, r\.originBar, r\.top, \"\"\)\s*$",
-    "event: dropped from memory": r"^\s+f_emit\(EV_IFVG_DROPPED, old\.side, old\.id, old\.originBar, old\.mid, ",
     "no IFVG alert yet": r"^\s+EV_IFVG_INVERTED\s+=> false\s*$",
 }
-# within a bar: Phase 1 advances and releases, then the IFVG observer; inside an IFVG bar the facts,
-# then the close; inside an inversion the event, then memory.
-IFVG_ORDER = (("f_fvgStep(bearFvgs)", "fvgDropNow.push(old)", "if ifvgOn and barstate.isconfirmed", "ifvgBook.observeIfvg()"),
+# within a bar: Phase 1 advances and releases, then the IFVG advance, memory, the observer; inside an
+# IFVG bar the facts, then the close; inside an inversion the event, then memory.
+IFVG_ORDER = (("f_fvgStep(bearFvgs)", "fvgDropNow.push(old)", "if ifvgOn and barstate.isconfirmed",
+               "ifvgBook.compactIfvg(ifvgBook.bull)", "ifvgBook.compactIfvg(ifvgBook.bear)", "ifvgBook.observeIfvg()"),
               ("if na(r.touchBar) and high >= r.bottom", "if na(r.ceBar) and high >= r.mid", "if na(r.fullBar) and high >= r.top",
                "if close > r.top"),
               ("if na(r.touchBar) and low <= r.top", "if na(r.ceBar) and low <= r.mid", "if na(r.fullBar) and low <= r.bottom",
                "if close < r.bottom"),
-              ("f_emit(EV_IFVG_INVERTED", "if recs.size() > IFVG_MEM"))
+              ("f_emit(EV_IFVG_INVERTED", "b.compactIfvg(recs)"))
 IFVG_CONSTANTS = {"IFVG_MEM": "memory"}
 IFVG_VIEW = r"\b(f_ifvgBar|f_ifvgFacts|f_ifvgActive|f_ifvgRec|dbgIfvg)\b"
 
@@ -762,7 +765,7 @@ def st23_ifvg_rules(src: str | None = None):
             re.search(r"\b(bullFvgs|bearFvgs|fvgDropNow)\.(push|remove|shift|pop|clear|set|insert|unshift)\(", engine):
         bad.append("the observer writes a Phase 1 record or list")
     run = {i for i, _ in lines_of(("ENGINE RUN",))}
-    for m, n, where in (("advanceIfvg", 2, run), ("observeIfvg", 1, run), ("invertIfvg", 1, None)):
+    for m, n, where in (("advanceIfvg", 2, run), ("observeIfvg", 1, run), ("invertIfvg", 1, None), ("compactIfvg", 3, None)):
         calls = [i for i, ln in enumerate(lines) if re.search(rf"\.{m}\(", ln)]
         if len(calls) != n or (where is not None and not set(calls) <= where):
             bad.append(f"{m} called {len(calls)}× (expected {n})")

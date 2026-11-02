@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.9.1-dev — IFVG memory never drops an ACTIVE IFVG (DEF-IFVG8 revised) · validation 1.21.0 (2026-11-02, branch `ifvg/pine`) — EXPERIMENTAL, not frozen
+
+**User (2026-11-02):** the v0.9.0-dev implementation report is approved except its memory fallback (all 50 records of a side ACTIVE → the oldest ACTIVE one dropped), which is NOT approved: an ACTIVE IFVG is logical market state and must never disappear to enforce a storage cap. `IFVG_MEM = 50` stays as the retention target per side. Correct it before IFVG-L00; v0.9.0-dev (never compiled) is not the build to test.
+
+**CHANGE (src/IST.pine, IFVG memory only)**
+* **`compactIfvg`, the one memory routine:**
+  * while the side holds more than `IFVG_MEM` records, scan from the oldest (inversion order);
+  * skip an ACTIVE record; remove an INVALIDATED one, with `IFVG_DROPPED_MEMORY`;
+  * stop at the cap, or at the end of the side.
+* **When it runs:**
+  * in ENGINE RUN, after the active IFVGs advanced (bullish side, then bearish), so an end can let an over-full side compact;
+  * in `invertIfvg`, after each inversion's record and event.
+* The v0.9.0-dev victim scan (else the oldest ACTIVE one) is removed. `IFVG_DROPPED_MEMORY` now exists only for INVALIDATED records.
+* **Per-bar order:** Phase 1 FVG block → IFVG facts and ends (bullish IFVGs, then bearish) → memory (bullish side, then bearish) → observer (new shadows; each inversion: record → `IFVG_INVERTED` → memory of its side).
+* Build v0.9.1-dev. No other line changes: the inversion trigger, eligibility, shadows, geometry, thresholds, same-bar order and identity are unchanged. Phase 1, CISD, displacement, LRL and HTF are unchanged.
+
+**WHY.** The 50 is a retention target, not permission to destroy active logical state.
+* 52 ACTIVE → all 52 kept (temporary overflow).
+* One ends → `IFVG_INVALIDATED`, then memory drops the oldest INVALIDATED record.
+* Every ACTIVE IFVG's future retest, CE, full and end stay observable.
+
+**PHASE 1 / 2, LRL, HTF FVG, CISD, DISPLACEMENT IMPACT:** none. Against `DISPLACEMENT_BASELINE_v0.8.0-dev` the diff still only adds lines, except the four build lines.
+
+**REPAINT IMPACT:** none. Memory changes only which INVALIDATED records are kept.
+
+**Validation 1.21.0**
+* **Oracle and `IfvgPine`:** `_compact`, the same routine at the same points; Pine = oracle, record for record and event for event.
+* **INV-IFVG-07** (revised): ≤ memory per side unless every record of the side is ACTIVE; inversion order; the oldest INVALIDATED records leave first, and only while the side holds more than memory.
+* **INV-IFVG-09** (new): every dropped record was INVALIDATED just before the drop, and the ACTIVE identities after a bar = those before − the bar's ends + the bar's inversions. 83 invariants.
+* **ST-23:** 21 rules (the memory routine and its three call sites pinned); 34 mutations, among them the v0.9.0-dev fallback.
+* **`tests/test_ifvg_memory.py`** (the requested cases 1–10, both sides, under the invariant monitor, Pine = oracle):
+  * 50 + 1 ACTIVE → 51 kept;
+  * 55 ACTIVE kept;
+  * the routine on 51 ACTIVE + 1 old INVALIDATED;
+  * an old INVALIDATED record leaves, 51 ACTIVE remain;
+  * an over-full ACTIVE side compacts when one ends;
+  * the older INVALIDATED record goes first (also for two ended on one bar);
+  * lifecycles identical with or without overflow;
+  * replay;
+  * 5,000-bar walks lose no ACTIVE IFVG.
+* **Property:** with any memory, the ACTIVE IFVGs and every IFVG event but the drops equal those of an unlimited memory.
+* **Random walks (20,000 bars, seeds 1–3, memory 50):**
+  * 0 ACTIVE drops, where v0.9.0-dev had 95–215;
+  * peak side 93 / 248 / 180;
+  * ACTIVE IFVGs and lifecycles = an unlimited memory.
+* **Real data unchanged:** 566 inversions; (inverted, dropped) per segment (266, 166), (140, 40), (160, 60).
+* **Docs:** `docs/IFVG.md` DEF-IFVG8 and §6 / §7; `docs/TESTS_IFVG.md` (S-IFVG-12, v0.9.1-dev procedure).
+
+**TEST:**
+* FULL: **PASS**, exit 0, 722.4 s, **1227 passed, 2 skipped** (the long-standing parity skip, and the observed-capture test: the latest real capture was written by v0.8.0-dev):
+  * static 23/23 (ST-21, ST-23);
+  * IFVG 126/126 (oracle 26, Pine 79, memory 21), IFVG study 8/8;
+  * parity 163/165, property 44/44, long walks 22/22, invariant detectors 85/85;
+  * CISD 167/167, displacement 106/106, LRL 85/85, HTF 46/46, golden 110/110, regression 5/5;
+  * Phase 1 / 2 unchanged.
+* TradingView: IFVG-L00 PENDING, on v0.9.1-dev. IFVG-L10 needs a new real capture with v0.9.1-dev.
+
 ## v0.9.0-dev — IFVG in Pine (IFVG-R) · validation 1.20.0 (2026-11-02, branch `ifvg/pine`) — EXPERIMENTAL, not frozen
 
 **User (2026-11-02):** the IFVG research / oracle phase is approved, with two clarifications.
@@ -43,7 +100,7 @@ Implement IFVG-R in Pine as an observer after the frozen Phase 1 FVG block. No f
   * `docs/IFVG.md`: APPROVED, §6 the clarifications, §7 Pine and capture;
   * `docs/TESTS_IFVG.md`: S-IFVG, IFVG-L00…L12.
 
-**OPEN FOR REVIEW.** DEF-IFVG8's fallback: when all 50 IFVGs of a side are active, the oldest ACTIVE one is dropped (the approved text, the DEF-A6 mirror). It never happens on the real data. It happens on 20,000-bar random walks with gaps (about 95 to 215 drops per walk).
+**OPEN FOR REVIEW (resolved in v0.9.1-dev: not approved, replaced).** DEF-IFVG8's fallback: when all 50 IFVGs of a side are active, the oldest ACTIVE one is dropped (the approved text, the DEF-A6 mirror). It never happens on the real data. It happens on 20,000-bar random walks with gaps (about 95 to 215 drops per walk).
 
 **TEST:**
 * FULL: **PASS**, exit 0, 627.3 s, **1201 passed, 2 skipped** (the long-standing parity skip, and the observed-capture test: the latest real capture was written by v0.8.0-dev):

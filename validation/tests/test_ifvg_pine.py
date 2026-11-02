@@ -1,4 +1,4 @@
-"""IFVG in src/IST.pine (v0.9.0-dev). Pine runs IFVG-R as transliterated in validation/models/ifvg.py
+"""IFVG in src/IST.pine (v0.9.0-dev; memory revised in v0.9.1-dev, tests/test_ifvg_memory.py). Pine runs IFVG-R as transliterated in validation/models/ifvg.py
 IfvgPine (written from the Pine code: advanceIfvg on the active records, then observeIfvg over the
 shadows of the Phase 1 FVG engine, invertIfvg). Proven here: it equals the approved oracle (IfvgEngine)
 on every case of the approval list (1–35) and on the real data, record for record and event for event;
@@ -161,16 +161,6 @@ def test_24_memory_50_per_side_on_real_data(segs):
         assert not [e for e in ev if e.type == "IFVG_DROPPED_MEMORY" and e.meta == "active record"]
 
 
-@pytest.mark.parametrize("seed", [1, 2])
-def test_24_memory_fallback_on_walks(seed):
-    """DEF-IFVG8's fallback (all 50 of a side active: the oldest active one goes) happens on random
-    walks; both models drop the same records."""
-    cs = random_walk(20000, seed, gap_prob=0.02)
-    same(cs, FvgSettings(), IfvgSettings())
-    _, ev = run(IfvgPine, cs, FvgSettings(), IfvgSettings())
-    assert any(e.type == "IFVG_DROPPED_MEMORY" and e.meta == "active record" for e in ev)
-
-
 def test_25_deterministic_full_replay(segs):
     cs = segs[2][1]
     a, ae = run(IfvgPine, cs)
@@ -266,8 +256,18 @@ MUTATIONS = {
     "the observer removes a Phase 1 record": ("            b.shadows.remove(i)\n        else if",
                                               "            bullFvgs.remove(0)\n            b.shadows.remove(i)\n        else if"),
     "memory 60": ("IFVG_MEM     = 50 ", "IFVG_MEM     = 60 "),
-    "the newest record dropped": ("Ifvg old = recs.remove(victim)", "Ifvg old = recs.pop()"),
-    "active records dropped before ended ones": ("            if not na(x.endBar)\n", "            if na(x.endBar)\n"),
+    "the newest record dropped": ("            recs.remove(i)\n", "            recs.pop()\n"),
+    "an ACTIVE record evicted (the v0.9.0-dev fallback)": ("        if na(x.endBar)\n            i += 1\n",
+                                                           "        if na(x.endBar) and recs.size() <= IFVG_MEM\n            i += 1\n"),
+    "compaction stops at the first ACTIVE record": ("        if na(x.endBar)\n            i += 1\n",
+                                                    "        if na(x.endBar)\n            break\n"),
+    "no memory after the bar's ends": ("        ifvgBook.compactIfvg(ifvgBook.bull)\n        ifvgBook.compactIfvg(ifvgBook.bear)\n", ""),
+    "memory before the advance": ("        ifvgBook.compactIfvg(ifvgBook.bull)\n        ifvgBook.compactIfvg(ifvgBook.bear)\n"
+                                  "        ifvgBook.observeIfvg()\n", "        ifvgBook.observeIfvg()\n"
+                                  "        ifvgBook.compactIfvg(ifvgBook.bull)\n        ifvgBook.compactIfvg(ifvgBook.bear)\n"),
+    "no memory after an inversion": ("    b.compactIfvg(recs)\n", ""),
+    "a cap of active records": ("    while recs.size() > IFVG_MEM and i < recs.size()\n",
+                                "    while recs.size() > IFVG_MEM and i < recs.size() - 1\n"),
     "a debug toggle gates detection": ("    if ifvgOn and barstate.isconfirmed\n", "    if ifvgOn and dbgOn and barstate.isconfirmed\n"),
     "the capture gates detection": ("    if ifvgOn and barstate.isconfirmed\n", "    if ifvgOn and capOn and barstate.isconfirmed\n"),
     "CISD gates detection": ("    if ifvgOn and barstate.isconfirmed\n", "    if ifvgOn and cisdOn and barstate.isconfirmed\n"),
