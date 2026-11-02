@@ -1,0 +1,173 @@
+{
+ "id": "GOLD_DISP_C3",
+ "category": "C · borderline",
+ "special": [
+  "close position just above 0.75",
+  "displacement + CISD"
+ ],
+ "judgement": "Large bullish candle with a visible upper wick; the close sits just inside the top quarter of the range.",
+ "symbol": "CME_MINI:NQ1!",
+ "timeframe_sec": 60,
+ "timezone": "America/New_York",
+ "tick_size": 0.25,
+ "source": {
+  "evidence": [
+   "ist-v0.4.3-dev_nq1-1m_capture-1000_2026-10-27.csv",
+   "ist-v0.4.4-dev_nq1-1m_capture-1000_2026-10-28.csv"
+  ],
+  "bar_replay": false,
+  "note": "exact OHLC copied from the evidence capture(s); 15 bars before the first case bar, 1 after the last"
+ },
+ "start": "2026-10-27T22:15",
+ "case_bars": [
+  15
+ ],
+ "candles": [
+  [
+   "2026-10-27T22:15",
+   29856.75,
+   29856.75,
+   29842.5,
+   29844.5
+  ],
+  [
+   "2026-10-27T22:16",
+   29844.75,
+   29854.75,
+   29842.0,
+   29854.5
+  ],
+  [
+   "2026-10-27T22:17",
+   29854.5,
+   29862.5,
+   29850.75,
+   29852.25
+  ],
+  [
+   "2026-10-27T22:18",
+   29851.5,
+   29852.25,
+   29844.5,
+   29847.0
+  ],
+  [
+   "2026-10-27T22:19",
+   29846.75,
+   29852.0,
+   29844.25,
+   29850.5
+  ],
+  [
+   "2026-10-27T22:20",
+   29849.75,
+   29862.0,
+   29849.75,
+   29856.75
+  ],
+  [
+   "2026-10-27T22:21",
+   29856.5,
+   29858.0,
+   29849.0,
+   29852.5
+  ],
+  [
+   "2026-10-27T22:22",
+   29852.75,
+   29856.25,
+   29849.25,
+   29852.0
+  ],
+  [
+   "2026-10-27T22:23",
+   29852.0,
+   29855.0,
+   29850.0,
+   29854.0
+  ],
+  [
+   "2026-10-27T22:24",
+   29852.75,
+   29854.0,
+   29849.0,
+   29853.0
+  ],
+  [
+   "2026-10-27T22:25",
+   29852.5,
+   29852.5,
+   29842.5,
+   29842.75
+  ],
+  [
+   "2026-10-27T22:26",
+   29843.25,
+   29849.25,
+   29841.25,
+   29849.0
+  ],
+  [
+   "2026-10-27T22:27",
+   29848.25,
+   29849.0,
+   29845.0,
+   29848.5
+  ],
+  [
+   "2026-10-27T22:28",
+   29847.25,
+   29850.5,
+   29847.25,
+   29849.0
+  ],
+  [
+   "2026-10-27T22:29",
+   29847.25,
+   29850.0,
+   29843.0,
+   29849.5
+  ],
+  [
+   "2026-10-27T22:30",
+   29849.25,
+   29869.0,
+   29848.5,
+   29864.0
+  ],
+  [
+   "2026-10-27T22:31",
+   29864.5,
+   29865.5,
+   29856.0,
+   29857.5
+  ]
+ ],
+ "expected": [
+  {
+   "time": "2026-10-27T22:30",
+   "side": 1,
+   "open": 29849.25,
+   "high": 29869.0,
+   "low": 29848.5,
+   "close": 29864.0,
+   "prev_high": 29850.0,
+   "prev_low": 29843.0,
+   "A": 7.9285714286,
+   "body": 14.75,
+   "range": 20.5,
+   "body_k": 1.8603603604,
+   "range_k": 2.5855855856,
+   "close_position": 0.756097561,
+   "beyond_prev": true,
+   "verdict": 1,
+   "fails": [],
+   "fvg_next": "YES",
+   "cisd_on_bar": 1,
+   "same_side_cisd_within_10": [
+    0
+   ],
+   "describe": "up-close; body 14.75 pts = 72 % of its 20.5-pt range; wicks 5 up / 0.75 down; range 2.6 × the median range of the 14 candles before; close +14 pts beyond the previous candle's high"
+  }
+ ]
+}

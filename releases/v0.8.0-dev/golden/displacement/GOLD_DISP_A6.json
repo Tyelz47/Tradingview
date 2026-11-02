@@ -1,0 +1,171 @@
+{
+ "id": "GOLD_DISP_A6",
+ "category": "A · clear displacement",
+ "special": [
+  "displacement without CISD",
+  "FVG = YES",
+  "inside the real v0.8.0-dev capture"
+ ],
+ "judgement": "Bearish expansion at 02:00: a large down body with small wicks, closing well below the previous candle; no CISD near it.",
+ "symbol": "CME_MINI:MNQZ2026",
+ "timeframe_sec": 60,
+ "timezone": "America/New_York",
+ "tick_size": 0.25,
+ "source": {
+  "evidence": [
+   "ist-v0.7.0-dev_mnq-1m_capture-1000_2026-10-30.csv"
+  ],
+  "bar_replay": false,
+  "note": "exact OHLC copied from the evidence capture(s); 15 bars before the first case bar, 1 after the last"
+ },
+ "start": "2026-10-30T01:45",
+ "case_bars": [
+  15
+ ],
+ "candles": [
+  [
+   "2026-10-30T01:45",
+   28989.5,
+   29001.0,
+   28985.25,
+   28998.25
+  ],
+  [
+   "2026-10-30T01:46",
+   28998.5,
+   28999.0,
+   28993.0,
+   28993.25
+  ],
+  [
+   "2026-10-30T01:47",
+   28993.75,
+   28999.75,
+   28992.5,
+   28993.5
+  ],
+  [
+   "2026-10-30T01:48",
+   28993.0,
+   29002.25,
+   28992.5,
+   28996.5
+  ],
+  [
+   "2026-10-30T01:49",
+   28997.0,
+   28997.5,
+   28986.75,
+   28989.75
+  ],
+  [
+   "2026-10-30T01:50",
+   28990.0,
+   28996.0,
+   28986.0,
+   28986.75
+  ],
+  [
+   "2026-10-30T01:51",
+   28986.5,
+   28993.0,
+   28981.25,
+   28986.75
+  ],
+  [
+   "2026-10-30T01:52",
+   28987.25,
+   28990.0,
+   28981.25,
+   28983.0
+  ],
+  [
+   "2026-10-30T01:53",
+   28983.0,
+   28986.0,
+   28977.75,
+   28979.75
+  ],
+  [
+   "2026-10-30T01:54",
+   28980.5,
+   28985.0,
+   28978.25,
+   28979.5
+  ],
+  [
+   "2026-10-30T01:55",
+   28978.25,
+   28983.0,
+   28973.25,
+   28980.5
+  ],
+  [
+   "2026-10-30T01:56",
+   28981.0,
+   28985.75,
+   28976.25,
+   28977.5
+  ],
+  [
+   "2026-10-30T01:57",
+   28977.5,
+   28978.0,
+   28964.25,
+   28967.25
+  ],
+  [
+   "2026-10-30T01:58",
+   28967.5,
+   28974.75,
+   28963.25,
+   28971.5
+  ],
+  [
+   "2026-10-30T01:59",
+   28971.75,
+   28983.25,
+   28971.25,
+   28980.0
+  ],
+  [
+   "2026-10-30T02:00",
+   28980.0,
+   28981.75,
+   28956.25,
+   28958.5
+  ],
+  [
+   "2026-10-30T02:01",
+   28958.25,
+   28970.0,
+   28955.25,
+   28962.75
+  ]
+ ],
+ "expected": [
+  {
+   "time": "2026-10-30T02:00",
+   "side": -1,
+   "open": 28980.0,
+   "high": 28981.75,
+   "low": 28956.25,
+   "close": 28958.5,
+   "prev_high": 28983.25,
+   "prev_low": 28971.25,
+   "A": 9.6964285714,
+   "body": 21.5,
+   "range": 25.5,
+   "body_k": 2.2173112339,
+   "range_k": 2.6298342541,
+   "close_position": 0.9117647059,
+   "beyond_prev": true,
+   "verdict": -1,
+   "fails": [],
+   "fvg_next": "YES",
+   "cisd_on_bar": 0,
+   "same_side_cisd_within_10": [],
+   "describe": "down-close; body 21.5 pts = 84 % of its 25.5-pt range; wicks 1.75 up / 2.25 down; range 2.6 × the median range of the 14 candles before; close +12.75 pts beyond the previous candle's low"
+  }
+ ]
+}

@@ -1,5 +1,30 @@
 # Changelog
 
+## Displacement FROZEN — DISPLACEMENT_BASELINE_v0.8.0-dev · IST v0.8.0-dev unchanged · validation 1.18.0 (2026-11-02, branch `displacement/pine`) — no indicator change
+
+**User (2026-11-02):** DISP-L12 reload PASS: the same timestamps kept side / verdict, A, body / A, close position, confirmation close and FVG metadata after a page refresh and after removing and re-adding the indicator, and a borderline non-displacement stayed 0. DISP-L00, L10, L11, L12 PASS. Freeze the approved single-candle DISPLACEMENT-R; nothing else changes.
+
+**RESULT**
+* Final statuses: **DISP-L00 PASS · DISP-L10 PASS · DISP-L11 PASS · DISP-L12 PASS** (`docs/TESTS_DISPLACEMENT.md`).
+* Real parity (DISP-L10): 1,060 displacement bar comparisons, 22 DISPLACEMENT_CONFIRMED, 22 DISPLACEMENT_DROPPED_MEMORY, 50 snapshot records, 0 DIFFERENCE.
+* Golden (DISP-L11): 19 cases, 22 candles. 6 clear, 5 rejected, 6 borderline, 2 inconclusive.
+  * I1 / I2 are documented as evidence for a possible future multi-bar module.
+  * They do not change the frozen single-candle DISPLACEMENT-R.
+* **Freeze package:**
+  * `docs/DISPLACEMENT_FREEZE_REPORT.md`;
+  * `docs/DISPLACEMENT.md`, `docs/TESTS_DISPLACEMENT.md` and `docs/STUDY_DISPLACEMENT.md`, now marked FROZEN;
+  * `releases/v0.8.0-dev/`, read-only: source, docs, oracle, golden dataset + README, the real parity evidence byte for byte, `SHA256SUMS.txt`, `MANIFEST.txt`, `README.txt`.
+* Annotated tag `DISPLACEMENT_BASELINE_v0.8.0-dev` on the freeze commit.
+
+**TEST:**
+* FULL: **PASS**, exit 0, 684.9 s, **1052 passed, 1 skipped** (the long-standing parity skip):
+  * static 22/22 (ST-21, ST-22);
+  * displacement 106/106, displacement study 24/24, golden 110/110;
+  * parity 142/143 (the real v0.8.0-dev evidence 0 DIFFERENCE);
+  * CISD 167/167, LRL 85/85, HTF 46/46;
+  * Phase 1 / 2 unchanged.
+* `src/IST.pine` unchanged since `1b54759` (SHA-256 740ebcf6…5862). Untouched: CISD-R and `CISD_BASELINE_v0.7.1-dev`, LRL, HTF FVG, Phase 1 / 2 and the earlier releases.
+
 ## DISP-L10 PASS · DISP-L11 human goldens PASS — IST v0.8.0-dev unchanged · validation 1.18.0 (2026-11-01, branch `displacement/pine`) — no indicator change
 
 **User (2026-11-01):** the real IST v0.8.0-dev capture passes with 0 DIFFERENCE (DISP-L10), the displacement section included (1,060 bar verdicts, 50 snapshot records, 22 + 22 events). Next: DISP-L11, human / golden validation of the approved DISPLACEMENT-R, with no threshold change and no tuning.

@@ -1,0 +1,174 @@
+{
+ "id": "GOLD_DISP_B3",
+ "category": "B · clear non-displacement",
+ "special": [
+  "body / A ≥ 1.5 but close position < 0.75 rejected"
+ ],
+ "judgement": "Big bearish body, but the candle closes in the middle of a very large range (long lower wick): the push was rejected inside the bar.",
+ "symbol": "CME_MINI:NQ1!",
+ "timeframe_sec": 60,
+ "timezone": "America/New_York",
+ "tick_size": 0.25,
+ "source": {
+  "evidence": [
+   "ist-v0.4.3-dev_nq1-1m_capture-1000_2026-10-27.csv",
+   "ist-v0.4.4-dev_nq1-1m_capture-1000_2026-10-28.csv"
+  ],
+  "bar_replay": false,
+  "note": "exact OHLC copied from the evidence capture(s); 15 bars before the first case bar, 1 after the last"
+ },
+ "start": "2026-10-27T13:45",
+ "case_bars": [
+  15
+ ],
+ "candles": [
+  [
+   "2026-10-27T13:45",
+   29813.25,
+   29815.25,
+   29808.5,
+   29809.25
+  ],
+  [
+   "2026-10-27T13:46",
+   29808.75,
+   29810.75,
+   29806.25,
+   29807.0
+  ],
+  [
+   "2026-10-27T13:47",
+   29807.0,
+   29809.0,
+   29803.5,
+   29804.0
+  ],
+  [
+   "2026-10-27T13:48",
+   29804.25,
+   29807.25,
+   29797.5,
+   29806.5
+  ],
+  [
+   "2026-10-27T13:49",
+   29807.0,
+   29810.25,
+   29806.0,
+   29808.25
+  ],
+  [
+   "2026-10-27T13:50",
+   29807.75,
+   29810.75,
+   29805.0,
+   29807.75
+  ],
+  [
+   "2026-10-27T13:51",
+   29807.5,
+   29811.25,
+   29805.75,
+   29807.5
+  ],
+  [
+   "2026-10-27T13:52",
+   29807.0,
+   29807.25,
+   29795.0,
+   29798.5
+  ],
+  [
+   "2026-10-27T13:53",
+   29798.5,
+   29801.5,
+   29789.0,
+   29789.25
+  ],
+  [
+   "2026-10-27T13:54",
+   29789.25,
+   29790.5,
+   29785.25,
+   29786.25
+  ],
+  [
+   "2026-10-27T13:55",
+   29786.25,
+   29789.75,
+   29783.25,
+   29785.5
+  ],
+  [
+   "2026-10-27T13:56",
+   29785.5,
+   29786.75,
+   29777.25,
+   29780.25
+  ],
+  [
+   "2026-10-27T13:57",
+   29780.5,
+   29788.0,
+   29779.5,
+   29782.75
+  ],
+  [
+   "2026-10-27T13:58",
+   29782.75,
+   29787.75,
+   29780.75,
+   29783.75
+  ],
+  [
+   "2026-10-27T13:59",
+   29783.5,
+   29789.5,
+   29783.0,
+   29787.5
+  ],
+  [
+   "2026-10-27T14:00",
+   29788.0,
+   29789.25,
+   29755.75,
+   29771.25
+  ],
+  [
+   "2026-10-27T14:01",
+   29770.75,
+   29786.0,
+   29769.5,
+   29783.0
+  ]
+ ],
+ "expected": [
+  {
+   "time": "2026-10-27T14:00",
+   "side": -1,
+   "open": 29788.0,
+   "high": 29789.25,
+   "low": 29755.75,
+   "close": 29771.25,
+   "prev_high": 29789.5,
+   "prev_low": 29783.0,
+   "A": 7.3928571429,
+   "body": 16.75,
+   "range": 33.5,
+   "body_k": 2.2657004831,
+   "range_k": 4.5314009662,
+   "close_position": 0.5373134328,
+   "beyond_prev": true,
+   "verdict": 0,
+   "fails": [
+    "close position < 0.75"
+   ],
+   "fvg_next": "NO",
+   "cisd_on_bar": 0,
+   "same_side_cisd_within_10": [
+    -8
+   ],
+   "describe": "down-close; body 16.75 pts = 50 % of its 33.5-pt range; wicks 1.25 up / 15.5 down; range 5.2 × the median range of the 14 candles before; close +11.75 pts beyond the previous candle's low"
+  }
+ ]
+}

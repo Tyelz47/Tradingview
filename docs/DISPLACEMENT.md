@@ -1,12 +1,13 @@
 # IST · Displacement (DEF-DISP1 … DISP9)
 
-**Status: APPROVED by the user on 2026-11-01 (DISPLACEMENT-R, M1…M11). Implemented in Pine: IST v0.8.0-dev (EXPERIMENTAL, not frozen).**
+**Status: FROZEN on 2026-11-02. Tag `DISPLACEMENT_BASELINE_v0.8.0-dev`; report `docs/DISPLACEMENT_FREEZE_REPORT.md`; copy in `releases/v0.8.0-dev/`.** Approved by the user on 2026-11-01 (DISPLACEMENT-R, M1…M11) and implemented in Pine in IST v0.8.0-dev. Only the single-candle definition is frozen; there is no multi-bar displacement in this baseline.
 * The research behind it is `docs/STUDY_DISPLACEMENT.md`.
 * Reference model: `validation/models/displacement.py`, the opt-in module `disp` of the oracle (validation 1.16.0, unchanged by the Pine phase).
 * Pine: §5. Parity capture: §6. TradingView tests: `docs/TESTS_DISPLACEMENT.md`.
+* **DISP-L00 PASS:** compile and runtime.
 * **DISP-L10 PASS:** the real v0.8.0-dev capture, 0 DIFFERENCE.
 * **DISP-L11 PASS:** human golden cases, `validation/golden/human/displacement/`.
-* DISP-L12 (reload) is the remaining freeze gate.
+* **DISP-L12 PASS:** reload (user).
 * **Approved decisions.**
   * M1: k = 1.5.
   * M2: close position 0.75.
@@ -129,7 +130,6 @@ Existing capture fields and their meaning are unchanged.
 ## 7 · Not started (by instruction)
 
 * The renderer and alerts (M11), and the final visual design.
-* Multi-bar displacement (M5).
 * Context / quality classes: CISD, sweep, FVG, DOL, structure.
 * IFVG.
-* A freeze: DISP-L10 and DISP-L11 pass; it still needs the DISP-L12 reload check and the user's go.
+* Multi-bar displacement (M5). The golden cases I1 (a two-candle push with large upper wicks) and I2 (a three-candle staircase) are evidence for a possible future, separate multi-bar module. They do not change the frozen single-candle DISPLACEMENT-R.

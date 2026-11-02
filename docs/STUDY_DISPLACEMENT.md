@@ -1,6 +1,10 @@
 # Displacement research study
 
-**Status: APPROVED by the user on 2026-11-01 (DISPLACEMENT-R, decisions M1…M11 as recommended in §M).** The specification is `docs/DISPLACEMENT.md`, the reference model `validation/models/displacement.py` (validation 1.16.0), and the Pine implementation IST v0.8.0-dev (validation 1.17.0). This study is kept as the research record.
+**Status: APPROVED by the user on 2026-11-01 (DISPLACEMENT-R, decisions M1…M11 as recommended in §M).** The specification is `docs/DISPLACEMENT.md`, the reference model `validation/models/displacement.py` (validation 1.16.0), and the Pine implementation IST v0.8.0-dev (validation 1.17.0), **FROZEN on 2026-11-02 (tag `DISPLACEMENT_BASELINE_v0.8.0-dev`)**. This study is kept as the research record.
+* **Multi-bar evidence for the future (M5).** The human golden cases I1 and I2 (`validation/golden/human/displacement/`) confirm the false-negative class measured in §J:
+  * I1: a two-candle push of about 4 × A, each candle with a large upper wick;
+  * I2: a three-candle staircase of about 3.3 × A.
+  * Both are evidence for a possible future, **separate** multi-bar displacement module. They do not change the frozen single-candle DISPLACEMENT-R.
 * **Wording correction (2026-11-01, no rule change).** §A item 4, §H and M3 first described "close beyond the previous candle" as the necessary condition for leaving an FVG. That was wrong. A standard bullish FVG is a three-candle condition: the low of candle 3 above the high of candle 1. The rule stays in DISPLACEMENT-R as a **displacement** criterion: it separates directional repricing from a large candle still contained within the previous candle. It is not the FVG definition.
 * At the time of the study: no change to `src/IST.pine`, to CISD-R (frozen, `CISD_BASELINE_v0.7.1-dev`), to LRL, HTF FVG, Phase 1 or Phase 2.
 * Harness: `validation/studies/displacement.py` (`python -m validation.studies.displacement` prints every table below).

@@ -1,10 +1,10 @@
-# IST · Displacement tests — v0.8.0-dev (EXPERIMENTAL)
+# IST · Displacement tests — v0.8.0-dev (FROZEN)
 
-**Status (2026-11-01).**
-* **DISP-L10 PASS** (user, real IST v0.8.0-dev capture, 0 DIFFERENCE).
-* **DISP-L11 PASS** (human / golden validation: 19 cases, 22 candles, 0 mismatch, no systematic conflict). The reviewer's classifications await the user's look on the chart (procedure below).
-* DISP-L12 (reload, freeze gate) and DISP-L01 … L05 are **PENDING**. TradingView results are recorded only from the user's results, never assumed.
-* Freeze gates: DISP-L10 PASS · DISP-L11 PASS · DISP-L12 pending.
+**Status (2026-11-02).**
+* **DISP-L00, DISP-L10, DISP-L11 and DISP-L12: PASS**, all recorded from the user's results.
+* DISP-L01 … L05 were not recorded one by one.
+* TradingView results are recorded only from the user's results, never assumed.
+* **DISPLACEMENT FROZEN:** tag `DISPLACEMENT_BASELINE_v0.8.0-dev` (`docs/DISPLACEMENT_FREEZE_REPORT.md`, copy in `releases/v0.8.0-dev/`).
 
 **Build:** `src/IST.pine` v0.8.0-dev (branch `displacement/pine`). Definition: `docs/DISPLACEMENT.md` (DISPLACEMENT-R, approved 2026-11-01).
 
@@ -91,8 +91,8 @@ For each case, look at the candle and say whether you agree with its category: A
 
 | id | result | date | notes |
 |---|---|---|---|
-| DISP-L00 | not recorded separately | 2026-11-01 | the DISP-L10 capture was written by v0.8.0-dev in TradingView, so it compiled and ran |
-| DISP-L01 … L05 | PENDING | | |
+| DISP-L00 | **PASS** | 2026-11-01 / 02 | v0.8.0-dev compiled and ran (user); its real capture is DISP-L10 |
+| DISP-L01 … L05 | not recorded one by one | | |
 | DISP-L10 | **PASS** | 2026-11-01 | real capture of IST v0.8.0-dev (MNQ 1m Bar Replay, 2026-10-29 19:56 → 10-30 13:51; `pine-logs-IST_43f18.csv`, kept as `parity/evidence/ist-v0.8.0-dev_mnq-1m-replay_capture-1000_2026-10-30.csv`): 0 DIFFERENCE in every module. Displacement: 1,060 bar verdicts, 50 snapshot records consistent, 22 + 22 events |
-| DISP-L11 | **PASS** | 2026-11-01 | 19 cases / 22 candles from the evidence captures: 6 clear displacements (3 ▲, 3 ▼), 5 clear non-displacements, 6 borderline, 2 supporting / inconclusive (I1, I2: approved exclusions M2 / M5). 0 mismatch; the mirror holds; 4 cases agree with the real Pine log. Visual confirmation by the user recommended (above) |
-| DISP-L12 | PENDING | | the reload procedure above (freeze gate) |
+| DISP-L11 | **PASS** | 2026-11-01 / 02 | 19 cases / 22 candles from the evidence captures: 6 clear displacements (3 ▲, 3 ▼), 5 clear non-displacements, 6 borderline, 2 supporting / inconclusive (I1, I2: approved exclusions M2 / M5). 0 mismatch; the mirror holds; 4 cases agree with the real Pine log. Confirmed by the user |
+| DISP-L12 | **PASS** | 2026-11-02 | user: historical displacements checked before and after (a) a page refresh and (b) removing and re-adding the indicator. The same timestamps kept side / verdict, A, body / A, close position, confirmation close and FVG metadata. A borderline non-displacement stayed verdict 0 |
