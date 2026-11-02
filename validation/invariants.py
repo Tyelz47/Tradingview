@@ -156,6 +156,22 @@ DISP_FROZEN = _inv("INV-DISP-04", "DISP", "a record never changes; its FVG fact,
 DISP_EVENTS = _inv("INV-DISP-05", "DISP", "events and records agree: DISPLACEMENT_CONFIRMED on the candle (side, id, "
                                           "close); DISPLACEMENT_DROPPED_MEMORY iff a record left memory")
 DISP_MEM = _inv("INV-DISP-06", "DISP", "records ≤ memory, in bar order; the oldest leaves first")
+# ── IFVG (docs/IFVG.md, oracle only) ──
+IFVG_TRIGGER = _inv("INV-IFVG-01", "IFVG", "an IFVG is created on a bar iff a tracked Phase 1 FVG is invalidated there "
+                                           "(DEF-A5): its first close strictly beyond the far edge since confirmation + 1")
+IFVG_GEOM = _inv("INV-IFVG-02", "IFVG", "an IFVG copies its parent: id, origin, confirmation, top, bottom, CE; its side "
+                                        "is the opposite; the inverting close and the parent's prior state are recorded")
+IFVG_FACTS = _inv("INV-IFVG-03", "IFVG", "retest / CE / full: the first bar after the inversion whose wick reaches the "
+                                         "near edge / CE / far edge; never missed, never early")
+IFVG_END = _inv("INV-IFVG-04", "IFVG", "an IFVG ends (INVALIDATED) on the first close strictly beyond its far edge after "
+                                       "the inversion, never missed, never early")
+IFVG_FROZEN = _inv("INV-IFVG-05", "IFVG", "identity, geometry and the inversion never change; a fact or an end once "
+                                          "stamped never changes; an ended IFVG never changes")
+IFVG_EVENTS = _inv("INV-IFVG-06", "IFVG", "events and records agree: IFVG_INVERTED on the inversion bar, IFVG_FIRST_TOUCH "
+                                          "on the retest, IFVG_INVALIDATED on the end, IFVG_DROPPED_MEMORY iff a record "
+                                          "left memory")
+IFVG_MEM = _inv("INV-IFVG-07", "IFVG", "records per side ≤ memory, in inversion order; an active record leaves only when "
+                                       "no ended one of its side is left")
 
 LIQ_FACTS = ("taken_bar", "take_ext", "take_close", "take_gap", "cls")
 
@@ -195,6 +211,9 @@ class Monitor:
         self.cisd_last = None                   # the newest CISD seen: (side, ext_bar, bar)
         self.disp_snap: dict = {}               # displacement id → frozen record fields
         self.disp_tr: list = []                 # our own true ranges, for INV-DISP-01 / 02
+        self.ifvg_snap: dict = {}               # (side, id) → frozen IFVG fields
+        self.ifvg_par: dict = {}                # Phase 1 FVG id → the record, seen on its confirmation bar
+        self.ifvg_obj: dict = {}                # (side, id) → the IFVG record object (its last bar's facts, once dropped)
         self.tol = model.settings.liq.tol_ticks * model.settings.tick
         self.eps = model.settings.eps
 
@@ -225,6 +244,8 @@ class Monitor:
             self._cisd(bar, new, full)
         if getattr(m, "disp", None) is not None:
             self._disp(bar, new, full)
+        if getattr(m, "ifvg", None) is not None:
+            self._ifvg(bar, c, new, full)
         self.n_events = len(m.events)
         self.last_event = m.events[-1] if m.events else None
 
@@ -246,6 +267,8 @@ class Monitor:
             self._cisd(bar, [], final=True)
         if getattr(m, "disp", None) is not None:
             self._disp(bar, [], final=True)
+        if getattr(m, "ifvg", None) is not None:
+            self._ifvg(bar, c, [], True, final=True)
 
     # ── events ──
     def _events(self, bar, c, new, full=True):
@@ -269,7 +292,7 @@ class Monitor:
             if fam in self.dropped:
                 self._fail(EV_AFTER_DROP, f"{e.type} id {e.sid} after its DROPPED_MEMORY")
             if e.type.endswith("_CREATED") or e.type in ("SESSION_START", "LRL_CONFIRMED", "HTF_FVG_SEEDED", "CISD_CONFIRMED",
-                                                         "DISPLACEMENT_CONFIRMED"):
+                                                         "DISPLACEMENT_CONFIRMED", "IFVG_INVERTED"):
                 self.known.add(fam)
             elif e.type != "LEVEL_SET" and fam not in self.known:
                 self._fail(EV_KNOWN, f"{e.type} id {e.sid} refers to no known structure")
@@ -869,6 +892,83 @@ class Monitor:
         for k in gone:
             del self.disp_snap[k]
         for k in (DISP_RULE, DISP_FIELDS, DISP_FVG, DISP_FROZEN, DISP_EVENTS, DISP_MEM):
+            stats.INV_CHECKS[k] += 1
+
+    # ── IFVG (docs/IFVG.md) ──
+    def _ifvg(self, bar, c, new, full=True, final=False):
+        """Recomputed from the candles and the Phase 1 FVG records the monitor saw on their
+        confirmation bars (read only). New records are checked on their inversion bar, facts and
+        the end of active records every bar, ended ones on full sweeps (INV-IFVG-05)."""
+        from validation.models.ifvg import pre_state
+        e, cs = self.m.ifvg, self.m.candles
+        for z in self.m.fvg.records():
+            if z.confirm_bar == bar:
+                self.ifvg_par[z.id] = z
+        for side, recs in ((1, e.bull), (-1, e.bear)):
+            if len(recs) > e.s.memory or any(a.bar > b.bar for a, b in zip(recs, recs[1:])) or \
+                    any(r.side != side for r in recs):
+                self._fail(IFVG_MEM, f"{len(recs)} side-{side} records (memory {e.s.memory}), bars {[r.bar for r in recs]}")
+        recs = e.records()
+        made = {(r.side, r.id) for r in recs if r.bar == bar and (r.side, r.id) not in self.ifvg_snap}
+        inv = {(-x.dir, x.sid) for x in new if x.type == "FVG_INVALIDATED"}
+        # several inversions of one side on one bar, memory smaller: the older ones leave on that bar
+        born_gone = inv - made
+        if not final and (not made <= inv or not born_gone <= {(x.dir, x.sid) for x in new if x.type == "IFVG_DROPPED_MEMORY"}):
+            self._fail(IFVG_TRIGGER, f"IFVGs created {sorted(made)} vs Phase 1 invalidations {sorted(inv)}")
+        beyond = lambda x, r: (x.close > r.far) if r.side < 0 else (x.close < r.far)       # the IFVG's own end
+        through = lambda x, r: (x.close < r.near) if r.side < 0 else (x.close > r.near)    # the parent's DEF-A5 close
+        for r in recs:
+            if (r.side, r.id) not in made:
+                continue
+            z = self.ifvg_par.get(r.id)
+            if z is None or z.dir != -r.side or not through(cs[bar], r) or \
+                    any(through(cs[j], r) for j in range(z.confirm_bar + 1, bar)):
+                self._fail(IFVG_TRIGGER, f"IFVG {r.side}:{r.id} on bar {bar}: not the parent's first close-through")
+            if (r.origin_bar, r.parent_bar, r.top, r.bottom, r.mid, r.time, r.close, r.pre, r.retest, r.ce, r.full,
+                    r.end) != (z.origin_bar, z.confirm_bar, z.top, z.bottom, z.mid, cs[bar].time, cs[bar].close,
+                               pre_state(z, bar), None, None, None, None):
+                self._fail(IFVG_GEOM, f"IFVG {r.side}:{r.id}: {r} vs parent {z}")
+        reach = lambda x, r, lv: x.high >= lv if r.side < 0 else x.low <= lv
+        for r in (recs if full else [r for r in recs if r.end is None or r.end == bar]):
+            k = (r.side, r.id)
+            old = self.ifvg_snap.get(k)
+            now = (r.side, r.id, r.origin_bar, r.parent_bar, r.top, r.bottom, r.mid, r.bar, r.time, r.close, r.pre,
+                   r.retest, r.ce, r.full, r.end)
+            if old is not None and r.end in (None, bar):
+                for i, lv in ((11, r.near), (12, r.mid), (13, r.far)):
+                    st = now[i]
+                    if (st is None and bar > r.bar and reach(c, r, lv)) or \
+                            (st is not None and old[i] is None and not (st == bar and reach(c, r, lv))):
+                        self._fail(IFVG_FACTS, f"IFVG {k}: facts {now[11:14]} on bar {bar}")
+                if (r.end is None and bar > r.bar and beyond(c, r)) or \
+                        (r.end is not None and old[14] is None and not (r.end == bar > r.bar and beyond(c, r))):
+                    self._fail(IFVG_END, f"IFVG {k}: end {r.end} on bar {bar}, close {c.close}")
+            if old is not None and (old[:11] != now[:11] or (old[14] is not None and old != now) or
+                                    any(a is not None and a != b for a, b in zip(old[11:], now[11:]))):
+                self._fail(IFVG_FROZEN, f"IFVG {k}: {old} → {now}")
+            self.ifvg_snap[k] = now
+            self.ifvg_obj[k] = r
+        seen = {(r.side, r.id) for r in recs}
+        gone = [k for k in self.ifvg_snap if k not in seen]
+        last = [self.ifvg_obj[k] for k in gone]               # advanced on this bar, then released by an inversion
+        evs = sorted((x.type, x.dir, x.sid, x.price, x.origin_bar) for x in new if x.type.startswith("IFVG_"))
+        par = lambda k: self.ifvg_par[k[1]]
+        want = sorted([("IFVG_INVERTED", r.side, r.id, r.close, r.origin_bar) for r in recs if (r.side, r.id) in made] +
+                      [("IFVG_FIRST_TOUCH", r.side, r.id, r.near, r.origin_bar) for r in recs + last if r.retest == bar] +
+                      [("IFVG_INVALIDATED", r.side, r.id, c.close, r.origin_bar) for r in recs + last if r.end == bar] +
+                      [("IFVG_DROPPED_MEMORY", k[0], k[1], self.ifvg_snap[k][6], self.ifvg_snap[k][2]) for k in gone] +
+                      [x for k in born_gone for x in (("IFVG_INVERTED", k[0], k[1], c.close, par(k).origin_bar),
+                                                      ("IFVG_DROPPED_MEMORY", k[0], k[1], par(k).mid, par(k).origin_bar))])
+        if not final and evs != want:
+            self._fail(IFVG_EVENTS, f"events {evs} vs records {want}")
+        ended = lambda k: any(r.side == k[0] and r.end is not None for r in recs)
+        for k in gone:
+            if self.ifvg_obj[k].end is None and ended(k):
+                self._fail(IFVG_MEM, f"active IFVG {k} dropped while an ended one of its side stays")
+            del self.ifvg_snap[k], self.ifvg_obj[k]
+        if any(ended(k) for k in born_gone):
+            self._fail(IFVG_MEM, f"IFVGs {sorted(born_gone)} dropped on their bar while an ended one of their side stays")
+        for k in (IFVG_TRIGGER, IFVG_GEOM, IFVG_FACTS, IFVG_END, IFVG_FROZEN, IFVG_EVENTS, IFVG_MEM):
             stats.INV_CHECKS[k] += 1
 
 

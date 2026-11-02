@@ -1,6 +1,6 @@
 """IST validation agent — one command, one honest answer.
 
-    python validation/validation_agent.py [--mode quick|full|deep] [--phase 1|2|lrl|htf|cisd|disp|all]
+    python validation/validation_agent.py [--mode quick|full|deep] [--phase 1|2|lrl|htf|cisd|disp|ifvg|all]
                                           [--seed N] [--report PATH] [--verbose] [--update-baseline]
     python -m validation  (same options)
 
@@ -53,9 +53,11 @@ SECTIONS = [  # key, report title, group
     ("htf", "HTF FVG (oracle + Pine v0.6.2-dev)", "HTF"),
     ("cisd", "CISD (oracle + Pine v0.7.1-dev)", "CISD"),
     ("disp", "Displacement (oracle + Pine v0.8.0-dev)", "DISP"),
+    ("ifvg", "IFVG (oracle only; no Pine yet)", "IFVG"),
     ("research.lrl", "LRL research study (no indicator change)", "RESEARCH"),
     ("research.cisd", "CISD research study (no indicator change)", "RESEARCH"),
     ("research.disp", "Displacement study (no indicator change)", "RESEARCH"),
+    ("research.ifvg", "IFVG study (no indicator change)", "RESEARCH"),
 ]
 SCENARIO_SECTIONS = {"phase1.fvg", "phase1.lifecycle", "phase1.sessions", "phase1.levels", "phase2.swing",
                      "phase2.sweeps", "phase2.eq", "events"}
@@ -133,7 +135,7 @@ def parse_args(argv):
     ap = argparse.ArgumentParser(prog="validation_agent", description=__doc__.split("\n\n")[0])
     ap.add_argument("--mode", choices=("quick", "full", "deep"), default="full",
                     help="quick: every change · full (default): before TradingView · deep: before a version freeze")
-    ap.add_argument("--phase", choices=("1", "2", "lrl", "htf", "cisd", "disp", "all"), default="all")
+    ap.add_argument("--phase", choices=("1", "2", "lrl", "htf", "cisd", "disp", "ifvg", "all"), default="all")
     ap.add_argument("--all", action="store_const", const="all", dest="phase", help="same as --phase all")
     ap.add_argument("--seed", type=int, default=20261027, help="Hypothesis seed (walks and corpus are fixed)")
     ap.add_argument("--report", type=Path, default=REPORT)
@@ -165,7 +167,7 @@ def main(argv=None) -> int:
     stats.reset()
     shutil.rmtree(artifacts.FAIL_DIR, ignore_errors=True)
     marker = {"1": "phase1 or common", "2": "phase2 or common", "lrl": "lrl or common", "htf": "htf or common",
-              "cisd": "cisd or common", "disp": "disp or common"}.get(args.phase)
+              "cisd": "cisd or common", "disp": "disp or common", "ifvg": "ifvg or common"}.get(args.phase)
     pargs = [str(VALIDATION_DIR / "tests"), str(VALIDATION_DIR / "fuzz"), "-p", "no:cacheprovider",
              "--rootdir", str(ROOT), "-o", "addopts=", f"--hypothesis-seed={args.seed}",
              "-v" if args.verbose else "-q", "--tb=short" if args.verbose else "--tb=line", "-W", "ignore::DeprecationWarning"]
@@ -288,7 +290,7 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
     w(f"* Bars checked by the invariant monitor in total: {stats.COUNTS['bars.checked']}")
     w(f"* Coverage: {stats.COUNTS['lrl.confirmed']} LRLs confirmed, {stats.COUNTS['htf.created']} HTF FVGs created, "
       f"{stats.COUNTS['htf.seeded']} seeded (reload property), {stats.COUNTS['cisd.confirmed']} CISDs confirmed, "
-      f"{stats.COUNTS['disp.confirmed']} displacements\n")
+      f"{stats.COUNTS['disp.confirmed']} displacements, {stats.COUNTS['ifvg.inverted']} IFVGs\n")
     sel = stats.RESULTS.get("selectivity")
     if sel:
         w("Reaction-floor selectivity on the walks (synthetic noise, NOT NQ; presets unchanged):\n")

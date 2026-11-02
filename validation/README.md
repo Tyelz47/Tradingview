@@ -52,8 +52,10 @@ validation/
     displacement.py     docs/DISPLACEMENT.md DEF-DISP1…DISP9 (DISPLACEMENT-R, approved): opt-in module "disp"
                         (one closed candle; FVG fact on the next bar); DispPine = Pine's formulation, proven
                         equal. Pine: v0.8.0-dev, ST-22
+    ifvg.py             docs/IFVG.md DEF-IFVG1…IFVG9 (IFVG-R, proposed): opt-in module "ifvg", an observer of
+                        the Phase 1 FVG engine (needs "fvg"). No Pine yet: its events are ORACLE_ONLY (ST-14)
     ist.py              all modules in the Pine engine order → events + state
-  invariants.py         74 named invariants (10 LRL, 8 HTF, 8 CISD, 6 displacement, checked only when the module runs) + the per-bar Monitor
+  invariants.py         81 named invariants (10 LRL, 8 HTF, 8 CISD, 6 displacement, 7 IFVG, checked only when the module runs) + the per-bar Monitor
   static_checks.py      text checks of src/IST.pine
   regression.py         corpus, baseline snapshot, diff/classify, legacy models from git
   candles.py            builders, random walks, TradingView CSV loader, mirror/shift
@@ -70,7 +72,8 @@ validation/
                         liquidity_significance.py (reads the v0.4.3-dev evidence capture);
                         lrl.py (LRL research, docs/STUDY_LRL.md; both captures merged, charts → docs/study_lrl);
                         cisd.py (CISD research, docs/STUDY_CISD.md; the oracle equals its CISD-R engine);
-                        displacement.py (displacement research, docs/STUDY_DISPLACEMENT.md; the oracle equals D6)
+                        displacement.py (displacement research, docs/STUDY_DISPLACEMENT.md; the oracle equals D6);
+                        ifvg.py (IFVG research, docs/STUDY_IFVG.md; the oracle equals IF2)
   baselines/            baseline.json, expected_changes.json, phase1_removed_lines.txt
   reports/              VALIDATION_REPORT.md and failures/ (generated, not committed)
 ```
@@ -105,7 +108,7 @@ python validation/validation_agent.py --mode deep
 ```
 
 **Options:**
-* `--phase 1|2|lrl|htf|cisd|disp|all` runs one phase (or LRL detection, HTF FVG, CISD, displacement) plus the shared checks.
+* `--phase 1|2|lrl|htf|cisd|disp|ifvg|all` runs one phase (or LRL detection, HTF FVG, CISD, displacement, IFVG) plus the shared checks.
 * `--seed N` sets the Hypothesis seed. Walks and the regression corpus are fixed.
 * `--report PATH` writes the report elsewhere.
 * `--verbose` prints every test.

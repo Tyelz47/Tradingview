@@ -159,6 +159,13 @@ class DispSettings:
 
 
 @dataclass(frozen=True)
+class IfvgSettings:
+    """docs/IFVG.md IFVG-R (recommended 2026-11-02, awaiting the user's approval). The inversion is the
+    frozen Phase 1 invalidation (DEF-A5): no parameter. A bookkeeping constant only."""
+    memory: int = 50            # DEF-IFVG8 records kept per side (≥ 1); the oldest ended one goes first
+
+
+@dataclass(frozen=True)
 class SessionSettings:
     """DEF-F1…F6. Windows are `HHMM-HHMM` in `timezone`, every weekday."""
     timezone: str = "America/New_York"
@@ -196,9 +203,9 @@ class ViewSettings:
 
 
 MODULES = ("levels", "sessions", "fvg", "liq")
-# Opt-in modules: not in the default run (src/IST.pine has no displacement yet; baselines and
-# parity compare the default modules only).
-KNOWN_MODULES = MODULES + ("lrl", "htf", "cisd", "disp")
+# Opt-in modules: not in the default run (src/IST.pine has no IFVG yet; baselines and parity
+# compare the default modules only). "ifvg" observes the Phase 1 FVG engine, so it needs "fvg".
+KNOWN_MODULES = MODULES + ("lrl", "htf", "cisd", "disp", "ifvg")
 
 
 @dataclass(frozen=True)
@@ -213,6 +220,7 @@ class Settings:
     htf: HtfSettings = field(default_factory=HtfSettings)
     cisd: CisdSettings = field(default_factory=CisdSettings)
     disp: DispSettings = field(default_factory=DispSettings)
+    ifvg: IfvgSettings = field(default_factory=IfvgSettings)
     modules: tuple = MODULES
 
     @property
@@ -228,7 +236,7 @@ class Settings:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        for opt in ("lrl", "htf", "cisd", "disp"):
+        for opt in ("lrl", "htf", "cisd", "disp", "ifvg"):
             if opt not in self.modules:
                 del d[opt]               # opt-in module: absent cases keep their earlier definition (regression)
         if "htf" in d:
@@ -242,7 +250,7 @@ class Settings:
         d = dict(d or {})
         sub = {"fvg": FvgSettings, "liq": LiqSettings, "sessions": SessionSettings,
                "levels": LevelSettings, "view": ViewSettings, "lrl": LrlSettings, "htf": HtfSettings,
-               "cisd": CisdSettings, "disp": DispSettings}
+               "cisd": CisdSettings, "disp": DispSettings, "ifvg": IfvgSettings}
         kw = {}
         for name, typ in sub.items():
             if name in d:

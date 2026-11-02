@@ -29,6 +29,7 @@ def pytest_configure(config):
     for line in ("section(name): report section", "spec(*ids): TESTS_PHASE2 / ARCHITECTURE ids this test covers",
                  "phase1: Phase 1 logic", "phase2: Phase 2 logic", "lrl: LRL detection (docs/LRL.md)", "htf: HTF FVG (docs/HTF_FVG.md)", "cisd: CISD oracle and research (docs/CISD.md, docs/STUDY_CISD.md)",
                  "disp: displacement oracle and research (docs/DISPLACEMENT.md, docs/STUDY_DISPLACEMENT.md)",
+                 "ifvg: IFVG oracle and research (docs/IFVG.md, docs/STUDY_IFVG.md)",
                  "common: shared infrastructure"):
         config.addinivalue_line("markers", line)
 

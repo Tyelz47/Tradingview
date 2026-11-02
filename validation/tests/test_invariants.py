@@ -656,6 +656,88 @@ def disp06():
     mon.check()
 
 
+# ── IFVG (opt-in module, docs/IFVG.md) ──
+def ifvg_case(n=None):
+    """The merged NQ captures with Phase 1 FVG + IFVG, the first n bars stepped and checked."""
+    from validation.studies.lrl import nq_candles
+    m = IstModel(Settings(modules=("fvg", "ifvg")))
+    mon = Monitor(m)
+    for c in nq_candles()[:n]:
+        m.step(c)
+        mon.check()
+    return m, mon
+
+
+def _ifvg_bar(i=4):
+    """Bar of the i-th inversion on the NQ captures."""
+    from validation.studies.lrl import nq_candles
+    return [e.bar for e in IstModel(Settings(modules=("fvg", "ifvg"))).run(nq_candles()).events
+            if e.type == "IFVG_INVERTED"][i]
+
+
+def ifvg_new(corrupt):
+    """The 5th inversion bar is stepped, the engine corrupted, then checked."""
+    from validation.studies.lrl import nq_candles
+    t = _ifvg_bar()
+    m, mon = ifvg_case(t)
+    m.step(nq_candles()[t])
+    corrupt(m.ifvg, t)
+    mon.check()
+
+
+def ifvg01():
+    ifvg_new(lambda e, t: [x for x in (e.bull, e.bear) if x and x[-1].bar == t][0].pop())   # an inversion without IFVG
+
+
+def ifvg02():
+    ifvg_new(lambda e, t: setattr(next(r for r in e.records() if r.bar == t), "top", 0.0))
+
+
+def ifvg_at(pick, corrupt):
+    """Step the NQ captures with Phase 1 FVG + IFVG; on the first bar where `pick` finds a record,
+    corrupt it before that bar's (first) check. A bar is never checked twice: the Phase 1 FVG
+    monitor compares each bar's events once."""
+    from validation.studies.lrl import nq_candles
+    m = IstModel(Settings(modules=("fvg", "ifvg")))
+    mon = Monitor(m)
+    for c in nq_candles():
+        m.step(c)
+        r = pick(m, c)
+        if r is not None:
+            corrupt(m, r)
+        mon.check()
+    raise AssertionError("no bar to corrupt")
+
+
+def _active(m, c, ok):
+    return next((r for r in m.ifvg.records() if r.end is None and r.bar < m.bar and ok(r, c)), None)
+
+
+def ifvg03():   # a retest stamped on a bar that did not reach the near edge
+    ifvg_at(lambda m, c: _active(m, c, lambda r, c: r.retest is None and not (c.high >= r.near if r.side < 0 else c.low <= r.near)),
+            lambda m, r: setattr(r, "retest", m.bar))
+
+
+def ifvg04():   # an end without a close beyond the far edge
+    ifvg_at(lambda m, c: _active(m, c, lambda r, c: not (c.close > r.far if r.side < 0 else c.close < r.far)),
+            lambda m, r: setattr(r, "end", m.bar))
+
+
+def ifvg05():   # an ended record changes
+    ifvg_at(lambda m, c: next((r for r in m.ifvg.records() if r.end is not None and r.end < m.bar - 1), None),
+            lambda m, r: setattr(r, "bottom", r.bottom - 0.25))
+
+
+def ifvg06():   # a drop event for a record still in memory
+    ifvg_at(lambda m, c: next(iter(m.ifvg.records()), None) if m.bar > 100 else None,
+            lambda m, r: m.log.events.append(ev_now(m, "IFVG_DROPPED_MEMORY", r.side, r.id, r.mid)))
+
+
+def ifvg07():   # more records than memory
+    ifvg_at(lambda m, c: next(iter(m.ifvg.bull), None) if len(m.ifvg.bull) > 1 else None,
+            lambda m, r: setattr(m.ifvg, "s", replace(m.ifvg.s, memory=1)))
+
+
 CASES = {
     "INV-EV-01": ev01, "INV-EV-02": ev02, "INV-EV-03": ev03, "INV-EV-04": ev04, "INV-EV-05": ev05,
     "INV-FVG-01": fvg01, "INV-FVG-02": fvg02, "INV-FVG-03": fvg03, "INV-FVG-04": fvg04, "INV-FVG-05": fvg05,
@@ -675,6 +757,8 @@ CASES = {
     "INV-CISD-05": cisd05, "INV-CISD-06": cisd06, "INV-CISD-07": cisd07, "INV-CISD-08": cisd08,
     "INV-DISP-01": disp01, "INV-DISP-02": disp02, "INV-DISP-03": disp03, "INV-DISP-04": disp04,
     "INV-DISP-05": disp05, "INV-DISP-06": disp06,
+    "INV-IFVG-01": ifvg01, "INV-IFVG-02": ifvg02, "INV-IFVG-03": ifvg03, "INV-IFVG-04": ifvg04,
+    "INV-IFVG-05": ifvg05, "INV-IFVG-06": ifvg06, "INV-IFVG-07": ifvg07,
 }
 
 

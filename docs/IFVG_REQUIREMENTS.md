@@ -1,6 +1,8 @@
 # IFVG · research requirements (input for a future study; nothing is implemented)
 
 **Status.**
+* **Audited on 2026-11-02 by `docs/STUDY_IFVG.md` §A**: every observation holds. The rule is now proposed in `docs/IFVG.md` (IFVG-R: the inversion is the frozen DEF-A5 close beyond the far edge, with the parent's exact geometry).
+* One correction: the IFVG observer copies the parent on its confirmation bar, not at its invalidation. The FVG engine can release a just-invalidated record on that same bar.
 * This is a requirements note only, written from the user's references.
 * No IFVG rule is decided here, and none may be taken from a marketing image alone.
 * A future IFVG study must derive a deterministic, non-repainting definition first, as was done for LRL and CISD.

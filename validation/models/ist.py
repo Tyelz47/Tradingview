@@ -1,11 +1,12 @@
 """The whole reference model: one bar at a time, modules in the Pine engine order
 (levels → sessions → FVG → liquidity, src/IST.pine "ENGINE RUN"), then the opt-in LRL
-HTF FVG, CISD and displacement engines (docs/LRL.md, docs/HTF_FVG.md, docs/CISD.md,
-docs/DISPLACEMENT.md). Confirmed mode: every candle is a closed bar."""
+HTF FVG, CISD, displacement and IFVG engines (docs/LRL.md, docs/HTF_FVG.md, docs/CISD.md,
+docs/DISPLACEMENT.md, docs/IFVG.md). Confirmed mode: every candle is a closed bar."""
 from __future__ import annotations
 
 from validation.models.cisd import CisdEngine
 from validation.models.displacement import DisplacementEngine
+from validation.models.ifvg import IfvgEngine
 from validation.models.events import Event, EventLog, canonical
 from validation.models.fvg import FvgEngine
 from validation.models.htf_fvg import HtfEngine
@@ -30,6 +31,9 @@ class IstModel:
         self.hfvg = HtfEngine(s.htf, s.fvg, s.tick, self.log, htf_pre, htf_external) if "htf" in s.modules else None
         self.cisd = CisdEngine(s.cisd, s.tick, self.log) if "cisd" in s.modules else None
         self.disp = DisplacementEngine(s.disp, s.tick, self.log) if "disp" in s.modules else None
+        if "ifvg" in s.modules and self.fvg is None:
+            raise ValueError("the IFVG module observes the Phase 1 FVG engine: add 'fvg' to the modules")
+        self.ifvg = IfvgEngine(s.ifvg, s.tick, self.log, self.fvg) if "ifvg" in s.modules else None
 
     @property
     def bar(self) -> int:
@@ -44,7 +48,7 @@ class IstModel:
         self.candles.append(c)
         self.log.at(bar, c.time)
         n = len(self.log.events)
-        for engine in (self.levels, self.sessions, self.fvg, self.liq, self.lrl, self.hfvg, self.cisd, self.disp):
+        for engine in (self.levels, self.sessions, self.fvg, self.liq, self.lrl, self.hfvg, self.cisd, self.disp, self.ifvg):
             if engine is not None:
                 engine.step(bar, c)
         return self.log.events[n:]
@@ -76,6 +80,8 @@ class IstModel:
             out["cisd"] = self.cisd.state()
         if self.disp is not None:
             out["disp"] = self.disp.state()
+        if self.ifvg is not None:
+            out["ifvg"] = self.ifvg.state()
         return out
 
 

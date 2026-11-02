@@ -1,5 +1,46 @@
 # Changelog
 
+## IFVG research + oracle — IFVG-R proposed · validation 1.19.0 (2026-11-02, branch `research/ifvg`) — no indicator change
+
+**User (2026-11-02):** start the research / specification of IFVG (inversion fair value gap) as an independent module. Audit `docs/IFVG_REQUIREMENTS.md`, compare inversion triggers on real NQ, recommend one definition, and implement it in the Python oracle. No Pine; nothing frozen changes.
+
+**RESULT**
+* **Audit (`docs/STUDY_IFVG.md` §A).** The requirements note holds. Its key observation is decisive: Phase 1's DEF-A5 invalidation is exactly a strict close beyond the far edge. One correction: the observer copies the parent on its confirmation bar, because the FVG engine can release a just-invalidated record on that bar.
+* **Five triggers on the 652 real Phase 1 FVGs** (3,791 1m bars):
+
+| trigger | inverted | after the Phase 1 invalidation |
+|---|---|---|
+| IF1 wick-through | 91 % | 0 % |
+| **IF2 close-through** | **87 %** | **identical to DEF-A5** |
+| IF3 + displacement | 67 % | 76 % |
+| IF4 after a full fill | 86 % | 46 % |
+| IF5 + CISD context | 84 % | 43 % |
+
+* **Facts.** Inversion candles are DISPLACEMENT-R 18 % of the time; a same-side CISD is within ±5 bars in 56 %; 41 % of CISDs have no inversion near them. After inversion: retest within 10 bars 82 %, and a close beyond the far edge within 10 bars 52 %. Descriptive only.
+* **H1 (supporting).** On its digitised candles, IF2 inverts the drop's bearish FVG 4 bars before the CISD, as in the image.
+* **IFVG-R** (`docs/IFVG.md`, DEF-IFVG1…9, PROPOSED):
+  * the parent's frozen DEF-A5 invalidation, at the bar close;
+  * the opposite side, the parent's exact geometry, identity = the parent's id + side;
+  * facts retest / CE / full, from the next bar;
+  * INVALIDATED on a strict close beyond the far edge; no second inversion;
+  * memory 50 per side;
+  * events INVERTED / FIRST_TOUCH / INVALIDATED / DROPPED_MEMORY.
+  * An observer: Phase 1 is never written, and the parent stays INVALIDATED there. CISD, displacement and liquidity are context, not requirements.
+
+**Validation 1.19.0**
+* `validation/studies/ifvg.py` + `tests/test_ifvg_study.py`.
+* The oracle `validation/models/ifvg.py`: opt-in module `ifvg` (needs `fvg`), `IfvgSettings(memory=50)`. Its events are ORACLE_ONLY (ST-14 excludes them until Pine). It equals the study's IF2 exactly (566 inversions, every lifecycle fact).
+* `tests/test_ifvg.py` (26), `fuzz/test_ifvg_properties.py`, INV-IFVG-01…07 with negative tests (81 invariants).
+* Report sections `ifvg` and `research.ifvg`; `--phase ifvg`.
+
+**TEST:**
+* FULL: **PASS**, exit 0, 601.6 s, **1101 passed, 1 skipped** (the long-standing parity skip):
+  * static 22/22;
+  * IFVG 26/26, IFVG study 8/8, property 42/42 (+5), long walks 22/22 (+3), invariant detectors 83/83 (+7);
+  * displacement 106/106, CISD 167/167, LRL 85/85, HTF 46/46, golden 110/110, parity 142/143;
+  * Phase 1 / 2 unchanged.
+* `src/IST.pine` unchanged (v0.8.0-dev, SHA-256 740ebcf6…5862). Unchanged: every frozen baseline and release, LRL, HTF FVG and the regression baseline.
+
 ## Displacement FROZEN — DISPLACEMENT_BASELINE_v0.8.0-dev · IST v0.8.0-dev unchanged · validation 1.18.0 (2026-11-02, branch `displacement/pine`) — no indicator change
 
 **User (2026-11-02):** DISP-L12 reload PASS: the same timestamps kept side / verdict, A, body / A, close position, confirmation close and FVG metadata after a page refresh and after removing and re-adding the indicator, and a borderline non-displacement stayed 0. DISP-L00, L10, L11, L12 PASS. Freeze the approved single-candle DISPLACEMENT-R; nothing else changes.
