@@ -1,9 +1,10 @@
 # IST · IFVG tests — v0.9.1-dev (EXPERIMENTAL)
 
-**Status (2026-11-02).**
-* The automated part passes (validation 1.20.0).
-* **IFVG-L00 … L12: NOT RUN.** v0.9.0-dev was never compiled; it is superseded by v0.9.1-dev (revised memory). TradingView results are recorded only from the user's results, never assumed.
-* Not frozen.
+**Status (2026-11-03).**
+* **IFVG-L10: PASS** (the user's real capture, 2026-11-02, recorded from the user's result): 82 MATCH · 0 DIFFERENCE · 16 NOT OBSERVABLE; IFVG 1,059 bar states, 167 + 168 + 168 + 151 events, 100 snapshot records, the shadows = the open Phase 1 FVGs. Kept as evidence (`validation/parity/evidence/ist-v0.9.1-dev_mnq1-1m_capture-1000_2026-11-02.csv`, `tests/test_parity_v091_evidence.py`).
+* **IFVG-L11: automated part PASS** (validation 1.22.0): 22 real golden cases, the mechanical case R1 and the memory golden MEM1 (`validation/golden/human/ifvg/`, `tests/test_ifvg_golden.py`). The manual sanity check on TradingView is the user's.
+* IFVG-L00 … L05 and L12: not recorded. The automated part passes. TradingView results are recorded only from the user's results, never assumed.
+* Not frozen. v0.9.0-dev was never compiled; it is superseded by v0.9.1-dev (revised memory).
 
 **Build:** `src/IST.pine` v0.9.1-dev (branch `ifvg/pine`). Definition: `docs/IFVG.md` (IFVG-R, approved 2026-11-02 with two clarifications and the revised memory rule DEF-IFVG8).
 
@@ -23,6 +24,8 @@
 | S-IFVG-10 | invariants INV-IFVG-01 … 09, each with a negative test (07: ≤ 50 per side unless all ACTIVE, oldest INVALIDATED first; 08: the registry = the open Phase 1 FVGs; 09: memory never removes an ACTIVE IFVG) | `invariants.py`, `tests/test_invariants.py` |
 | S-IFVG-11 | the research harness | `tests/test_ifvg_study.py` |
 | S-IFVG-12 | DEF-IFVG8 (revised): 50 ACTIVE + 1 → 51 kept; 55 ACTIVE kept; an old INVALIDATED record leaves, 51 ACTIVE remain; an over-full ACTIVE side compacts when one ends (retest → end → drop on that bar); an older INVALIDATED record goes before a newly invalidated one; never a drop of an ACTIVE record; lifecycles identical with or without overflow; both sides; replay; random walks lose no ACTIVE IFVG (equal to an unlimited memory); generated candles | `tests/test_ifvg_memory.py`, `fuzz/test_ifvg_properties.py` |
+| S-IFVG-13 | IFVG-L11 human / golden: 22 real MNQ cases (20 inside the real v0.9.1-dev capture, 2 from v0.8.0-dev): the candles are the evidence bars; IFVG-R by hand gives every recorded number; the oracle and `IfvgPine` give the verdict on the window and on the whole capture; the real Pine log agrees (FVG_INVALIDATED and IFVG_INVERTED of the same FVG id on the same bar, the audit geometry, every later IFVG event and CE / full fact); the context is the Pine log's and never changes the verdict; the mirror; the coverage A–R; R1 mechanical; MEM1 on the real log; H1 supporting | `validation/golden/human/ifvg/`, `tests/test_ifvg_golden.py` |
+| S-IFVG-14 | the real v0.9.1-dev capture (IFVG-L10): 0 DIFFERENCE, its counts pinned; every IFVG_DROPPED_MEMORY was INVALIDATED before it (121 in the log, 31 in the snapshot, 1 before the snapshot); the bearish side over 50 ACTIVE for 655 bars (peak 66), all kept | `parity/evidence/`, `tests/test_parity_v091_evidence.py` |
 
 ## TradingView procedure (NQ1! or MNQ1! 1m; Confirmed only ON)
 
@@ -40,8 +43,8 @@ There is **no IFVG drawing** in this build. Developer → **Debug mode** ON adds
 | IFVG-L03 | lifecycle | follow that IFVG on the next candles | `IFVG_FIRST_TOUCH` when a high reaches its bottom (never on the inversion candle); `IFVG_INVALIDATED` on the first close above its top (a close exactly at the top, or a wick above it, is not an end) |
 | IFVG-L04 | engine OFF / other modules / visibility | Enable IFVG engine OFF, then ON; then Show FVGs OFF | while OFF: no IFVG events, IFVG values na. Every drawing, Debug row and alert of the other modules identical either way. Show FVGs OFF changes no IFVG value |
 | IFVG-L05 | no drawing, no alert | look at the chart; an "Any alert() function call" alert | nothing IFVG-related drawn; no IFVG alert message |
-| IFVG-L10 | **real parity (freeze gate)** | Developer → Parity capture ON (N = 1000); save the Pine Logs into `validation/parity/`; run `python -m validation.parity --capture <file>` | **0 DIFFERENCE**, the IFVG section included (shadows, active per side, facts per bar; events; snapshot records) |
-| IFVG-L11 | **human golden cases (freeze gate)** | to be defined after L10 (real candles, as DISP-L11) | every deterministic golden reproduced, or each difference explained |
+| IFVG-L10 | **real parity (freeze gate)** · **PASS (2026-11-02)** | Developer → Parity capture ON (N = 1000); save the Pine Logs into `validation/parity/`; run `python -m validation.parity --capture <file>` | **0 DIFFERENCE**, the IFVG section included (shadows, active per side, facts per bar; events; snapshot records) |
+| IFVG-L11 | **human golden cases (freeze gate)** · automated part **PASS** (2026-11-03) | the cases of `validation/golden/human/ifvg/` (real candles), then the user's visual check of the sanity cases (README there) | every deterministic golden reproduced, or each difference explained |
 | IFVG-L12 | **reload (freeze gate)** | note 3 IFVGs (id, side, inversion time, close); refresh the page; remove and re-add the indicator | the same IFVGs, unchanged (any FVG whose confirmation is ≥ 16 bars after the history start) |
 
 ### IFVG-L00 manual: compile + runtime (what you do)

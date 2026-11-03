@@ -1,5 +1,51 @@
 # Changelog
 
+## IFVG-L10 PASS · IFVG-L11 human / golden validation — IST v0.9.1-dev unchanged · validation 1.22.0 (2026-11-03, branch `ifvg/pine`) — no indicator change
+
+**User (2026-11-03):** IFVG-L10 real Pine ↔ oracle parity PASSED on IST v0.9.1-dev:
+* 82 MATCH · 0 DIFFERENCE · 16 NOT OBSERVABLE;
+* IFVG 1,059 bars, 654 events, 100 snapshot records;
+* every earlier module still at 0 real differences.
+
+Mark IFVG-L10 = PASS and run IFVG-L11: human / golden validation of the fixed IFVG-R, with no rule tuning. Do not change IFVG-R or any frozen module; no HTF IFVG, scoring or styling; do not freeze yet.
+
+**RESULT**
+* **IFVG-L10 recorded.** The user's capture (`pine-logs-IST_faf9f.csv`, MNQ1! live, 2026-11-02 04:16 → 23:11) is kept byte for byte as `parity/evidence/ist-v0.9.1-dev_mnq1-1m_capture-1000_2026-11-02.csv`, with its SHA-256 and `CAPTURE_V091`.
+  * `tests/test_parity_v091_evidence.py` pins its counts.
+  * It checks every one of the 153 IFVG drops in the log: 121 INVALIDATED earlier in the log, 31 in the snapshot, 1 before the snapshot (NOT OBSERVABLE), 0 ACTIVE.
+  * The bearish side held 51–66 ACTIVE IFVGs for 655 bars, all kept: the revised DEF-IFVG8 at work in real Pine.
+  * The observed-capture test now runs on it (0 DIFFERENCE) instead of skipping.
+* **IFVG-L11 golden package** (`validation/golden/human/ifvg/`, README there).
+  * **22 real MNQ cases:** 20 inside the v0.9.1-dev capture, 2 from v0.8.0-dev (another day and contract).
+    * 7 clear bearish IFVGs, 7 clear bullish;
+    * 3 wick-only rejections;
+    * 3 closes exactly on the edge;
+    * 2 one-tick borderline inversions.
+    * The special cases A–Q are each covered by real candles and derived, not labelled.
+  * **R1:** case R is mechanical (synthetic). The five captures hold no real instance with any Phase 1 memory 1–15, and the README explains why.
+  * **MEM1:** the memory golden on the real log.
+  * **H1:** re-audited as SUPPORTING, from its pixel-digitised candles; V1 SUPPORTING; V2 INCONCLUSIVE. No conflict.
+* `tests/test_ifvg_golden.py`, per case:
+  * the candles are the evidence bars;
+  * IFVG-R by hand gives every recorded number;
+  * the oracle (invariants on) and `IfvgPine` give the verdict on the window and the whole capture;
+  * the real Pine log agrees: FVG_INVALIDATED and IFVG_INVERTED of the same FVG id on the same bar, the audit geometry, every later IFVG event and CE / full fact;
+  * the context is the Pine log's and never changes the verdict;
+  * the mirror;
+  * then the coverage, R1, MEM1 and H1.
+* **Finding (diagnostics only, no bug).** An IFVG that ends while its side is over 50 is dropped on that bar, so the BAR line's IX no longer lists its last-bar fact. The parity oracle does the same (0 DIFFERENCE). The golden test checks such a fact through the drop, which comes only on or after the end.
+
+**PHASE 1 / 2, LRL, HTF FVG, CISD, DISPLACEMENT, IFVG IMPACT:** none. `src/IST.pine` is unchanged (v0.9.1-dev), and so is the oracle.
+
+**TEST:**
+* FULL: **PASS**, exit 0, 582.0 s, **1411 passed, 1 skipped** (the manual-parity JSON, not present; the observed-capture test now runs on the v0.9.1-dev capture: 0 DIFFERENCE):
+  * static 23/23 (ST-21, ST-23);
+  * golden 290/290 (+180 IFVG-L11), IFVG 126/126, IFVG study 8/8;
+  * parity 167/168, property 44/44, long walks 22/22, invariant detectors 85/85;
+  * CISD 167/167, displacement 106/106, LRL 85/85, HTF 46/46, regression 5/5;
+  * Phase 1 / 2 unchanged.
+* TradingView: IFVG-L10 PASS (user). IFVG-L11: automated part PASS; the manual sanity cases are the user's. IFVG-L12 (reload) pending.
+
 ## v0.9.1-dev — IFVG memory never drops an ACTIVE IFVG (DEF-IFVG8 revised) · validation 1.21.0 (2026-11-02, branch `ifvg/pine`) — EXPERIMENTAL, not frozen
 
 **User (2026-11-02):** the v0.9.0-dev implementation report is approved except its memory fallback (all 50 records of a side ACTIVE → the oldest ACTIVE one dropped), which is NOT approved: an ACTIVE IFVG is logical market state and must never disappear to enforce a storage cap. `IFVG_MEM = 50` stays as the retention target per side. Correct it before IFVG-L00; v0.9.0-dev (never compiled) is not the build to test.

@@ -1,0 +1,245 @@
+{
+ "id": "GOLD_IFVG_A6",
+ "kind": "case",
+ "category": "A · clear bearish IFVG (from a bullish FVG)",
+ "special": [
+  "A",
+  "E",
+  "F",
+  "K",
+  "P",
+  "Q"
+ ],
+ "judgement": "immediate inversion; the next candle reaches every IFVG edge and closes beyond the top",
+ "symbol": "CME_MINI:MNQ1!",
+ "timeframe_sec": 60,
+ "timezone": "America/New_York",
+ "tick_size": 0.25,
+ "source": {
+  "evidence": [
+   "ist-v0.9.1-dev_mnq1-1m_capture-1000_2026-11-02.csv"
+  ],
+  "bar_replay": false,
+  "pine_ifvg": true,
+  "pine_log": "IST v0.9.1-dev: FVG and IFVG events, BAR lines with IFVG facts",
+  "note": "exact OHLC copied from the evidence capture: 16 bars before candle 1 (the TR average at candle 1 is exact), to one bar after the IFVG's end or a few bars after the last fact"
+ },
+ "start": "2026-11-02T08:49",
+ "candles": [
+  [
+   "2026-11-02T08:49",
+   28790.75,
+   28795.75,
+   28781.0,
+   28789.75
+  ],
+  [
+   "2026-11-02T08:50",
+   28789.5,
+   28796.0,
+   28774.75,
+   28784.5
+  ],
+  [
+   "2026-11-02T08:51",
+   28784.5,
+   28791.75,
+   28782.75,
+   28786.25
+  ],
+  [
+   "2026-11-02T08:52",
+   28787.0,
+   28787.0,
+   28768.0,
+   28772.25
+  ],
+  [
+   "2026-11-02T08:53",
+   28772.25,
+   28776.75,
+   28764.25,
+   28768.0
+  ],
+  [
+   "2026-11-02T08:54",
+   28767.5,
+   28776.0,
+   28764.5,
+   28768.25
+  ],
+  [
+   "2026-11-02T08:55",
+   28769.0,
+   28774.5,
+   28761.5,
+   28766.5
+  ],
+  [
+   "2026-11-02T08:56",
+   28767.0,
+   28775.0,
+   28763.75,
+   28769.0
+  ],
+  [
+   "2026-11-02T08:57",
+   28769.75,
+   28772.5,
+   28763.75,
+   28771.0
+  ],
+  [
+   "2026-11-02T08:58",
+   28770.5,
+   28776.0,
+   28761.5,
+   28763.0
+  ],
+  [
+   "2026-11-02T08:59",
+   28763.25,
+   28764.5,
+   28749.5,
+   28754.0
+  ],
+  [
+   "2026-11-02T09:00",
+   28754.5,
+   28763.0,
+   28751.5,
+   28753.25
+  ],
+  [
+   "2026-11-02T09:01",
+   28753.25,
+   28758.0,
+   28750.75,
+   28756.75
+  ],
+  [
+   "2026-11-02T09:02",
+   28756.75,
+   28766.75,
+   28756.5,
+   28761.0
+  ],
+  [
+   "2026-11-02T09:03",
+   28760.75,
+   28762.75,
+   28743.0,
+   28745.25
+  ],
+  [
+   "2026-11-02T09:04",
+   28745.25,
+   28749.0,
+   28734.0,
+   28744.75
+  ],
+  [
+   "2026-11-02T09:05",
+   28745.0,
+   28764.75,
+   28745.0,
+   28763.25
+  ],
+  [
+   "2026-11-02T09:06",
+   28763.5,
+   28781.5,
+   28762.25,
+   28773.5
+  ],
+  [
+   "2026-11-02T09:07",
+   28774.0,
+   28777.5,
+   28766.5,
+   28769.25
+  ],
+  [
+   "2026-11-02T09:08",
+   28768.5,
+   28771.0,
+   28763.5,
+   28763.5
+  ],
+  [
+   "2026-11-02T09:09",
+   28763.5,
+   28771.0,
+   28760.0,
+   28770.0
+  ],
+  [
+   "2026-11-02T09:10",
+   28770.5,
+   28772.5,
+   28759.25,
+   28764.5
+  ]
+ ],
+ "fvg": {
+  "id": "2026-11-02T09:07",
+  "side": "BULL",
+  "origin": "2026-11-02T09:05",
+  "confirmation": "2026-11-02T09:07",
+  "top": 28766.5,
+  "bottom": 28764.75,
+  "ce": 28765.625,
+  "gap": 1.75,
+  "tr_avg": 13.517857142857142,
+  "qualified": true,
+  "touch": "2026-11-02T09:08",
+  "ce_touch": "2026-11-02T09:08",
+  "full": "2026-11-02T09:08",
+  "state_before_inversion": "UNTOUCHED"
+ },
+ "rejections": [],
+ "expected": {
+  "verdict": "BEARISH IFVG",
+  "inversion": {
+   "time": "2026-11-02T09:08",
+   "ohlc": [
+    28768.5,
+    28771.0,
+    28763.5,
+    28763.5
+   ],
+   "close": 28763.5,
+   "margin_ticks": 5,
+   "ifvg_side": "BEAR"
+  },
+  "lifecycle": {
+   "first_touch": "2026-11-02T09:09",
+   "ce": "2026-11-02T09:09",
+   "full_traversal": "2026-11-02T09:09",
+   "invalidated": {
+    "time": "2026-11-02T09:09",
+    "close": 28770.0
+   },
+   "state_at_window_end": "INVALIDATED"
+  }
+ },
+ "context": {
+  "anchor": "2026-11-02T09:08",
+  "cisd_within_5": [
+   [
+    -3,
+    "BULL"
+   ]
+  ],
+  "same_side_cisd_within_5": false,
+  "displacement_on_anchor": null,
+  "liquidity_on_anchor": [],
+  "lrl_within_5": [],
+  "source": "the Pine log of the evidence capture"
+ },
+ "after_window": {
+  "inversion": "2026-11-02T09:08",
+  "invalidated": "2026-11-02T09:09",
+  "first_touch": "2026-11-02T09:09"
+ }
+}

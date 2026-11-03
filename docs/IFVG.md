@@ -1,6 +1,6 @@
 # IST · Inversion fair value gap (DEF-IFVG1 … IFVG9)
 
-**Status: APPROVED (2026-11-02), with two clarifications and the revised memory rule (§6). In Pine since v0.9.0-dev; the current build is v0.9.1-dev (EXPERIMENTAL, not frozen; TradingView tests IFVG-L00… pending, `docs/TESTS_IFVG.md`).**
+**Status: APPROVED (2026-11-02), with two clarifications and the revised memory rule (§6). In Pine since v0.9.0-dev; the current build is v0.9.1-dev (EXPERIMENTAL, not frozen). IFVG-L10 real parity PASS (2026-11-02); IFVG-L11 golden automated part PASS; L12 pending (`docs/TESTS_IFVG.md`).**
 * This is the recommendation IFVG-R of `docs/STUDY_IFVG.md` §I.
 * Reference model: `validation/models/ifvg.py`, the opt-in module `ifvg` of the oracle. It needs the Phase 1 module `fvg`. Default runs and the regression baseline do not include it.
 * Pine: `src/IST.pine` v0.9.1-dev (§7), transliterated in `validation/models/ifvg.py` `IfvgPine` and proven equal to the oracle.
@@ -48,6 +48,7 @@ CE and full traversal are record facts, not events (decision N3).
 * `fuzz/test_ifvg_properties.py` (invariants, Pine = oracle, mirror, translation, no lookahead, other modules unchanged, long walks).
 * `tests/test_ifvg_study.py` (the research harness).
 * Invariants INV-IFVG-01…09, each with a negative test.
+* `tests/test_ifvg_golden.py` (IFVG-L11: 22 real golden cases, R1, MEM1, the H1 reference) and `tests/test_parity_v091_evidence.py` (the real v0.9.1-dev capture).
 * The full list: `docs/TESTS_IFVG.md`.
 
 ## 5 · Not started (by instruction)
