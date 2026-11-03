@@ -1,6 +1,6 @@
 # IST · Inversion fair value gap (DEF-IFVG1 … IFVG9)
 
-**Status: APPROVED (2026-11-02), with two clarifications and the revised memory rule (§6). In Pine since v0.9.0-dev; the current build is v0.9.1-dev (EXPERIMENTAL, not frozen). IFVG-L10 real parity PASS (2026-11-02); IFVG-L11 golden automated part PASS; L12 pending (`docs/TESTS_IFVG.md`).**
+**Status: APPROVED (2026-11-02), with two clarifications and the revised memory rule (§6). In Pine since v0.9.0-dev; the current build is v0.9.1-dev (EXPERIMENTAL, not frozen). IFVG-L00, L10 (real parity) and L11 (golden) PASS; IFVG-L12 automated PASS, the manual reload check pending. **Freeze prepared** (`docs/IFVG_FREEZE_REPORT.md`, `releases/v0.9.1-dev/`); the tag `IFVG_BASELINE_v0.9.1-dev` follows the manual IFVG-L12 PASS (`docs/TESTS_IFVG.md`).**
 * This is the recommendation IFVG-R of `docs/STUDY_IFVG.md` §I.
 * Reference model: `validation/models/ifvg.py`, the opt-in module `ifvg` of the oracle. It needs the Phase 1 module `fvg`. Default runs and the regression baseline do not include it.
 * Pine: `src/IST.pine` v0.9.1-dev (§7), transliterated in `validation/models/ifvg.py` `IfvgPine` and proven equal to the oracle.
@@ -38,6 +38,7 @@ CE and full traversal are record facts, not events (decision N3).
 * Every decision is made at a bar's close from that bar and earlier ones; the parent is frozen Phase 1 state.
 * The inversion bar is the parent's DEF-A5 bar, which Phase 1 already logs and parity already verifies.
 * Prefix invariance and reload: an IFVG depends on its parent's existence, which is a Phase 1 property (reload behaviour as Phase 1), and on later bars only.
+* IFVG-L12 (`tests/test_ifvg_freeze.py`): a bar only adds its inversions, stamps facts / ends of ACTIVE IFVGs or drops INVALIDATED records. Two fresh runs are identical on every bar. A later first loaded bar keeps every IFVG of an FVG confirmed ≥ 16 bars after it, unless Phase 1's frozen DEF-A6 releases an OPEN FVG (`docs/IFVG_FREEZE_REPORT.md` §6). Only the timing of IFVG_DROPPED_MEMORY follows the number of older records held.
 
 ## 4 · Validation (validation 1.20.0)
 
@@ -49,6 +50,7 @@ CE and full traversal are record facts, not events (decision N3).
 * `tests/test_ifvg_study.py` (the research harness).
 * Invariants INV-IFVG-01…09, each with a negative test.
 * `tests/test_ifvg_golden.py` (IFVG-L11: 22 real golden cases, R1, MEM1, the H1 reference) and `tests/test_parity_v091_evidence.py` (the real v0.9.1-dev capture).
+* `tests/test_ifvg_freeze.py` (IFVG-L12 automated: determinism, no repaint, history start, independence, memory reload, same-bar order, Phase 1).
 * The full list: `docs/TESTS_IFVG.md`.
 
 ## 5 · Not started (by instruction)

@@ -1,5 +1,37 @@
 # Changelog
 
+## IFVG-L11 PASS · IFVG-L12 automated determinism / reload PASS · IFVG freeze prepared — IST v0.9.1-dev unchanged · validation 1.23.0 (2026-11-03, branch `ifvg/pine`) — no indicator change
+
+**User (2026-11-03):** the manual IFVG-L11 sanity review passed: mark IFVG-L11 = PASS (IFVG-L00 and IFVG-L10 PASS, IFVG-L12 pending).
+* Run the final IFVG-L12 determinism / reload validation and prepare the freeze package.
+* Do not create the baseline tag before the user's manual IFVG-L12 PASS.
+* Do not change IFVG-R or any frozen module; no HTF IFVG, DOL / context engine, quality scoring, renderer / styling or alerts.
+
+**RESULT**
+* **IFVG-L11 PASS** recorded (`docs/TESTS_IFVG.md`).
+* **IFVG-L12 automated: PASS.** `tests/test_ifvg_freeze.py`, 46 tests, each requirement by name (the table is in its docstring). The data: the real v0.9.1-dev candles, the three research segments, a 5,000-bar walk with a side over 50 ACTIVE, and the six real captures.
+  1. **Determinism.** Two fresh runs are identical on every bar: shadows, every record field, memory, the bar's events. The Pine-Log text of the IFVG event stream matches byte for byte, and the oracle matches per bar.
+  2. **No repaint.** A bar only adds its inversions, stamps facts / ends of ACTIVE IFVGs, or drops INVALIDATED records. A prefix equals the full run's past, and no IFVG of the prefix changes.
+  3. **A later first loaded bar** (shifts 1, 17, 100, 400 on six real captures) keeps every IFVG of an FVG confirmed ≥ 16 bars after it: every field, its events, the ACTIVE set. Only the timing of IFVG_DROPPED_MEMORY follows the older records held.
+  4. **Independence.** Every module and display setting on / off gives the same IFVGs. The Pine engine reads only `ifvgOn`, `IFVG_MEM`, its event codes, its book and the Phase 1 FVG lists, inside `if engineTick`.
+  5. **Memory.** Two reloads from the real Pine state (51–66 ACTIVE bearish IFVGs for 655 bars) give the same ACTIVE set on every bar, equal to Pine's counts and to Pine's own final set; no drop of an ACTIVE record.
+  6. **Same-bar order.** In the real Pine log, every bar follows Phase 1 → facts / ends → memory → inversion → memory, and its IFVG lines are the oracle's, in order (654 events, 332 bars). A real example is pinned (05:57). Memory 1 / 2 / 50 gives the same order.
+  7. **Phase 1** is identical with the IFVG on and off, on every bar.
+* **Real capture regression:** the v0.9.1-dev evidence still gives 0 DIFFERENCE, with every count pinned; the CSV is unchanged.
+* **Tooling.** `parity/capture.py`: `restore_ifvg` was extracted from `_compare_ifvg` (the same comparison) so the L12 memory test can restore the real snapshot.
+* **Freeze package** (tag `IFVG_BASELINE_v0.9.1-dev` **not created**):
+  * `docs/IFVG_FREEZE_REPORT.md`;
+  * `docs/TESTS_IFVG.md` with the manual IFVG-L12 procedure (A3 bearish, B2 bullish, B4 lifecycle, C2 wick-only rejection; refresh, remove / re-add);
+  * the status of `docs/IFVG.md` and `docs/STUDY_IFVG.md`;
+  * `releases/v0.9.1-dev/`, read-only: source, IFVG docs, oracle, golden dataset, real evidence byte for byte, SHA256SUMS, MANIFEST, README.txt.
+* **Known limitation documented.** Phase 1's frozen DEF-A6 release of an OPEN FVG follows the history start. Four such releases are in the real v0.9.1-dev log, all of FVGs 4–5 days old and about 1,500 points away, and none on the six replayed captures.
+
+**PHASE 1 / 2, LRL, HTF FVG, CISD, DISPLACEMENT, IFVG IMPACT:** none. `src/IST.pine` is unchanged (v0.9.1-dev, SHA-256 `553248e7…`), and so is the oracle.
+
+**TEST:**
+* FULL: PASS, exit 0, 739.1 s, **1457 passed, 1 skipped**: static 23/23; IFVG 172/172 (+46 L12); golden 290/290; parity 167/168; invariant detectors 85/85; property 44/44; CISD 167, displacement 106, LRL 85 and HTF 46, all unchanged.
+* TradingView: IFVG-L00, L10 and L11 PASS (user). IFVG-L12: automated part PASS; the manual reload check is the user's.
+
 ## IFVG-L10 PASS · IFVG-L11 human / golden validation — IST v0.9.1-dev unchanged · validation 1.22.0 (2026-11-03, branch `ifvg/pine`) — no indicator change
 
 **User (2026-11-03):** IFVG-L10 real Pine ↔ oracle parity PASSED on IST v0.9.1-dev:

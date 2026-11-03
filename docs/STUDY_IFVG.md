@@ -1,6 +1,6 @@
 # IFVG research study · inversion fair value gap
 
-**Status: RESEARCH + ORACLE, awaiting the user's approval (2026-11-02).** The recommendation is **IFVG-R** (§I). Its specification is `docs/IFVG.md` and its reference model is `validation/models/ifvg.py` (validation 1.19.0). **There is no Pine code.**
+**Status: IFVG-R APPROVED (2026-11-02), in Pine since v0.9.0-dev (v0.9.1-dev: the revised memory rule); freeze prepared 2026-11-03 (`docs/IFVG_FREEZE_REPORT.md`).** The study below is the research as written for the approval (validation 1.19.0), when there was no Pine code. The recommendation is **IFVG-R** (§I). Its specification is `docs/IFVG.md` and its reference model is `validation/models/ifvg.py`.
 * Nothing frozen changes:
   * `PHASE1_BASELINE_v0.3.2`, `PHASE2_BASELINE_v0.4.4-dev`, `CISD_BASELINE_v0.7.1-dev` and `DISPLACEMENT_BASELINE_v0.8.0-dev` are untouched;
   * `src/IST.pine` is unchanged;

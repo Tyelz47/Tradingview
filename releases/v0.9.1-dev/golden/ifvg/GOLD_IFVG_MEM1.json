@@ -1,0 +1,57 @@
+{
+ "id": "GOLD_IFVG_MEM1",
+ "kind": "memory",
+ "category": "MEM · DEF-IFVG8 on the real log",
+ "special": [],
+ "judgement": "The real IST v0.9.1-dev log: the bearish side holds 51 ACTIVE IFVGs from 05:06 and up to 66 (23:04), all kept (the 50 is a retention target). A bearish IFVG that ends while the side is over 50 is dropped on that very bar, after its IFVG_INVALIDATED. Every one of the 153 drops in the log was INVALIDATED before it (tests/test_parity_v091_evidence.py). Mechanics on the same real candles with memory 2 (below the Pine constant, model only): the invariant monitor checks the oldest INVALIDATED goes first and no ACTIVE one ever goes.",
+ "timezone": "America/New_York",
+ "source": {
+  "evidence": [
+   "ist-v0.9.1-dev_mnq1-1m_capture-1000_2026-11-02.csv"
+  ]
+ },
+ "settings": {
+  "mechanical_memory": 2
+ },
+ "expected": {
+  "first_over_50": {
+   "around": [
+    "2026-11-02T05:05",
+    "2026-11-02T05:06"
+   ],
+   "ia": [
+    [
+     20,
+     50
+    ],
+    [
+     19,
+     51
+    ]
+   ]
+  },
+  "peak": {
+   "time": "2026-11-02T23:04",
+   "ia": [
+    1,
+    66
+   ]
+  },
+  "ended_then_dropped_on_one_bar": [
+   {
+    "id": "2026-11-02T05:58",
+    "time": "2026-11-02T06:39"
+   },
+   {
+    "id": "2026-11-02T05:48",
+    "time": "2026-11-02T07:08"
+   }
+  ],
+  "drops": {
+   "invalidated_earlier_in_the_log": 121,
+   "invalidated_in_the_snapshot": 31,
+   "before_the_snapshot_not_observable": 1,
+   "active": 0
+  }
+ }
+}

@@ -1079,6 +1079,36 @@ def _compare_disp(cap: dict, s: Settings, add, fmt) -> dict:
     return out
 
 
+def restore_ifvg(cap: dict, s: Settings):
+    """Pine's state after the IFVG snapshot (captured bar k0 = IFVGSTATE at): the Phase 1 FVG engine
+    stepped on the captured bars up to k0 and given Pine's FVGREC records, the IFVG oracle given Pine's
+    IFVGREC records, shadows and counters. Returns (candles, log, fvg, ifvg, records in IFVGREC order);
+    step both engines from k0 + 1 on. Bars are captured-window indices."""
+    h, bars, raw = cap["head"], cap["bars"], cap["ifvg"]
+    i0, st = bars[0]["i"], raw["IFVGSTATE"][0]
+    k0 = st["at"] - i0
+    candles = [b["candle"] for b in bars]
+    log = EventLog()
+    fvg = FvgEngine(s.fvg, s.tick, log)
+    for t in range(k0 + 1):
+        log.at(t, candles[t].time)
+        fvg.step(t, candles[t])
+    rel = lambda b: None if b is None else b - i0
+    restored = [Fvg(z["id"], z["dir"] > 0, z["ob"] - i0, z["ot"], z["cb"] - i0, z["id"], z["top"], z["bottom"], z["mid"],
+                    None, 0.0, None, None, z["ext"], rel(z["touch"]), None, rel(z["ce"]), None, rel(z["full"]), None,
+                    rel(z["inv"]), None) for z in raw["FVGREC"]]
+    fvg.bull, fvg.bear = [z for z in restored if z.is_bull], [z for z in restored if not z.is_bull]
+    e = IfvgEngine(IfvgSettings(memory=int(h.get("ifvgmem", IfvgSettings().memory))), s.tick, log, fvg)
+    by_id = {(z.dir, z.id): z for z in restored}
+    e.parents = {i: by_id[(d, i)] for i, d in st["sh"] if (d, i) in by_id}
+    recs = [Ifvg(r["id"], r["side"], r["ob"] - i0, r["pb"] - i0, r["top"], r["bottom"], r["mid"], r["bar"] - i0, r["time"],
+                 r["close"], PRE[r["pre"]], rel(r["touch"]), rel(r["ce"]), rel(r["full"]), rel(r["end"]))
+            for r in raw["IFVGREC"]]
+    e.bull, e.bear = [r for r in recs if r.side > 0], [r for r in recs if r.side < 0]
+    e.inverted, e.dropped = st["inverted"], st["dropped"]
+    return candles, log, fvg, e, recs
+
+
 def _compare_ifvg(cap: dict, s: Settings, add, fmt) -> dict:
     """IFVG in the captured window (docs/IFVG.md, IST v0.9.0-dev).
 
@@ -1105,18 +1135,8 @@ def _compare_ifvg(cap: dict, s: Settings, add, fmt) -> dict:
     if not s.fvg.lookback <= k0 < len(bars):
         add("ifvg", DIFF, f"snapshot after captured bar {k0}: the replay needs it after bar {s.fvg.lookback - 1}")
         return out
-    candles = [b["candle"] for b in bars]
-    log = EventLog()
-    fvg = FvgEngine(s.fvg, s.tick, log)
-    for t in range(k0 + 1):
-        log.at(t, candles[t].time)
-        fvg.step(t, candles[t])
-    rel = lambda b: None if b is None else b - i0
-    restored = [Fvg(z["id"], z["dir"] > 0, z["ob"] - i0, z["ot"], z["cb"] - i0, z["id"], z["top"], z["bottom"], z["mid"],
-                    None, 0.0, None, None, z["ext"], rel(z["touch"]), None, rel(z["ce"]), None, rel(z["full"]), None,
-                    rel(z["inv"]), None) for z in raw["FVGREC"]]
-    fvg.bull, fvg.bear = [z for z in restored if z.is_bull], [z for z in restored if not z.is_bull]
-    e = IfvgEngine(IfvgSettings(memory=int(h.get("ifvgmem", approved.memory))), s.tick, log, fvg)
+    candles, log, fvg, e, recs = restore_ifvg(cap, s)
+    restored = fvg.records()
     bad = [z.id for z in restored if not (z.top > z.bottom and abs(z.mid - (z.top + z.bottom) / 2) <= TOL)]
     if bad:
         add("ifvg", DIFF, f"snapshot Phase 1 FVGs {bad}: top, bottom and CE do not hold")
@@ -1125,12 +1145,6 @@ def _compare_ifvg(cap: dict, s: Settings, add, fmt) -> dict:
             any((d, i) not in by_id for i, d in st["sh"]):
         add("ifvg", DIFF, f"shadows {st['sh']} ≠ the open Phase 1 FVGs of the snapshot (eligibility)")
         return out
-    e.parents = {i: by_id[(d, i)] for i, d in st["sh"]}
-    recs = [Ifvg(r["id"], r["side"], r["ob"] - i0, r["pb"] - i0, r["top"], r["bottom"], r["mid"], r["bar"] - i0, r["time"],
-                 r["close"], PRE[r["pre"]], rel(r["touch"]), rel(r["ce"]), rel(r["full"]), rel(r["end"]))
-            for r in raw["IFVGREC"]]
-    e.bull, e.bear = [r for r in recs if r.side > 0], [r for r in recs if r.side < 0]
-    e.inverted, e.dropped = st["inverted"], st["dropped"]
     for r, x in zip(recs, raw["IFVGREC"]):                # each snapshot record: its own numbers, its candle
         after = [b for b in (r.retest, r.ce, r.full, r.end) if b is not None]
         ok = (r.side in (-1, 1) and r.top > r.bottom and abs(r.mid - (r.top + r.bottom) / 2) <= TOL and 0 <= x["pre"] < 4
