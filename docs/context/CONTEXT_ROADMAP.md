@@ -1,16 +1,20 @@
 # IST · Context roadmap (CONTEXT-01 → …)
 
-**Status: PROPOSAL (2026-11-03).** Only CONTEXT-01 (this research) is done. Nothing after it has started, and CONTEXT-02 is not implemented.
+**Status (2026-11-03).**
+* CONTEXT-01 is approved as a research milestone (commit `6576bae`). It freezes no policy, hierarchy, model or claim.
+* CONTEXT-02 is done as research, oracle only: `TARGET_UNIVERSE_ORACLE.md`, awaiting review.
+* CONTEXT-03 is proposed in §4, not started.
 
 ## 1 · Layers and where each one stands
 
 | layer | status | phase |
 |---|---|---|
 | detection facts | Phase 1, Phase 2, CISD, displacement and IFVG **frozen**; LRL and HTF FVG **experimental** | — |
-| liquidity / target universe | specified as a proposal (TARGET_UNIVERSE.md); measured by the study harness | **CONTEXT-02** (oracle) |
-| directional context | candidate models A / B / C (DIRECTIONAL_CONTEXT_RESEARCH.md); no HTF data | CONTEXT-03 (research + oracle) |
-| PRIMARY DOL | the DOL-P1 candidate (DOL_RESEARCH §7); baselines B0…B4 defined | CONTEXT-04 (evaluation + oracle) |
-| Pine for the approved layers | — | CONTEXT-05 (Pine + parity + freeze) |
+| liquidity / target universe | **oracle implemented** (TARGET_UNIVERSE_ORACLE.md, DEF-TU1…TU10); research, not frozen | CONTEXT-02 ✓ |
+| evaluation harness and dataset | outcome labels, baselines on the universe, NQ / ES data | **CONTEXT-03** (proposed, §4) |
+| directional context | candidate models A / B / C (DIRECTIONAL_CONTEXT_RESEARCH.md); no HTF data | CONTEXT-04 (research + oracle) |
+| PRIMARY DOL | the DOL-P1 candidate (DOL_RESEARCH §7), a hypothesis only | CONTEXT-05 (evaluation + oracle) |
+| Pine for the approved layers | — | after the oracle layers (Pine + parity + freeze) |
 | narrative, quality / confluence, renderer, alerts | not started (by instruction) | later |
 
 Every phase follows the project's discipline:
@@ -28,7 +32,14 @@ Every phase follows the project's discipline:
 | a multi-timeframe delivery state | Models B / C need CISD-R states on HTF candles | not in IST; CONTEXT-03 |
 | the user's decisions D-CX1…D-CX12 | DOL_RESEARCH §13 | open |
 
-## 3 · CONTEXT-02, the exact proposal (not started)
+## 3 · CONTEXT-02, the proposal as written in CONTEXT-01
+
+Now implemented as `TARGET_UNIVERSE_ORACLE.md`. It differs from this text in five places:
+* TARGET_TAKEN carries the class; there are no separate TARGET_SWEEP / TARGET_BREAK events.
+* The universe's own event log covers every target; the frozen event bus is untouched.
+* TOUCH is separate from TAKEN.
+* Pools are exact-tick.
+* D-2 / D-3 come only from superseded Module G values.
 
 **Title.** CONTEXT-02 · Target universe: an oracle-only, read-only specification and model. It makes **no DOL choice and no directional context**.
 
@@ -86,7 +97,49 @@ Every phase follows the project's discipline:
 * any Pine, renderer, alert, styling, score or entry model;
 * a multi-timeframe engine; SMT; OB / breaker / OTE; any frozen-module change.
 
-## 4 · After CONTEXT-02 (sketch, to be re-proposed when its time comes)
+## 4 · CONTEXT-03, the exact proposal (not started)
+
+**Title.** CONTEXT-03 · Evaluation harness and research dataset. It contains **no DOL policy, no directional context and no Pine**.
+
+**Why this comes before directional context.** Every later question needs three things that do not exist yet:
+* fixed outcome labels computed from TOUCH / TAKEN facts;
+* the baselines expressed on the target universe;
+* enough data.
+
+Today there are 83 h, 13 decision points and ≤ 12 distinct outcomes per fact. Models A / B / C need HTF history that no capture holds.
+
+**Prerequisites (the user):**
+* G-V1…G-V5 recorded, or decision D-TU1;
+* the dataset source and size (D-CX9);
+* the evaluation horizon (D-CX8);
+* the reading of NEXT_TARGET (D-CX7, wording only).
+
+**Deliverables:**
+
+| file | content |
+|---|---|
+| `validation/models/outcomes.py` | an evaluation-only labeller. Given a hypothesis (target id, falsifier id, horizon) issued at t, it reads the target universe's TOUCH / TAKEN facts after t and returns PRIMARY_REACHED · OPPOSITE_REACHED_FIRST · BOTH_SAME_BAR_UNRESOLVED · UNRESOLVED · CENSORED, plus TOUCHED_NOT_TAKEN as a separate fact. It never feeds back into the target universe |
+| `validation/studies/context.py` | the CONTEXT-01 baselines B0…B4 recomputed on the target universe, as definitions, not tuned. B3's ordering lives only inside B3, never in the universe. CONTEXT-01's numbers are kept as the record |
+| `validation/data/…` (or `validation/parity/evidence/…`) | the research dataset: complete NQ and ES trading days, plus the HTF bars, each file checked against an overlapping TradingView capture (0 differences) |
+| `docs/context/EVALUATION.md` | the pre-registration: decision points, horizon, labels and metrics (reached first against the driftless reference, abstention, censoring, distinct outcomes) |
+
+**Tests (the minimum):**
+* labels on hand-made paths, including a touch that is not a take and a same-bar take on both sides;
+* no lookahead: a label at t is unchanged when bars before t change, and only bars after t matter;
+* mirror symmetry;
+* the baselines read only the AVAILABLE universe at t.
+
+**Gates:**
+* the user approves the pre-registration;
+* FULL PASS;
+* frozen hashes intact;
+* `src/IST.pine` byte-identical.
+
+**Out of scope:** Primary DOL, directional context (Models A / B / C), narrative, scores, renderer, alerts, Pine, any frozen-module change.
+
+**What follows.** Directional-context research (Models A / B / C on the HTF data) becomes CONTEXT-04, and the Primary DOL policy CONTEXT-05. Both are re-proposed when their time comes.
+
+## 5 · After CONTEXT-02 (CONTEXT-01's sketch; superseded by §4)
 
 * **CONTEXT-03 · Directional context.**
   * Collect HTF data (15m … 1D) per D-CX9.

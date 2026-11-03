@@ -31,6 +31,7 @@ def pytest_configure(config):
                  "disp: displacement oracle and research (docs/DISPLACEMENT.md, docs/STUDY_DISPLACEMENT.md)",
                  "ifvg: IFVG oracle and research (docs/IFVG.md, docs/STUDY_IFVG.md)",
                  "context: DOL / directional context research (docs/context/)",
+                 "targets: target universe oracle, CONTEXT-02 (docs/context/TARGET_UNIVERSE_ORACLE.md)",
                  "common: shared infrastructure"):
         config.addinivalue_line("markers", line)
 

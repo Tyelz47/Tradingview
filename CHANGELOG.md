@@ -1,5 +1,42 @@
 # Changelog
 
+## CONTEXT-02 — Target universe oracle · IST v0.9.1-dev unchanged · validation 1.25.0 (2026-11-03, branch `context/research`) — no indicator change
+
+**User (2026-11-03):**
+* CONTEXT-01 is approved as a research milestone only. No DOL policy, W > D > S hierarchy, "Daily governs", Model B, dealing range, swing externality or predictive claim is frozen by it.
+* Commit CONTEXT-01: done, `6576bae`, no tag.
+* Then build the read-only TargetUniverse in the Python oracle only. It must say which targets exist at t, never which one price will go to.
+* Touch ≠ taken; Phase 2 through adapters; G-V gates or UNVERIFIED; no hierarchy; exact-tick pools; no Pine.
+
+**CHANGES**
+* `validation/models/targets.py` (new): an observer of Module G / Module F / Phase 2 after each bar (DEF-TU1…TU10).
+  * Identity `TYPE:source key:ticks`.
+  * TOUCH (exactly at the price) separate from TAKEN (Phase 2's own record, or DEF-L4 unchanged for the period and session extremes; class UNKNOWN when the first take was unseen).
+  * States AVAILABLE / TAKEN / UNVERIFIED / INVALID, with `history` and `verification`.
+  * Loaded-history rule with completed TradingView evidence bars; exact-tick composite pools.
+  * Categorical externality against the closed ranges; `HISTORICAL_PERIOD_LEVEL`; its own event log.
+  * DAILY / WEEKLY UNVERIFIED until G-V1…G-V5.
+* `validation/tests/test_targets.py` and `test_targets_real.py` (new, 30 tests, section `targets`).
+* `docs/context/TARGET_UNIVERSE_ORACLE.md` (new); `TARGET_UNIVERSE.md` and `CONTEXT_ROADMAP.md` updated (CONTEXT-03 proposal).
+* Validation agent: section and report block TARGET UNIVERSE, `--phase targets`; conftest marker; validation 1.25.0.
+
+**RESULT**
+* Phase 2 adapter: 192,772 record states on 4,979 real bars, plus three 4,000-bar walks: **0 conflicts**.
+* The 12 session extremes in the captures equal Pine's logged SESSION_END H / L.
+* Loaded-history restarts at bars 97 / 311 / 640: 36 targets born before the history; 21 restored by evidence bars, 15 consumed with class UNKNOWN, 0 AVAILABLE by assumption.
+* G-V1…G-V5 stay PENDING (manual). The captures support the period identity and the exact price on MNQ1! 11-02 (LEVEL_SET = the D bar = six 4H bars; D bars at 18:00 ET across DST).
+* Real goldens TU-G1…G9: 4 DETERMINISTIC, 5 SUPPORTING.
+* Not implemented: Primary DOL, directional context, narrative, renderer, alerts, Pine.
+
+**RISKS:** none for the indicator. Period targets are deliberately UNVERIFIED until the user records G-V.
+
+**TEST:**
+* FULL (mode full, before the README / CHANGELOG entries): **PASS**, exit 0, 1100.1 s, **1491 passed, 1 skipped** (the absent manual `pine_observed.json`, not a functional failure): TARGETS **30/30 (new)**; static 23/23; Phase 1 17/16/19/4 and Phase 2 52/13/18 unchanged; golden 290/290; parity 167/168; invariant detectors 85/85; property 44/44; IFVG 172, CISD 167, displacement 106, LRL 85, HTF 46; research studies LRL 34, CISD 29, displacement 24, IFVG 8, context 4.
+* `src/IST.pine` SHA-256 `553248e7…9b91` (= `IFVG_BASELINE_v0.9.1-dev`).
+* The release SHA256SUMS: 5/5, 9/9, 10/10, 30/30, 36/36.
+* The v0.9.1-dev MANIFEST: 51/51.
+* No frozen model, parity or golden file changed since the IFVG tag.
+
 ## CONTEXT-01 — DOL / directional context research · IST v0.9.1-dev unchanged · validation 1.24.0 (2026-11-03, branch `context/research`) — no indicator change
 
 **User (2026-11-03):** research and specification only, for a future DOL / DIRECTIONAL CONTEXT layer above the detection modules.

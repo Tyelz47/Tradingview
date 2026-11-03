@@ -1,6 +1,12 @@
 # IST · CONTEXT-01 · Target universe
 
-**Status: RESEARCH + SPECIFICATION PROPOSAL (2026-11-03), awaiting the user's review.**
+**Status: RESEARCH + SPECIFICATION PROPOSAL (2026-11-03). CONTEXT-01 milestone `6576bae`, approved as research only.**
+* **Refined by CONTEXT-02** (`TARGET_UNIVERSE_ORACLE.md`, DEF-TU1…TU10), which takes precedence where the two differ:
+  * TOUCH (exactly at the price) and TAKEN (DEF-L4) are separate. There is no single "reached".
+  * No W > D > S rank: `source_class` is provenance only, and externality is categorical.
+  * Composite pools are exact-tick only, with no tolerance.
+  * Older D / W extremes appear only as `HISTORICAL_PERIOD_LEVEL` (superseded Module G values). Those from before the history are BLOCKED.
+  * PDH / PDL / PWH / PWL stay UNVERIFIED until G-V1…G-V5.
 * No frozen module changes. Every source below is read as it is.
 * The parent document is `DOL_RESEARCH.md` (DEF-DOL1…DOL8). The measured numbers come from `validation/studies/context.py`.
 
