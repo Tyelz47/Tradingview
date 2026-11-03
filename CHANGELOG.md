@@ -1,5 +1,39 @@
 # Changelog
 
+## IFVG FROZEN — IFVG_BASELINE_v0.9.1-dev · IST v0.9.1-dev unchanged · validation 1.23.0 (2026-11-03, branch `ifvg/pine`) — no indicator change
+
+**User (2026-11-03):** IFVG-L12 manual validation PASS.
+* The four MNQ1! 1m cases of 2026-11-02 (A3 bearish, B2 bullish, B4 lifecycle, C2 wick-only rejection), Debug ON, kept their IFVG / FVG Pine Logs identities, inversions and lifecycles on the normal chart, after a page refresh, and after removing and re-adding the indicator.
+* The documented exceptions are accepted, not failures: IFVG_DROPPED_MEMORY timing, "inversions so far", CE / full as facts, the first ~16 loaded bars.
+* IFVG-L00, L10, L11, L12 PASS; IFVG-R approved for freeze. Freeze the implementation exactly as validated, with a documentation-only commit and the annotated tag on it.
+
+**RESULT**
+* Final statuses: **IFVG-L00 PASS · IFVG-L10 PASS · IFVG-L11 PASS · IFVG-L12 PASS** (automated and manual; `docs/TESTS_IFVG.md`).
+* **Frozen: IFVG-R exactly as approved** (`docs/IFVG_FREEZE_REPORT.md` §3):
+  * Phase-1-qualified FVGs only;
+  * the strict DEF-A5 close beyond the far edge, opposite side; a wick or a close at the boundary is no inversion;
+  * inherited geometry;
+  * confirmed at the inversion close, lifecycle from the next bar;
+  * wick facts FIRST_TOUCH / CE / FULL_TRAVERSAL, INVALIDATED only on a strict close beyond the far edge;
+  * an observer of Phase 1, one IFVG per original FVG;
+  * memory 50 per side as a retention target, ACTIVE never evicted;
+  * no context requirement.
+* **Accepted limitations, frozen** (§6):
+  * the loaded-history boundary (about 16 bars observed, not a rule);
+  * the Phase 1 DEF-A6 dependency;
+  * IFVG_DROPPED_MEMORY timing;
+  * no hard memory bound (to monitor);
+  * CE / full as facts, no renderer / alerts;
+  * chart timeframe only, no predictive claim.
+* **Freeze commit (documentation and release metadata only):**
+  * `docs/IFVG_FREEZE_REPORT.md`, `docs/IFVG.md`, `docs/TESTS_IFVG.md` and `docs/STUDY_IFVG.md` marked FROZEN; README; this entry;
+  * `releases/v0.9.1-dev/`: the same documents, `CHANGELOG.md`, `README.md` and `README.txt` refreshed, `SHA256SUMS.txt` regenerated, read-only again; `MANIFEST.txt` unchanged (no file in it changed).
+* Annotated tag `IFVG_BASELINE_v0.9.1-dev` on this commit, so the tagged tree records the manual IFVG-L12 PASS.
+
+**TEST:**
+* FULL on the freeze tree: **PASS**, exit 0, 683.0 s, **1457 passed, 1 skipped** (the absent manual `pine_observed.json`, not a functional failure): static 23/23; IFVG 172/172; golden 290/290; parity 167/168 (the real v0.9.1-dev evidence 0 DIFFERENCE); invariant detectors 85/85; property 44/44; CISD 167, displacement 106, LRL 85, HTF 46; Phase 1 / 2 unchanged.
+* `src/IST.pine` unchanged since `0d49bc3` (SHA-256 `553248e7…9b91`). The oracle, the golden dataset and the evidence are unchanged since `db607ae`. Untouched: `PHASE1_BASELINE_v0.3.2`, `PHASE2_BASELINE_v0.4.4-dev`, `CISD_BASELINE_v0.7.1-dev`, `DISPLACEMENT_BASELINE_v0.8.0-dev` and the earlier releases.
+
 ## IFVG-L11 PASS · IFVG-L12 automated determinism / reload PASS · IFVG freeze prepared — IST v0.9.1-dev unchanged · validation 1.23.0 (2026-11-03, branch `ifvg/pine`) — no indicator change
 
 **User (2026-11-03):** the manual IFVG-L11 sanity review passed: mark IFVG-L11 = PASS (IFVG-L00 and IFVG-L10 PASS, IFVG-L12 pending).

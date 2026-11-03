@@ -1,10 +1,10 @@
 # IST · IFVG freeze report — v0.9.1-dev
 
-**Status: FREEZE PREPARED on 2026-11-03. NOT FROZEN YET.**
-* IFVG-L00, IFVG-L10 and IFVG-L11 pass, all recorded from the user's results.
-* IFVG-L12: the automated part passes. The manual TradingView reload check is the user's (`docs/TESTS_IFVG.md`, "IFVG-L12 manual").
-* The baseline tag **`IFVG_BASELINE_v0.9.1-dev` is not created.** It follows the user's manual IFVG-L12 PASS and go.
-* This prepares the freeze of the **IFVG module** (IFVG-R) only:
+**Status: FROZEN on 2026-11-03. Tag `IFVG_BASELINE_v0.9.1-dev`.**
+* **IFVG-L00, IFVG-L10, IFVG-L11 and IFVG-L12 PASS**, all recorded from the user's results.
+* **IFVG-L12 MANUAL = PASS** (user, 2026-11-03, §2.3); the automated part passes too.
+* The annotated tag `IFVG_BASELINE_v0.9.1-dev` is on the documentation-only freeze commit, so the tagged tree itself records the manual IFVG-L12 PASS. That commit changes no executable file: `src/IST.pine`, the oracle, the golden dataset and the evidence are those of the prepared freeze (`db607ae`).
+* This freezes the **IFVG module** (IFVG-R) only:
   * LRL and HTF FVG in the same file stay EXPERIMENTAL;
   * CISD stays frozen under `CISD_BASELINE_v0.7.1-dev`, displacement under `DISPLACEMENT_BASELINE_v0.8.0-dev`;
   * the Phase 1 and Phase 2 baselines are untouched.
@@ -16,7 +16,7 @@
 | Build | IST **v0.9.1-dev**. The label is kept: the frozen bytes are the bytes captured in TradingView |
 | Source | `src/IST.pine`, SHA-256 `553248e78d36fb22665768e4f2e85be610f62a869886b363d05d18c851ea9b91`, unchanged since commit `0d49bc3` (the build in the real capture, `build=v0.9.1-dev`) |
 | Oracle | `validation/models/ifvg.py`: `IfvgEngine` is the definition; `IfvgPine` is Pine's formulation, transliterated and proven equal. SHA-256 `1b980c3cf12bd29b35733283be74f158df23b505cab15831323d2f735e08c118` |
-| Proposed git tag | **`IFVG_BASELINE_v0.9.1-dev`** (annotated, the convention of the earlier baselines), on branch `ifvg/pine`. Not merged into `main` |
+| Git tag | **`IFVG_BASELINE_v0.9.1-dev`** (annotated, the convention of the earlier baselines) on the freeze commit, branch `ifvg/pine`. Not merged into `main` |
 | Read-only copy | `releases/v0.9.1-dev/` (see the next table) |
 | Baselines | `PHASE1_BASELINE_v0.3.2`, `PHASE2_BASELINE_v0.4.4-dev`, `CISD_BASELINE_v0.7.1-dev` and `DISPLACEMENT_BASELINE_v0.8.0-dev` unchanged. The Phase 1 diff guard (ST-15) passes. Against `DISPLACEMENT_BASELINE_v0.8.0-dev` the Pine diff only adds lines, except the four build lines |
 | Validation tooling | 1.23.0 |
@@ -29,7 +29,7 @@
 * `SHA256SUMS.txt` (inside the folder: `sha256sum -c SHA256SUMS.txt`);
 * `MANIFEST.txt` (the tests, static checks, invariants and tooling, from the repository root).
 
-**Rollback:** once tagged, `git checkout IFVG_BASELINE_v0.9.1-dev`, or paste `releases/v0.9.1-dev/src/IST.pine` into the Pine Editor.
+**Rollback:** `git checkout IFVG_BASELINE_v0.9.1-dev`, or paste `releases/v0.9.1-dev/src/IST.pine` into the Pine Editor.
 
 ## 2 · Evidence
 
@@ -74,7 +74,7 @@ The dataset is `validation/golden/human/ifvg/` (README there): **22 real MNQ cas
 
 Pinned by `tests/test_ifvg_golden.py`.
 
-### 2.3 IFVG-L12: reload / determinism — automated PASS · manual PENDING
+### 2.3 IFVG-L12: reload / determinism — automated PASS · manual PASS
 
 **Automated** (`tests/test_ifvg_freeze.py`, 46 tests; the requirement table is in its docstring). The data:
 * the real v0.9.1-dev candles (1,076 bars);
@@ -93,9 +93,16 @@ Pinned by `tests/test_ifvg_golden.py`.
 | **6 Phase 1** | Phase 1 alone and Phase 1 with the IFVG: the same Phase 1 events and FVG records (ids, geometry, lifecycle, memory order) on every bar, and the same memory releases |
 | **7 real capture** | The v0.9.1-dev evidence re-run: 0 DIFFERENCE, every count of §2.1 (`tests/test_parity_v091_evidence.py`); its SHA-256 checked (`tests/test_parity_capture.py`) |
 
-**Manual: PENDING.** The user's TradingView reload check (`docs/TESTS_IFVG.md`, "IFVG-L12 manual"):
-* three IFVGs (A3 bearish, B2 bullish, B4 lifecycle) and one rejection (C2, wick only);
-* each checked on the normal chart, after a page refresh, and after removing and re-adding the indicator.
+**Manual: PASS (user, 2026-11-03).** The TradingView reload check of `docs/TESTS_IFVG.md` ("IFVG-L12 manual"), on MNQ1! 1m, 2026-11-02, Debug ON:
+* the four cases: A3 bearish IFVG, B2 bullish IFVG, B4 lifecycle, and C2, the wick-only rejected inversion;
+* each in three states: A, the normal chart; B, after a browser page refresh; C, after removing and re-adding the indicator;
+* the IFVG / FVG Pine Logs identities, the inversions and the lifecycles stayed the same in A, B and C.
+
+The user accepted the documented exceptions; they are not failures:
+* the timing of IFVG_DROPPED_MEMORY may change when the first loaded bar changes;
+* "inversions so far" may change, because it counts from the first loaded bar;
+* CE and full traversal are facts, not Pine Logs events;
+* IFVGs whose parent FVG is confirmed inside the first ~16 loaded bars stay under the loaded-history limitation (§6).
 
 ### 2.4 IFVG-L00 — PASS
 
@@ -112,20 +119,26 @@ v0.9.1-dev compiled and ran in TradingView (user).
 * CISD 167/167 and displacement 106/106 (frozen suites unchanged), LRL 85/85, HTF 46/46;
 * Phase 1 / 2 sections and regression (5/5) unchanged.
 
+**Re-run on the freeze tree** (documentation changed only): FULL **PASS**, exit 0, 683.0 s, **1457 passed, 1 skipped**, every section total as above. The skip is the same absent manual `pine_observed.json`, not a functional failure.
+
 ## 3 · Frozen definition (IFVG-R; exact text: `docs/IFVG.md`, DEF-IFVG1 … IFVG9)
 
-The bearish IFVG from a bullish Phase 1 FVG is described here; the bullish IFVG from a bearish FVG is the exact mirror.
+Approved for freeze by the user on 2026-11-03.
 
 | rule | frozen text |
 |---|---|
-| **origin** | Only Phase-1-qualified FVGs: DEF-A1 / A2, the frozen detector with the current [calc] FVG inputs. The FVG must be in the Phase 1 logical FVG universe immediately before its DEF-A5 invalidation. Invalidated and released on the same bar: it inverts. Released earlier: it never inverts. Visibility is irrelevant |
-| **inversion** | Original bullish FVG: the strict DEF-A5 close below its bottom → **bearish IFVG**. Original bearish FVG: the strict DEF-A5 close above its top → **bullish IFVG**. A wick alone: **no**. A close exactly at the boundary: **no**. Decided at the bar's close, from the bar after the FVG's confirmation. It is Phase 1's own DEF-A5 bar (`invBar`), read and never recomputed: there is one close rule |
-| **geometry** | Exactly inherited: top, bottom, CE. No clipping, no new boundary |
-| **lifecycle** | From the bar **after** the inversion. FIRST_TOUCH (the near edge), CE and FULL_TRAVERSAL (the far edge) are wick facts, each stamped once. Terminal INVALIDATED on the first strict close beyond the far edge. A close back inside the zone is not an end |
-| **same-bar order** | ACTIVE IFVGs (bullish, then bearish): FIRST_TOUCH → CE → FULL_TRAVERSAL → INVALIDATED. Then memory (bullish side, then bearish). Then the new Phase 1 inversions in creation order: record → IFVG_INVERTED → memory of its side. A new IFVG is not evaluated on its inversion bar |
-| **memory** | Target 50 per side, a retention target. An ACTIVE IFVG is never memory-evicted. Temporary overflow is allowed. While a side holds more than 50 records, its oldest INVALIDATED record leaves, with IFVG_DROPPED_MEMORY (terminal records only) |
-| **identity** | The original FVG's stable id (its candle-3 time) and the IFVG side. No second inversion |
-| **context** | Not required: CISD, displacement, liquidity, LRL, HTF FVG, session, display. Context is a later layer |
+| **eligibility** | Only Phase-1-qualified FVGs: DEF-A1 / A2, the frozen detector with the current [calc] FVG inputs. The FVG must be in the Phase 1 logical FVG universe immediately before its DEF-A5 invalidation. Invalidated and released on the same bar: it inverts. Released earlier: it never inverts. Visibility is irrelevant |
+| **inversion** | Original **bullish** FVG: a strict close below its bottom → **BEARISH IFVG**. Original **bearish** FVG: a strict close above its top → **BULLISH IFVG**. A wick beyond the boundary: **no inversion**. A close exactly at the boundary: **no inversion**. It is Phase 1's own DEF-A5 bar (`invBar`), read and never recomputed: there is one close rule. From the bar after the FVG's confirmation |
+| **geometry** | Inherited exactly from the original FVG: bottom, top, CE. No new geometry: no clipping, no new boundary |
+| **timing** | The inversion confirms at the inversion candle's close. The inversion candle does **not** count as FIRST_TOUCH, CE, FULL_TRAVERSAL or invalidation of the newly created IFVG. The lifecycle begins on the next bar |
+| **active lifecycle: bearish IFVG** | FIRST_TOUCH when `high >= bottom`; CE fact when `high >= CE`; FULL_TRAVERSAL when `high >= top`; INVALIDATED only on a strict `close > top` |
+| **active lifecycle: bullish IFVG** | FIRST_TOUCH when `low <= top`; CE fact when `low <= CE`; FULL_TRAVERSAL when `low <= bottom`; INVALIDATED only on a strict `close < bottom` |
+| **lifecycle rules** | Each fact is stamped once. A wick through the far edge alone is **not** terminal, and a close back inside the zone is not an end. On one bar the facts are recorded before the terminal invalidation. INVALIDATED is terminal |
+| **same-bar order** | ACTIVE IFVGs (bullish, then bearish): FIRST_TOUCH → CE → FULL_TRAVERSAL → INVALIDATED. Then memory (bullish side, then bearish). Then the new Phase 1 inversions in creation order: record → IFVG_INVERTED → memory of its side |
+| **parent relationship** | The original FVG remains governed entirely by Phase 1, where it stays historically INVALIDATED. The IFVG observes the Phase 1 invalidation and never mutates the Phase 1 record or lists. A Phase 1 memory release of the parent after the inversion does not destroy the existing IFVG (golden B4) |
+| **identity** | Stable, derived from the original FVG's identity: its id (candle-3 time) and the IFVG side. At most one IFVG per original FVG; no second inversion |
+| **memory** | Target retained count: 50 per resulting side. ACTIVE IFVGs are **never** memory-evicted. Temporary overflow is allowed. Compaction removes the oldest INVALIDATED records first. IFVG_DROPPED_MEMORY is for terminal records only |
+| **context independence** | Not required for IFVG creation: CISD, displacement, liquidity, LRL, HTF narrative (HTF FVG), session, display. A separate context layer may use them later |
 | **events** | `IFVG_INVERTED`, `IFVG_FIRST_TOUCH`, `IFVG_INVALIDATED`, `IFVG_DROPPED_MEMORY`. CE and full traversal are record facts, not events |
 | **Pine** | An observer after the frozen Phase 1 FVG block that never writes a Phase 1 record or list (ST-23). One input, `ifvgOn` ([calc], ON); one constant, `IFVG_MEM = 50`. No history read in the engine (ST-21). No renderer and no alert; Debug shows four Data Window values and the Pine Logs events |
 
@@ -137,20 +150,30 @@ The bearish IFVG from a bullish Phase 1 FVG is described here; the bullish IFVG 
 
 ## 5 · Open items (not blocking the freeze)
 
-* IFVG-L01 … L05 were not recorded one by one; L00, L10 and L11 cover their logic.
+* IFVG-L01 … L05 were not recorded one by one; L00, L10, L11 and L12 cover their logic.
+* Monitor the memory size (§6).
 * Not started, by instruction: HTF IFVG, the DOL / context engine, quality scoring, the renderer / styling, alerts.
 * The BAR line's IX does not list the last-bar fact of an IFVG that is dropped on its end bar. This is diagnostics only, and the oracle does the same (`docs/TESTS_IFVG.md`, L11).
 
-## 6 · Known limitations
+## 6 · Accepted limitations (frozen with the baseline)
 
-* **Chart timeframe only.**
-* **History start (reload on a live chart).** TradingView recomputes from the first loaded bar, which moves as new bars arrive.
-  * The IFVGs of FVGs confirmed in the first 16 loaded bars can differ, because Phase 1 qualification needs the TR average.
+The user accepted these on 2026-11-03. None of them changes IFVG-R; changing one is a new, approved version.
+
+* **Loaded-history boundary.** TradingView recomputes from the first loaded bar, which moves as new bars arrive (a refresh or a re-add on a live chart).
+  * IFVGs whose parent FVG is confirmed very close to that boundary may differ, because Phase 1 qualification needs the TR average.
+  * Observed in the reload tests: every parent FVG confirmed at least ~16 bars after the first loaded bar was stable.
+  * **This is an observed reload-boundary limitation, not a rule of IFVG-R.** The definition has no 16-bar parameter.
   * An IFVG of an FVG inverted before the first loaded bar does not exist.
-  * Phase 1's frozen DEF-A6 releases an OPEN FVG when all 50 of a direction are open. Which one it releases follows the history start, and a released FVG never inverts. The real v0.9.1-dev log has four such releases, all of FVGs 4–5 days old and about 1,500 points from price; none of the six real captures shows one when replayed. This is Phase 1's reload behaviour, inherited.
-  * The timing of IFVG_DROPPED_MEMORY follows the number of older records held. It is bookkeeping and never touches an ACTIVE IFVG or a lifecycle event.
-* **Memory has no hard bound** by design. The number of ACTIVE IFVGs is what the market leaves open: real peak 66, up to 248 on 20,000-bar trending walks. A Pine array holds up to 100,000 elements.
-* **CE and full traversal are facts, not events.** On the chart they are visible only through the parity capture (BAR IX).
-* **No drawing or alert yet.** IFVGs are visible only with Debug mode (Data Window, Pine Logs).
-* **No predictive claim** (`docs/STUDY_IFVG.md`). IFVG-R describes a frozen FVG closed through.
+* **Phase 1 dependency.** Phase 1's DEF-A6 stays frozen. It releases an OPEN FVG when all 50 of a direction are open.
+  * Which one it releases follows the history start, and a released FVG never inverts. So the release of a very old OPEN FVG can depend on the loaded-history start.
+  * The real v0.9.1-dev log has four such releases, all of FVGs 4–5 days old and about 1,500 points from price. None of the six real captures shows one when replayed.
+  * This is Phase 1's reload behaviour, inherited.
+* **Memory timing.** The timing of IFVG_DROPPED_MEMORY may differ when the older preloaded records differ.
+  * It is bookkeeping and never touches an ACTIVE IFVG or a lifecycle event.
+  * The ACTIVE semantic state stays deterministic for equivalent observable history.
+* **Memory size.** ACTIVE records are never evicted, by design, so the logical retained count can exceed 50 and has no strict maximum.
+  * Real peak 66; up to 248 on 20,000-bar trending walks. A Pine array holds up to 100,000 elements.
+  * **This is an engineering limitation to monitor.** The semantics do not change now.
+* **Diagnostics.** CE and full traversal are facts, not separate events. On the chart they are visible only through the parity capture (BAR IX). No IFVG renderer and no alerts exist yet: IFVGs are visible only with Debug mode (Data Window, Pine Logs).
+* **Scope.** Chart timeframe only. No predictive-performance claim (`docs/STUDY_IFVG.md`): IFVG-R describes a frozen FVG closed through.
 * Pine prints prices rounded to the tick. On an exact half-tick CE, parity accepts both neighbouring ticks.

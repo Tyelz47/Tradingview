@@ -1,12 +1,12 @@
-# IST · IFVG tests — v0.9.1-dev (freeze prepared)
+# IST · IFVG tests — v0.9.1-dev (FROZEN)
 
 **Status (2026-11-03).**
 * **IFVG-L00: PASS** (user).
 * **IFVG-L10: PASS** (the user's real capture, 2026-11-02, recorded from the user's result): 82 MATCH · 0 DIFFERENCE · 16 NOT OBSERVABLE; IFVG 1,059 bar states, 167 + 168 + 168 + 151 events, 100 snapshot records, the shadows = the open Phase 1 FVGs. Kept as evidence (`validation/parity/evidence/ist-v0.9.1-dev_mnq1-1m_capture-1000_2026-11-02.csv`, `tests/test_parity_v091_evidence.py`).
 * **IFVG-L11: PASS**: 22 real golden cases, the mechanical case R1 and the memory golden MEM1 (`validation/golden/human/ifvg/`, `tests/test_ifvg_golden.py`), and the user's manual sanity review (2026-11-03).
-* **IFVG-L12: automated part PASS** (validation 1.23.0, `tests/test_ifvg_freeze.py`). **Manual reload: PENDING**, the procedure below.
-* IFVG-L01 … L05: not recorded one by one; L00, L10 and L11 cover their logic. TradingView results are recorded only from the user's results, never assumed.
-* **Freeze prepared, not frozen** (`docs/IFVG_FREEZE_REPORT.md`, `releases/v0.9.1-dev/`). The tag `IFVG_BASELINE_v0.9.1-dev` follows the manual IFVG-L12 PASS. v0.9.0-dev was never compiled; v0.9.1-dev (revised memory) superseded it.
+* **IFVG-L12: PASS.** The automated part (validation 1.23.0, `tests/test_ifvg_freeze.py`), and **IFVG-L12 MANUAL = PASS** (user, 2026-11-03: the procedure below, four cases in three states).
+* IFVG-L01 … L05: not recorded one by one; L00, L10, L11 and L12 cover their logic. TradingView results are recorded only from the user's results, never assumed.
+* **IFVG FROZEN:** tag `IFVG_BASELINE_v0.9.1-dev` (`docs/IFVG_FREEZE_REPORT.md`, copy in `releases/v0.9.1-dev/`). v0.9.0-dev was never compiled; v0.9.1-dev (revised memory) superseded it.
 
 **Build:** `src/IST.pine` v0.9.1-dev (branch `ifvg/pine`). Definition: `docs/IFVG.md` (IFVG-R, approved 2026-11-02 with two clarifications and the revised memory rule DEF-IFVG8).
 
@@ -48,7 +48,7 @@ There is **no IFVG drawing** in this build. Developer → **Debug mode** ON adds
 | IFVG-L05 | no drawing, no alert | look at the chart; an "Any alert() function call" alert | nothing IFVG-related drawn; no IFVG alert message |
 | IFVG-L10 | **real parity (freeze gate)** · **PASS (2026-11-02)** | Developer → Parity capture ON (N = 1000); save the Pine Logs into `validation/parity/`; run `python -m validation.parity --capture <file>` | **0 DIFFERENCE**, the IFVG section included (shadows, active per side, facts per bar; events; snapshot records) |
 | IFVG-L11 | **human golden cases (freeze gate)** · **PASS** (2026-11-03: automated, and the user's sanity review) | the cases of `validation/golden/human/ifvg/` (real candles), then the user's visual check of the sanity cases (README there) | every deterministic golden reproduced, or each difference explained |
-| IFVG-L12 | **reload (freeze gate)** · automated part **PASS** (2026-11-03) · manual **PENDING** | automated: `tests/test_ifvg_freeze.py`; manual: the procedure below (3 IFVGs + 1 rejection; refresh the page; remove and re-add the indicator) | the same IFVGs, unchanged: id, side, geometry, inversion, lifecycle lines (any FVG confirmed ≥ 16 bars after the first loaded bar); the rejection stays NO IFVG |
+| IFVG-L12 | **reload (freeze gate)** · **PASS** (2026-11-03: automated, and the user's manual reload) | automated: `tests/test_ifvg_freeze.py`; manual: the procedure below (3 IFVGs + 1 rejection; refresh the page; remove and re-add the indicator) | the same IFVGs, unchanged: id, side, geometry, inversion, lifecycle lines (any FVG confirmed ≥ 16 bars after the first loaded bar); the rejection stays NO IFVG |
 
 ### IFVG-L00 manual: compile + runtime (what you do)
 
@@ -95,3 +95,6 @@ Not part of the comparison:
 | 4 | **rejected: wick only** (golden C2) | bearish FVG, candle 1 10:47, candle 3 **10:49** → `id=2026-11-02 10:49`; bottom 28787.75, top 28791.75, CE 28789.75 | **NO IFVG**: at 10:51 (O 28787.25 · H 28792.50 · L 28764.50 · C 28765.00) the wick goes above the top, the close stays below it | only Phase 1 lines: `10:49 FVG_CREATED`, `10:50 FVG_FIRST_TOUCH`, `10:50 FVG_CE_TOUCH`, `10:51 FVG_FULL_FILL`. **No `FVG_INVALIDATED` and no `IFVG_` line with this id**, at 10:51 or later (up to at least 23:11) | no IFVG |
 
 **Record:** PASS, or FAIL with the case, the step (A, B or C) and the line that changed.
+
+**Result (user, 2026-11-03): PASS.** All four cases, Debug ON, in A, B and C: the IFVG / FVG Pine Logs identities, the inversions and the lifecycles stayed the same.
+* The documented exceptions were accepted and are not failures: the timing of IFVG_DROPPED_MEMORY, "inversions so far", CE / full as facts, and the IFVGs of FVGs confirmed inside the first ~16 loaded bars (`docs/IFVG_FREEZE_REPORT.md` §6).
