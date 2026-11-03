@@ -58,6 +58,7 @@ SECTIONS = [  # key, report title, group
     ("research.cisd", "CISD research study (no indicator change)", "RESEARCH"),
     ("research.disp", "Displacement study (no indicator change)", "RESEARCH"),
     ("research.ifvg", "IFVG study (no indicator change)", "RESEARCH"),
+    ("research.context", "DOL / directional context study (no indicator change)", "RESEARCH"),
 ]
 SCENARIO_SECTIONS = {"phase1.fvg", "phase1.lifecycle", "phase1.sessions", "phase1.levels", "phase2.swing",
                      "phase2.sweeps", "phase2.eq", "events"}

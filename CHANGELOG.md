@@ -1,5 +1,42 @@
 # Changelog
 
+## CONTEXT-01 — DOL / directional context research · IST v0.9.1-dev unchanged · validation 1.24.0 (2026-11-03, branch `context/research`) — no indicator change
+
+**User (2026-11-03):** research and specification only, for a future DOL / DIRECTIONAL CONTEXT layer above the detection modules.
+* Up to PRIMARY DOL; no Pine, renderer, styling, alerts, score, entry model, SMT, OB / breaker / OTE.
+* No frozen module changes. Facts are not bias. No arbitrary score or voting.
+* FEATURES_AT_T apart from OUTCOME_AFTER_T.
+
+**CHANGES**
+* `docs/context/` (new, proposal):
+  * `DOL_RESEARCH.md`: DEF-DOL1…DOL8, liquidity target versus PD array, states, PRIMARY / NEXT / ALTERNATE / path, an eligibility matrix and the DOL-P1 candidate (precedence, no score), MIXED / UNKNOWN, baselines B0…B4, outcome labels, the conceptual schema, the 12 answers, decisions D-CX1…D-CX12;
+  * `TARGET_UNIVERSE.md`, `DIRECTIONAL_CONTEXT_RESEARCH.md`, `RESEARCH_CASES.md`, `CONTEXT_ROADMAP.md` (the exact CONTEXT-02 proposal).
+* `validation/studies/context.py` (new, analysis only):
+  * four real 1m segments from the evidence;
+  * PDH … PWL from Pine's own HTF snapshot / HTFBAR / LEVEL_SET;
+  * target status with the observation-coverage rule;
+  * 13 pre-registered decision points, with features from the cut segment;
+  * the baselines, the fact → first-external-target tables and the case categories.
+* `validation/tests/test_context_study.py` (new, report section `research.context`): no lookahead (the future is replaced), the DEF-L4 status rule and UNVERIFIED, the outcome labels, the quoted numbers.
+* `validation/validation_agent.py` (one report section), `validation/conftest.py` (one marker), `validation/__init__.py` (1.24.0).
+
+**RESULT (descriptive; nothing tuned, no predictive claim)**
+* 4,979 bars ≈ 83 h, NQ family only; 13 decision points.
+* B1 (the nearest target of any class) was reached first 9 / 12 times against a driftless reference of 10.0. Proximity adds nothing beyond itself.
+* CISD, IFVG and displacement each sit at or below their reference for the next external target; 1–12 distinct outcomes per fact.
+* The 1m and 15m CISD states agree on 49–63% of bars.
+* External takes are rare: 5 sweeps and 11 breaks in 83 h.
+* Prerequisites flagged: G-V1…G-V5 (the level source) pending; a dataset (NQ and ES, ≥ 60 complete days each).
+
+**RISKS:** none for the indicator: `src/IST.pine` and every frozen file are unchanged. The study is descriptive on a small sample. Its numbers must not be read as evidence for a rule.
+
+**TEST:**
+* FULL (mode full, before the README / CHANGELOG entries): **PASS**, exit 0, 1169.2 s, **1461 passed, 1 skipped** (the absent manual `pine_observed.json`, not a functional failure): static 23/23; golden 290/290; parity 167/168; invariant detectors 85/85; property 44/44; IFVG 172, CISD 167, displacement 106, LRL 85, HTF 46; research studies LRL 34, CISD 29, displacement 24, IFVG 8, **context 4/4 (new)**; Phase 1 / 2 unchanged.
+* `src/IST.pine` SHA-256 `553248e7…9b91` (= `IFVG_BASELINE_v0.9.1-dev`).
+* The release SHA256SUMS: v0.3.2 5/5, v0.4.4-dev 9/9, v0.7.1-dev 10/10, v0.8.0-dev 30/30, v0.9.1-dev 36/36.
+* The v0.9.1-dev MANIFEST: 51/51.
+* `git diff IFVG_BASELINE_v0.9.1-dev` is empty for `src/`, `releases/`, `validation/models/`, `validation/parity/`, `validation/golden/`.
+
 ## IFVG FROZEN — IFVG_BASELINE_v0.9.1-dev · IST v0.9.1-dev unchanged · validation 1.23.0 (2026-11-03, branch `ifvg/pine`) — no indicator change
 
 **User (2026-11-03):** IFVG-L12 manual validation PASS.

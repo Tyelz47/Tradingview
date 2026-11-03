@@ -7,7 +7,7 @@ Pine or TradingView.
 """
 from pathlib import Path
 
-__version__ = "1.23.0"
+__version__ = "1.24.0"
 
 VALIDATION_DIR = Path(__file__).resolve().parent
 ROOT = VALIDATION_DIR.parent

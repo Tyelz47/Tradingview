@@ -30,6 +30,7 @@ def pytest_configure(config):
                  "phase1: Phase 1 logic", "phase2: Phase 2 logic", "lrl: LRL detection (docs/LRL.md)", "htf: HTF FVG (docs/HTF_FVG.md)", "cisd: CISD oracle and research (docs/CISD.md, docs/STUDY_CISD.md)",
                  "disp: displacement oracle and research (docs/DISPLACEMENT.md, docs/STUDY_DISPLACEMENT.md)",
                  "ifvg: IFVG oracle and research (docs/IFVG.md, docs/STUDY_IFVG.md)",
+                 "context: DOL / directional context research (docs/context/)",
                  "common: shared infrastructure"):
         config.addinivalue_line("markers", line)
 
