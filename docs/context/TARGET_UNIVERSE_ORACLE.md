@@ -1,6 +1,14 @@
 # IST · CONTEXT-02 · Target universe oracle (DEF-TU1 … TU10)
 
-**Status: RESEARCH, oracle only (2026-11-03, branch `context/research`), awaiting the user's review.**
+**Status: APPROVED as the deterministic TARGET UNIVERSE milestone (user, 2026-11-03; commit `e1ee951`). A research / oracle milestone, not a frozen semantic baseline.**
+* The approval covers no Primary DOL, no target hierarchy, no directional context, no HTF Model B and no predictive edge.
+* **The user's decisions D-TU1…D-TU9 (§7) are applied in CONTEXT-03:**
+  * identity by the SOURCE period;
+  * sessions pending T19–T22;
+  * temporal availability (OPEN / CLOSE);
+  * EQ exactly as Phase 2;
+  * the HTF restoration conditions;
+  * EXACT_TOUCH naming.
 * The CONTEXT-01 milestone is commit `6576bae`, a research record, not a frozen baseline.
 * No Pine: `src/IST.pine` is byte-identical to `IFVG_BASELINE_v0.9.1-dev`. No frozen module, no LRL and no HTF FVG changed.
 * Model: `validation/models/targets.py`. It is an observer, attached beside the oracle; `validation/models/ist.py` and `types.py` are unchanged.
@@ -28,27 +36,39 @@ A PASS of CONTEXT-02 means only one thing: the objective targets that exist at t
 
 | type | source key (the frozen module's own identity) | example |
 |---|---|---|
-| PDH / PDL | the **serving day**: Module G's `day_key` of the bar where the value became known | `PDL:D2026-11-02:112929` |
-| PWH / PWL | the serving week: Module G's `week_key` | `PWL:W2026-45:112929` |
+| PDH / PDL | the **source trading day** that printed the extreme (D-TU2), in Module G's own `day_key`. The publication day is metadata (`published_in`) | `PDL:D2026-10-30:112929` (Friday's low, published Monday 11-02) |
+| PWH / PWL | the **source ISO week**, in Module G's `week_key`; `published_in` is the week it is published in | `PWL:W2026-44:112929` (published in week 45) |
 | SESSION_HIGH / SESSION_LOW | `name@window : session id` (the session's start time) | `SESSION_LOW:NY AM@0930-1200:1793629800000:114538` |
 | BSL / SSL | Phase 2's Level id (the swing bar time) | `SSL:1793652060000:112405` |
 | EQH / EQL | Phase 2's cluster id (the time its second member confirmed). Its `bound` cannot move (DEF-L5.4, asserted) | `EQL:1793653260000:112405` |
 
 `source_id` repeats the frozen identity (`G:PDL:D2026-11-02`, `F:London@0200-0500:<id>`, `L:SSL:<id>`, `L5:EQL:<id>`). The same Phase 2 identity always gives the same target (tested on every real bar).
 
-**DEF-TU3 · Times.** All times are ms bar times, never bar indices.
+**Source period (D-TU2), in this order:**
+1. The source bar the value provider names: the TradingView D / W bar handed to Module G. Its open time is converted to Module G's trading-day or ISO-week key.
+2. Otherwise, the period observed just before an observed roll.
+3. Otherwise there is no identity: the value is **BLOCKED** (`SOURCE_PERIOD_UNKNOWN`) and not represented. This is the case for a value seeded on the first loaded bar by a provider that cannot name its source.
+
+The same source period published again is the same target (`republished_in`), so the identity never depends on when the next session happened to expose the level.
+
+**DEF-TU3 · Times (temporal availability, D-TU4).** All times are ms bar times, never bar indices.
+* `known_at` says when, inside the confirming bar, the target became objectively known:
+  * **OPEN**: the value is final before that bar trades, so that bar may interact with it;
+  * **CLOSE**: it is known only at that bar's close, so only later bars may interact.
+* Nothing finer is ever inferred.
 
 | field | period level | session extreme | BSL / SSL / EQH / EQL |
 |---|---|---|---|
 | `confirmed_at` | the bar where Module G set the value (LEVEL_SET; the first loaded bar if it was seeded) | the `SESSION_END` bar (the first bar outside the window) | the confirmation bar / the EQ qualification bar |
-| `first_observable_at` | that same bar: the value is final at its open | that same bar | the bar **after** (DEF-L4: k > confirmation) |
+| `known_at` | **OPEN**: request.security's previous-period value is final before the period's first bar trades | **OPEN**: the window has ended when the first bar outside it opens | **CLOSE**: a swing / pool is known at its confirmation close |
+| `first_observable_at` | that same bar | that same bar | the bar **after** (DEF-L4: k > confirmation) |
 | `since` (from here every trade must be seen) | the serving period's nominal start (Module G's boundary: 18:00 ET day, Sunday 18:00 week) | `confirmed_at` | `confirmed_at` |
 | `origin_time` | DEF-G3 anchor (or none) | the bar that printed the extreme | the swing bar / the first member's swing |
 
-**DEF-TU4 · TOUCH ≠ TAKEN.**
-* **TARGET_TOUCH.** From `first_observable_at`, before any take, a bar whose high (▲) or low (▼) is **exactly** the price. There is no tolerance. The bar is counted; the first touch is stamped once.
+**DEF-TU4 · EXACT_TOUCH ≠ TARGET_TAKEN.** TARGET_REACHED (`high ≥ price` / `low ≤ price`) is an evaluation concept, in `docs/context/EVALUATION.md` §1.
+* **EXACT_TOUCH** (`TARGET_EXACT_TOUCH`, `exact_touches`, `exact_touch_at`). From `first_observable_at`, before any take, a bar whose high (▲) or low (▼) is **exactly** the price. There is no tolerance.
   * BSL / SSL: Phase 2's own `touches` counter, adapted.
-  * EQH / EQL: the same rule applied to the frozen `bound`. Phase 2 does not count cluster touches, so this is an observation, not a Phase 2 semantic.
+  * EQH / EQL: **not tracked** (`exact_touches = None`). Phase 2 counts no cluster touches, and the adapter adds no interpretation of its own (D-TU8).
 * **TARGET_TAKEN**, once and terminal:
   * **Adapted (BSL / SSL / EQH / EQL):** Phase 2's own `taken_bar` and SWEEP / BREAK. Nothing is recomputed.
   * **Observed (period and session extremes):** the DEF-L4 rule applied unchanged.
@@ -88,10 +108,11 @@ Minimum evidence needed to restore AVAILABLE, per source:
 | historical period level (D-2, D-3 … from before the history) | not a Module G source in v1 → **not represented** |
 
 **DEF-TU7 · Source gate.**
-* `TargetSettings.validated` defaults to {SESSION, STRUCTURAL}:
-  * STRUCTURAL: Phase 2 is frozen, with real Pine parity 0 DIFFERENCE.
-  * SESSION: Module F is frozen (DEF-F1…F6); real parity matches SESSION membership, and the H / L equal Pine's logged values for all 12 sessions in the captures.
-* DAILY / WEEKLY wait for G-V1…G-V5 (§3). Until the user records those gates, every PDH / PDL / PWH / PWL is UNVERIFIED, with its facts recorded.
+* `TargetSettings.validated` defaults to **{STRUCTURAL}**: Phase 2 is frozen, with real Pine parity 0 DIFFERENCE.
+* **SESSION waits for T19–T22** (`SOURCE_PENDING_T19_T22`, D-TU3). The real evidence (SESSION parity, and the 12 H / L equal Pine's logs) is SUPPORTING, not proof.
+* **DAILY / WEEKLY wait for G-V1…G-V5** (`SOURCE_PENDING_GV`, D-TU1).
+* Until the user records those gates, the affected targets are UNVERIFIED and their facts are recorded.
+* The procedure is in `docs/context/MANUAL_GATES.md`.
 
 **DEF-TU8 · Composite pools.**
 * A pool is two or more unconsumed, non-INVALID targets on one side at **exactly the same tick**.
@@ -126,16 +147,16 @@ origin_time         ms|None the bar that printed the extreme (when the source kn
 confirmed_at        ms      known at this bar's close (DEF-TU3)
 first_observable_at ms|None first bar whose range counts
 since               ms      every trade from here must be seen for AVAILABLE
-adapted             bool    take facts read from Phase 2
-after_confirm       bool    lifecycle starts after confirmed_at (Phase 2)
+adapted             bool    exact touches and take read from Phase 2
+known_at            OPEN | CLOSE   (DEF-TU3, D-TU4)
 period_role         CURRENT | HISTORICAL_PERIOD_LEVEL | None;  age_periods int
-touches, touch_at                                   (TARGET_TOUCH)
+exact_touches (None: not tracked), exact_touch_at  (TARGET_EXACT_TOUCH)
 taken_at, taken_kind (SWEEP|BREAK|UNKNOWN), taken_gap, taken_before   (TARGET_TAKEN)
 invalid_at, invalid_reason
 history             OBSERVED | INCOMPLETE
-verification        () | SOURCE_PENDING_GV | HISTORY_INCOMPLETE
+verification        () | SOURCE_PENDING_GV | SOURCE_PENDING_T19_T22 | HISTORY_INCOMPLETE
 state               AVAILABLE | TAKEN | UNVERIFIED | INVALID
-meta                serving_period · session / window / start / end · pivot / react / tra · members / ref
+meta                source_period · published_in · republished_in · session / window / start / end · pivot / react / tra · members / ref
 snapshot only:      composite (pool id) · externality {range: relation}
 ```
 
@@ -181,13 +202,14 @@ snapshot only:      composite (pool id) · externality {range: relation}
 | TU-G3 | DETERMINISTIC | PWL of the week of 10-26 is never proven, because Monday 10-26 is in no capture (HISTORY_INCOMPLETE). Taken later, class UNKNOWN |
 | TU-G4 | SUPPORTING | PDL 30591.25 SWEEP at 10-14 08:35; the first take was observed. PDL waits for G-V |
 | TU-G5 | SUPPORTING | PDH 29881.25 BREAK at 10-27 21:41 (in Asia), on the same bar as NY PM H. PDH waits for G-V |
-| TU-G6 | DETERMINISTIC | London L 28882 SWEEP at 10-30 05:47 (session, validated) |
-| TU-G7 | DETERMINISTIC | NY AM L 28634.5 SWEEP at 11-02 12:10 (session, validated) |
+| TU-G6 | SUPPORTING | London L 28882 SWEEP at 10-30 05:47. The session source waits for T19–T22 |
+| TU-G7 | SUPPORTING | NY AM L 28634.5 SWEEP at 11-02 12:10. The session source waits for T19–T22 |
 | TU-G8 | SUPPORTING | PWH 30114 of the week of 10-26, consumed before the history: the logged D bar of 10-27 went above it (`taken_before`) |
 | TU-G9 | DETERMINISTIC | an exact touch is never a take on real bars: every touched target is taken later or never, at a bar exactly at the price |
+| TU-G10 | DETERMINISTIC | identity = the source period: on MNQ1! 11-02, PDL is `PDL:D2026-10-30` (Friday's low, published in D2026-11-02) and PWL is `PWL:W2026-44` (published in W2026-45); Monday's own low becomes `PDL:D2026-11-02` at the 18:00 roll |
 
-* SUPPORTING = the facts are exact, but an input (the Module G source) waits for G-V.
-* INCONCLUSIVE: none.
+* SUPPORTING = the facts are exact, but an input (the Module G source, or the session source) waits for G-V or T19–T22.
+* Totals: 3 DETERMINISTIC (G3, G9, G10) and 7 SUPPORTING (G1, G2, G4–G8). INCONCLUSIVE: none.
 
 ## 6 · Measured behaviour (diagnostics, no accuracy)
 
@@ -208,9 +230,23 @@ A shorter history never claims more than the full one:
 * a known class ⇒ the same take;
 * a target born inside it ⇒ the same facts.
 
-## 7 · Decisions for the user (not taken)
+## 7 · The user's decisions (2026-11-03), applied
 
-| id | question | the oracle's provisional choice |
+| id | decision | in the oracle |
+|---|---|---|
+| D-TU1 | G-V1…G-V5 are **not** waived. The capture evidence is supporting, not proof | DAILY / WEEKLY stay `SOURCE_PENDING_GV`; the procedure is MANUAL_GATES.md |
+| D-TU2 | Identity by the **source period**, not the publication period | `PDH:D<source trading day>:<ticks>`, `PWH:W<source ISO week>:<ticks>`; `published_in` is metadata; an unknown source → BLOCKED |
+| D-TU3 | Sessions stay implemented; VERIFIED waits for T19–T22 | SESSION is no longer in `validated`: `SOURCE_PENDING_T19_T22` |
+| D-TU4 | No blanket "first bar counts": temporal availability | `known_at` OPEN / CLOSE; OPEN only for values final before the bar trades |
+| D-TU5 | Pre-history targets: UNVERIFIED / BLOCKED, never AVAILABLE by assumption | approved, unchanged |
+| D-TU6 | Composite pools: exact same tick only, no cross-source tolerance | approved, unchanged |
+| D-TU7 | SWEEP / BREAK outside Phase 2 only as the DEF-L4 analogue for factual high / low targets; UNKNOWN when history is missing; never redefines Phase 2 | approved, unchanged |
+| D-TU8 | EQ exactly as Phase 2; no independent interpretation | EQ exact touches are no longer counted (`None`) |
+| D-TU9 | HTF restoration in the oracle only, with the same feed, a fully closed period, a known availability, coverage of the missing interval, and OHLC enough to prove crossed or not | the evidence-bar rule; an evidence bar known before its period closed is rejected (`ValueError`); not in Pine |
+
+The questions as first asked, kept for the record:
+
+| id | question | the provisional choice then |
 |---|---|---|
 | D-TU1 | PDH / PDL / PWH / PWL source: run G-V1…G-V5, or accept the capture evidence of §3 for some gates? | UNVERIFIED until the gates are recorded |
 | D-TU2 | The serving period as the identity of a period level (the day it is published) versus the source D / W bar's open time | serving period (Module G knows it; the source bar time comes from request.security) |

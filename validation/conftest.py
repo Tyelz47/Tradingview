@@ -32,6 +32,7 @@ def pytest_configure(config):
                  "ifvg: IFVG oracle and research (docs/IFVG.md, docs/STUDY_IFVG.md)",
                  "context: DOL / directional context research (docs/context/)",
                  "targets: target universe oracle, CONTEXT-02 (docs/context/TARGET_UNIVERSE_ORACLE.md)",
+                 "evaluation: DOL evaluation harness and dataset contract, CONTEXT-03 (docs/context/EVALUATION.md)",
                  "common: shared infrastructure"):
         config.addinivalue_line("markers", line)
 

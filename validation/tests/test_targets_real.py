@@ -121,7 +121,7 @@ def test_a_later_history_start_never_claims_more_than_the_full_history(segs):
                 if x.state == "TAKEN" and x.taken_kind in ("SWEEP", "BREAK"):
                     assert (y.taken_at, y.taken_kind) == (x.taken_at, x.taken_kind), (k, x.id)
                 if x.source_class != "STRUCTURAL" and x.since >= start:     # born inside the shorter history
-                    fact = lambda t: (t.touch_at, t.touches, t.taken_at, t.taken_kind, t.state, t.history)
+                    fact = lambda t: (t.exact_touch_at, t.exact_touches, t.taken_at, t.taken_kind, t.state, t.history)
                     assert fact(x) == fact(y), (k, x.id)
     stats.RESULTS.setdefault("targets", {})["excluded"] = dict(pre)
 
@@ -199,10 +199,11 @@ GOLDEN = [
     ("TU-G3", "DETERMINISTIC", "PWL of the week of 10-26 is never proven: Monday 10-26 is in no capture (HISTORY_INCOMPLETE)"),
     ("TU-G4", "SUPPORTING", "PDL 30591.25 SWEEP at 10-14 08:35, the first take observed; PDL waits for G-V"),
     ("TU-G5", "SUPPORTING", "PDH 29881.25 BREAK at 10-27 21:41 (in Asia), together with NY PM H; PDH waits for G-V"),
-    ("TU-G6", "DETERMINISTIC", "London L 28882 SWEEP at 10-30 05:47 (session, validated)"),
-    ("TU-G7", "DETERMINISTIC", "NY AM L 28634.5 SWEEP at 11-02 12:10 (session, validated)"),
+    ("TU-G6", "SUPPORTING", "London L 28882 SWEEP at 10-30 05:47; the session source waits for T19–T22"),
+    ("TU-G7", "SUPPORTING", "NY AM L 28634.5 SWEEP at 11-02 12:10; the session source waits for T19–T22"),
     ("TU-G8", "SUPPORTING", "PWH 30114 of the week of 10-26 consumed before the history: the logged D bar of 10-27 went above it"),
     ("TU-G9", "DETERMINISTIC", "exact touch ≠ take on real bars: a target touched exactly and taken later (or never)"),
+    ("TU-G10", "DETERMINISTIC", "identity = the source period: Monday 11-02's PDL is Friday 10-30's low, PWL the week-44 low"),
 ]
 
 
@@ -218,35 +219,42 @@ def test_real_golden_case(case, segs, full):
     elif cid == "TU-G2":
         i = bar_at(segs[3], "11-02 09:29")
         _, _, sn = run(segs[3], snapshots={i})
-        assert [p["members"] for p in sn[i]["pools"] if p["price_ticks"] == 112929] == [["PDL:D2026-11-02:112929", "PWL:W2026-45:112929"]]
+        assert [p["members"] for p in sn[i]["pools"] if p["price_ticks"] == 112929] == [["PDL:D2026-10-30:112929", "PWL:W2026-44:112929"]]
     elif cid == "TU-G3":
         _, tu, _ = run(segs[1], targets=ALL)
-        x = target(tu, "PWL:W2026-44:")
+        x = target(tu, "PWL:W2026-43:")
         assert x.price == 28986.25 and x.since == ms("10-25 18:00") and x.history == "INCOMPLETE"
         assert (x.state, x.taken_kind) == ("TAKEN", "UNKNOWN")        # taken later; its first take may lie unseen
-        assert target(full[1][1], "PWL:W2026-44:").state == "UNVERIFIED"
+        assert target(full[1][1], "PWL:W2026-43:").state == "UNVERIFIED"
     elif cid == "TU-G4":
-        x = target(full[2][1], "PDL:D2026-10-14:")
+        x = target(full[2][1], "PDL:D2026-10-13:")
         assert (x.price, x.taken_at, x.taken_kind, x.history, x.state) == (30591.25, ms("10-14 08:35"), "SWEEP", "OBSERVED", "UNVERIFIED")
     elif cid == "TU-G5":
         tu = full[0][1]
-        x, s = target(tu, "PDH:D2026-10-28:"), target(tu, "SESSION_HIGH:NY PM@1330-1600:")
+        x, s = target(tu, "PDH:D2026-10-27:"), target(tu, "SESSION_HIGH:NY PM@1330-1600:")
         assert (x.taken_at, x.taken_kind, s.taken_at, s.taken_kind) == (ms("10-27 21:41"), "BREAK", ms("10-27 21:41"), "BREAK")
-        assert (x.state, s.state) == ("UNVERIFIED", "TAKEN")
+        assert (x.state, s.state) == ("UNVERIFIED", "UNVERIFIED")
     elif cid == "TU-G6":
         x = target(full[1][1], "SESSION_LOW:London@0200-0500:")
-        assert (x.price, x.taken_at, x.taken_kind, x.state, x.verification) == (28882.0, ms("10-30 05:47"), "SWEEP", "TAKEN", ())
+        assert (x.price, x.taken_at, x.taken_kind, x.state, x.verification) == \
+            (28882.0, ms("10-30 05:47"), "SWEEP", "UNVERIFIED", ("SOURCE_PENDING_T19_T22",))
     elif cid == "TU-G7":
         x = target(full[3][1], "SESSION_LOW:NY AM@0930-1200:")
-        assert (x.price, x.taken_at, x.taken_kind, x.state) == (28634.5, ms("11-02 12:10"), "SWEEP", "TAKEN")
+        assert (x.price, x.taken_at, x.taken_kind, x.state) == (28634.5, ms("11-02 12:10"), "SWEEP", "UNVERIFIED")
+    elif cid == "TU-G10":
+        tu = full[3][1]
+        pdl, pwl = target(tu, "PDL:D2026-10-30:"), target(tu, "PWL:W2026-44:")
+        assert (pdl.meta, pwl.meta) == ({"source_period": "D2026-10-30", "published_in": "D2026-11-02"},
+                                        {"source_period": "W2026-44", "published_in": "W2026-45"})
+        assert target(tu, "PDL:D2026-11-02:").meta["published_in"] == "D2026-11-03"   # Monday's own low, from the 18:00 roll
     elif cid == "TU-G8":
-        x = target(full[1][1], "PWH:W2026-44:")
+        x = target(full[1][1], "PWH:W2026-43:")
         assert (x.price, x.taken_before, x.taken_at, x.taken_kind) == (30114.0, ms("10-27 18:00"), None, "UNKNOWN")
     elif cid == "TU-G9":
-        touched = [(seg, x) for seg, (_, tu, _) in zip(segs, full) for x in tu.targets.values() if x.touch_at is not None]
-        assert touched and all(x.taken_at is None or x.taken_at > x.touch_at for _, x in touched)
+        touched = [(seg, x) for seg, (_, tu, _) in zip(segs, full) for x in tu.targets.values() if x.exact_touch_at is not None]
+        assert touched and all(x.taken_at is None or x.taken_at > x.exact_touch_at for _, x in touched)
         for seg, x in touched:                                   # the touching bar is exactly at the price, never beyond
-            c = next(c for c in seg.cs if c.time == x.touch_at)
+            c = next(c for c in seg.cs if c.time == x.exact_touch_at)
             assert (c.high if x.side > 0 else c.low) == x.price
     stats.RESULTS.setdefault("targets", {}).setdefault("golden", {})[cid] = case[1:]
 
@@ -259,8 +267,8 @@ def test_report_diagnostics(segs, full):
         kinds = Counter(x.taken_kind for x in tu.targets.values() if x.consumed)
         pools = {p["id"] for p in tu.pools()}
         rows.append({"segment": seg.name, "targets": len(tu.targets), "by": dict(sorted(by.items())),
-                     "touch": ev["TARGET_TOUCH"], "sweep": kinds["SWEEP"], "break": kinds["BREAK"], "unknown": kinds["UNKNOWN"],
-                     "pools_end": len(pools), "pending": sum("SOURCE_PENDING_GV" in x.verification for x in tu.targets.values()),
+                     "touch": ev["TARGET_EXACT_TOUCH"], "sweep": kinds["SWEEP"], "break": kinds["BREAK"], "unknown": kinds["UNKNOWN"],
+                     "pools_end": len(pools), "pending": sum(any(v.startswith("SOURCE_PENDING") for v in x.verification) for x in tu.targets.values()),
                      "incomplete": sum(x.history == "INCOMPLETE" for x in tu.targets.values())})
     assert sum(r["targets"] for r in rows) > 0
     stats.RESULTS.setdefault("targets", {})["segments"] = rows

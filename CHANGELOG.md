@@ -1,5 +1,57 @@
 # Changelog
 
+## CONTEXT-03 — DOL evaluation harness + dataset contract · IST v0.9.1-dev unchanged · validation 1.26.0 (2026-11-04, branch `context/research`) — no indicator change
+
+**User (2026-11-03):** CONTEXT-02 approved as the deterministic TARGET UNIVERSE milestone, not a policy, hierarchy, context or edge.
+* Commit it first: done, `e1ee951`, no tag.
+* Correct the semantics: EXACT_TOUCH ≠ TARGET_REACHED ≠ TARGET_TAKEN.
+* Record D-TU1…D-TU9.
+* Then CONTEXT-03: the evaluation machinery only (data contract, outcome oracle, baseline adapters, metrics, DEV / OOS split, G-V manual protocol); no DOL policy, no directional context.
+
+**CHANGES**
+* D-TU decisions in `validation/models/targets.py`:
+  * the identity of PDH / PDL / PWH / PWL = the **source** period (`PDL:D2026-10-30:…`); the publication period is metadata; an unnamed source → BLOCKED; a republished source = the same target;
+  * SESSION no longer validated (`SOURCE_PENDING_T19_T22`);
+  * `known_at` OPEN / CLOSE (temporal availability);
+  * EQ exact touches not counted (Phase 2 counts none);
+  * evidence bars must be closed when known;
+  * EXACT_TOUCH naming.
+* `validation/models/outcomes.py` (new): the outcome oracle.
+  * REACHED / EXACT_TOUCH / TAKEN.
+  * PRIMARY_REACHED · OPPOSITE_REACHED_FIRST · BOTH_SAME_BAR_UNRESOLVED · UNRESOLVED · CENSORED · DATA_INVALID · NO_HYPOTHESIS; CONTEXT_INVALIDATED reserved, never emitted.
+  * TOUCHED_NOT_TAKEN diagnostic; REF-A distance reference.
+* `validation/models/dol_policy.py` (new): `DOLPolicy.evaluate(Snapshot) → DOLHypothesis | NoHypothesis`.
+  * Frozen snapshot and hypothesis.
+  * Baselines B0…B4 with pre-registered comparators; STRICT / PROVISIONAL eligibility.
+* `validation/studies/context_dataset.py` (new): the dataset contract.
+  * Metadata, provenance, contract spans and rolls.
+  * Integrity checks; the CME schedule with DST.
+  * Complete / truncated trading days.
+  * Time-ordered DEV / OOS split, `PolicyLock`.
+* `validation/studies/context_eval.py` (new): the harness. Hypotheses are issued during the universe pass; outcomes come after, from the future bars only. Metrics per underlying.
+* Tests: `test_outcomes.py`, `test_dol_baselines.py`, `test_context_dataset.py` (22, section `evaluation`); the target tests are amended (35).
+* Validation agent: the section and report block DOL EVALUATION, `--phase evaluation`; conftest marker; validation 1.26.0.
+* Docs:
+  * `docs/context/EVALUATION.md` (pre-registration, DEF-EV1…EV10), `DATASET_CONTRACT.md`, `MANUAL_GATES.md` (G-V1…G-V5 and T19–T22, with expected values);
+  * `TARGET_UNIVERSE_ORACLE.md` (decisions), `CONTEXT_ROADMAP.md` (CONTEXT-04 proposal), `DOL_RESEARCH.md` (correction note).
+
+**RESULT (descriptive only)**
+* The repository has 4 datasets, NQ family, with **no complete trading day** and no integrity issue.
+* 13 decision points, all DEVELOPMENT.
+* B0 / B2 / B4 STRICT emit nothing: no external target is AVAILABLE while the gates are pending.
+* B1@PROVISIONAL: PRIMARY 8 / 12 against REF-A 8.7.
+* No primary was reached by an exact touch on 1m.
+* No policy, hierarchy or edge is supported.
+
+**RISKS:** none for the indicator. Every period and session target stays UNVERIFIED until the user records G-V1…G-V5 and T19–T22.
+
+**TEST:**
+* FULL (mode full, before the README / CHANGELOG entries): **PASS**, exit 0, 1107.9 s, **1518 passed, 1 skipped** (the absent manual `pine_observed.json`, not a functional failure): EVAL **22/22 (new)**, TARGETS 35/35 (amended); static 23/23; Phase 1 17/16/19/4 and Phase 2 52/13/18 unchanged; golden 290/290; parity 167/168; invariant detectors 85/85; property 44/44; IFVG 172, CISD 167, displacement 106, LRL 85, HTF 46; research studies LRL 34, CISD 29, displacement 24, IFVG 8, context 4.
+* `src/IST.pine` SHA-256 `553248e7…9b91` (= `IFVG_BASELINE_v0.9.1-dev`).
+* The release SHA256SUMS: 5/5, 9/9, 10/10, 30/30, 36/36.
+* The v0.9.1-dev MANIFEST: 51/51.
+* No frozen model, parity or golden file changed.
+
 ## CONTEXT-02 — Target universe oracle · IST v0.9.1-dev unchanged · validation 1.25.0 (2026-11-03, branch `context/research`) — no indicator change
 
 **User (2026-11-03):**

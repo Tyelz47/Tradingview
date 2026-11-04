@@ -55,6 +55,7 @@ SECTIONS = [  # key, report title, group
     ("disp", "Displacement (oracle + Pine v0.8.0-dev)", "DISP"),
     ("ifvg", "IFVG (oracle + Pine v0.9.1-dev)", "IFVG"),
     ("targets", "Target universe (oracle only, CONTEXT-02)", "TARGETS"),
+    ("evaluation", "DOL evaluation harness + dataset contract (CONTEXT-03)", "EVAL"),
     ("research.lrl", "LRL research study (no indicator change)", "RESEARCH"),
     ("research.cisd", "CISD research study (no indicator change)", "RESEARCH"),
     ("research.disp", "Displacement study (no indicator change)", "RESEARCH"),
@@ -137,7 +138,7 @@ def parse_args(argv):
     ap = argparse.ArgumentParser(prog="validation_agent", description=__doc__.split("\n\n")[0])
     ap.add_argument("--mode", choices=("quick", "full", "deep"), default="full",
                     help="quick: every change · full (default): before TradingView · deep: before a version freeze")
-    ap.add_argument("--phase", choices=("1", "2", "lrl", "htf", "cisd", "disp", "ifvg", "targets", "all"), default="all")
+    ap.add_argument("--phase", choices=("1", "2", "lrl", "htf", "cisd", "disp", "ifvg", "targets", "evaluation", "all"), default="all")
     ap.add_argument("--all", action="store_const", const="all", dest="phase", help="same as --phase all")
     ap.add_argument("--seed", type=int, default=20261027, help="Hypothesis seed (walks and corpus are fixed)")
     ap.add_argument("--report", type=Path, default=REPORT)
@@ -170,7 +171,7 @@ def main(argv=None) -> int:
     shutil.rmtree(artifacts.FAIL_DIR, ignore_errors=True)
     marker = {"1": "phase1 or common", "2": "phase2 or common", "lrl": "lrl or common", "htf": "htf or common",
               "cisd": "cisd or common", "disp": "disp or common", "ifvg": "ifvg or common",
-              "targets": "targets or common"}.get(args.phase)
+              "targets": "targets or common", "evaluation": "evaluation or common"}.get(args.phase)
     pargs = [str(VALIDATION_DIR / "tests"), str(VALIDATION_DIR / "fuzz"), "-p", "no:cacheprovider",
              "--rootdir", str(ROOT), "-o", "addopts=", f"--hypothesis-seed={args.seed}",
              "-v" if args.verbose else "-q", "--tb=short" if args.verbose else "--tb=line", "-W", "ignore::DeprecationWarning"]
@@ -338,8 +339,8 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
     tg = stats.RESULTS.get("targets")
     w("## Target universe (CONTEXT-02, oracle only: diagnostics, no accuracy)\n")
     if tg and tg.get("segments"):
-        w("| Real segment | Targets | By source · state | TOUCH | SWEEP | BREAK | taken, class unknown | pools now | "
-          "SOURCE_PENDING_GV | history incomplete |\n|---|---|---|---|---|---|---|---|---|---|")
+        w("| Real segment | Targets | By source · state | EXACT_TOUCH | SWEEP | BREAK | taken, class unknown | pools now | "
+          "source pending (G-V / T19–T22) | history incomplete |\n|---|---|---|---|---|---|---|---|---|---|")
         for r in tg["segments"]:
             by = ", ".join(f"{c} {s} {n}" for (c, s), n in r["by"].items())
             w(f"| {r['segment']} | {r['targets']} | {by} | {r['touch']} | {r['sweep']} | {r['break']} | {r['unknown']} | "
@@ -353,6 +354,17 @@ def build_report(args, col, elapsed, pytest_v, hyp_v):
         w("* Real goldens: " + "; ".join(f"{k} {v[0]}" for k, v in sorted(tg.get("golden", {}).items())) + "\n")
     else:
         w("* Not run in this mode (section `targets`).\n")
+
+    ev = stats.RESULTS.get("evaluation")
+    w("## DOL evaluation harness (CONTEXT-03: baselines, descriptive only; no policy, no edge claimed)\n")
+    if ev:
+        w("Datasets under the contract:\n")
+        w("\n".join(ev["datasets"]) + "\n")
+        w("Baselines B0…B4 (STRICT = AVAILABLE only; PROVISIONAL = also the targets whose source gate is pending):\n")
+        w("\n".join(ev["rows"]) + "\n")
+        w("\n".join(ev["reasons"]) + "\n")
+    else:
+        w("* Not run in this mode (section `evaluation`).\n")
 
     from validation.parity import SERIES, capture as cap_parity, manual as man_parity
     par = stats.RESULTS.get("parity", {"status": "NOT RUN"})

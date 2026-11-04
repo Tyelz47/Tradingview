@@ -15,6 +15,7 @@ from validation.models.types import Candle, Settings
 pytestmark = [pytest.mark.targets, pytest.mark.section("targets")]
 NY = ZoneInfo("America/New_York")
 ALL = T.TargetSettings(validated=frozenset({"DAILY", "WEEKLY", "SESSION", "STRUCTURAL"}))
+SES = T.TargetSettings(validated=frozenset({"SESSION", "STRUCTURAL"}))
 TU_MODULES = Settings(modules=("levels", "sessions", "liq"))
 
 
@@ -50,26 +51,27 @@ def walks():
 
 def test_touch_is_not_a_take_and_the_class_is_by_the_taking_close():
     cs = london()
-    m, tu, snaps = T.run(cs, TU_MODULES, snapshots={184, 185, 194, 195})
+    m, tu, snaps = T.run(cs, TU_MODULES, targets=SES, snapshots={184, 185, 194, 195})
     hi, lo = by_type(tu, "SESSION_HIGH")[0], by_type(tu, "SESSION_LOW")[0]
     t = lambda i: cs[i].time
     assert (hi.price, hi.confirmed_at, hi.first_observable_at) == (105, t(185), t(185))
-    assert (hi.touch_at, hi.touches, hi.taken_at, hi.taken_kind, hi.state) == (t(190), 1, t(195), "SWEEP", "TAKEN")
-    assert (lo.touch_at, lo.touches, lo.taken_at, lo.taken_kind, lo.state) == (t(200), 1, t(205), "BREAK", "TAKEN")
+    assert (hi.exact_touch_at, hi.exact_touches, hi.taken_at, hi.taken_kind, hi.state) == (t(190), 1, t(195), "SWEEP", "TAKEN")
+    assert (lo.exact_touch_at, lo.exact_touches, lo.taken_at, lo.taken_kind, lo.state) == (t(200), 1, t(205), "BREAK", "TAKEN")
+    assert hi.known_at == "OPEN"
     assert hi.id == f"SESSION_HIGH:London@0200-0500:{t(5)}:420" and hi.source_id == f"F:London@0200-0500:{t(5)}"
     assert not any(x["source_class"] == "SESSION" for x in snaps[184]["targets"])        # absent before the session ends
     state = lambda i: next(x["state"] for x in snaps[i]["targets"] if x["id"] == hi.id)
     assert (state(185), state(194), state(195)) == ("AVAILABLE", "AVAILABLE", "TAKEN")  # the touch leaves it AVAILABLE
     kinds = [(e[1], e[3]) for e in tu.events if e[2] == hi.id]
-    assert kinds == [("TARGET_CREATED", f"F:London@0200-0500:{t(5)} · AVAILABLE"), ("TARGET_TOUCH", ""),
+    assert kinds == [("TARGET_CREATED", f"F:London@0200-0500:{t(5)} · AVAILABLE"), ("TARGET_EXACT_TOUCH", ""),
                      ("TARGET_TAKEN", "SWEEP"), ("TARGET_STATE", "AVAILABLE → TAKEN")]
 
 
 def test_mirror_swaps_high_and_low_and_keeps_every_fact():
     cs = london()
-    _, a, _ = T.run(cs, TU_MODULES)
-    _, b, _ = T.run(mirror(cs, 100.0), TU_MODULES)
-    fact = lambda x: (x.source_id.split(":")[0], x.confirmed_at, x.touch_at, x.taken_at, x.taken_kind, x.state, x.touches)
+    _, a, _ = T.run(cs, TU_MODULES, targets=SES)
+    _, b, _ = T.run(mirror(cs, 100.0), TU_MODULES, targets=SES)
+    fact = lambda x: (x.source_id.split(":")[0], x.confirmed_at, x.exact_touch_at, x.taken_at, x.taken_kind, x.state, x.exact_touches)
     for x in a.targets.values():
         twin = [y for y in b.targets.values() if y.type == T.MIRROR[x.type] and y.price == 200 - x.price
                 and y.confirmed_at == x.confirmed_at]
@@ -78,7 +80,7 @@ def test_mirror_swaps_high_and_low_and_keeps_every_fact():
 
 def test_a_target_is_taken_once_and_taken_is_terminal():
     cs = london({215: (100, 106, 99, 100)})                     # trades through 105 again after the take
-    _, tu, _ = T.run(cs, TU_MODULES)
+    _, tu, _ = T.run(cs, TU_MODULES, targets=SES)
     hi = by_type(tu, "SESSION_HIGH")[0]
     assert hi.taken_at == cs[195].time and hi.state == "TAKEN"
     assert sum(e[1] == "TARGET_TAKEN" and e[2] == hi.id for e in tu.events) == 1
@@ -86,17 +88,48 @@ def test_a_target_is_taken_once_and_taken_is_terminal():
 
 # ── period levels: the source gate and the loaded-history boundary ──
 
+class Provider:
+    """A Module G provider (IstModel(htf=…)) that also names the source bar it hands over (D-TU2).
+    value(kind, now) → (high, low); source(kind, now) → the source bar's open ms, or None."""
+
+    def __init__(self, engine, value, source):
+        self.engine, self.value, self.src = engine, value, source
+
+    def __call__(self, kind, key, old):
+        return self.value(kind, self.engine.prev.time)
+
+    def source(self, kind):
+        return self.src(kind, self.engine.prev.time)
+
+
 def fixed(pdh, pdl, pwh=130.0, pwl=70.0):
-    return lambda engine: (lambda kind, key, old: (pdh, pdl) if kind == "D" else (pwh, pwl))
+    """D source: the bar opened Sun 10-25 18:00 (trading day 10-26); W source: Sun 10-18 18:00 (ISO week 43)."""
+    return lambda e: Provider(e, lambda k, now: (pdh, pdl) if k == "D" else (pwh, pwl),
+                              lambda k, now: ms(2026, 10, 25, 18, 0) if k == "D" else ms(2026, 10, 18, 18, 0))
 
 
 def test_period_level_is_unverified_while_its_source_waits_for_g_v():
     cs = bars(ms(2026, 10, 27, 8, 0), {}, 40)
     _, tu, _ = T.run(cs, TU_MODULES, provider=fixed(110.0, 90.0))
     pdh = by_type(tu, "PDH")[0]
-    assert pdh.id == "PDH:D2026-10-27:440" and pdh.source_id == "G:PDH:D2026-10-27"
-    assert pdh.since == ms(2026, 10, 26, 18, 0) and pdh.period_role == "CURRENT"
+    assert pdh.id == "PDH:D2026-10-26:440" and pdh.source_id == "G:PDH:D2026-10-26"   # identity = the source period
+    assert pdh.meta == {"source_period": "D2026-10-26", "published_in": "D2026-10-27"}
+    assert by_type(tu, "PWH")[0].id == "PWH:W2026-43:520"
+    assert pdh.since == ms(2026, 10, 26, 18, 0) and pdh.period_role == "CURRENT" and pdh.known_at == "OPEN"
     assert pdh.state == "UNVERIFIED" and pdh.verification == ("SOURCE_PENDING_GV", "HISTORY_INCOMPLETE")
+
+
+def test_a_value_whose_source_period_cannot_be_named_gets_no_identity():
+    cs = bars(ms(2026, 10, 27, 8, 0), {}, 20)
+    _, tu, _ = T.run(cs, TU_MODULES, provider=lambda e: (lambda kind, key, old: (110.0, 90.0)))   # seeded, no source
+    assert not [x for x in tu.targets.values() if x.source_class in ("DAILY", "WEEKLY")]
+    assert [b[1:] for b in tu.blocked] == [(t, "SOURCE_PERIOD_UNKNOWN") for t in ("PDH", "PDL", "PWH", "PWL")]
+
+
+def test_sessions_wait_for_t19_t22_and_keep_their_facts():
+    _, tu, _ = T.run(london(), TU_MODULES)
+    hi = by_type(tu, "SESSION_HIGH")[0]
+    assert (hi.state, hi.verification, hi.taken_kind, hi.exact_touches) == ("UNVERIFIED", ("SOURCE_PENDING_T19_T22",), "SWEEP", 1)
 
 
 def test_a_level_born_before_the_loaded_history_is_never_available_by_assumption():
@@ -122,20 +155,42 @@ def test_completed_evidence_bars_restore_the_unseen_history_from_the_bar_they_ar
     assert (pdh.state, pdh.taken_kind, pdh.taken_before, pdh.taken_at) == ("TAKEN", "UNKNOWN", ms(2026, 10, 26, 22, 0), None)
 
 
+def rolling(same=False):
+    """Before the 18:00 roll the source is the 10-26 session (opened Sun 10-25 18:00), after it the 10-27 session
+    (opened Mon 10-26 18:00); with `same` the feed republishes the 10-26 bar after the roll."""
+    new = lambda now: not same and now >= ms(2026, 10, 27, 18, 0)
+    return lambda e: Provider(e, lambda k, now: ((109.0, 91.0) if new(now) else (108.0, 92.0)) if k == "D" else (130.0, 70.0),
+                              lambda k, now: (ms(2026, 10, 26, 18, 0) if new(now) else ms(2026, 10, 25, 18, 0)) if k == "D"
+                              else ms(2026, 10, 18, 18, 0))
+
+
 def test_an_observed_roll_is_fully_observed_and_the_old_value_becomes_historical():
     cs = bars(ms(2026, 10, 27, 17, 30), {45: (100, 110, 99.5, 109.5)}, 60)   # 18:15: through 108 and 109, close above 109
-    vals = iter([(108.0, 92.0), (109.0, 91.0)])
-    seq = {}
-    prov = lambda engine: (lambda kind, key, old: seq.setdefault((kind, key), next(vals)) if kind == "D" else (130.0, 70.0))
-    _, tu, _ = T.run(cs, TU_MODULES, targets=ALL, provider=prov)
+    _, tu, _ = T.run(cs, TU_MODULES, targets=ALL, provider=rolling())
     old, new = sorted(by_type(tu, "PDH"), key=lambda x: x.confirmed_at)
     assert (old.period_role, old.age_periods, new.period_role, new.age_periods) == ("HISTORICAL_PERIOD_LEVEL", 1, "CURRENT", 0)
-    assert new.id == "PDH:D2026-10-28:436" and new.since == new.confirmed_at == ms(2026, 10, 27, 18, 0)
-    assert (new.history, new.touch_at, new.taken_at, new.taken_kind) == ("OBSERVED", None, cs[45].time, "BREAK")
+    assert (old.id, new.id) == ("PDH:D2026-10-26:432", "PDH:D2026-10-27:436")
+    assert new.since == new.confirmed_at == ms(2026, 10, 27, 18, 0) and new.meta["published_in"] == "D2026-10-28"
+    assert (new.history, new.exact_touch_at, new.taken_at, new.taken_kind) == ("OBSERVED", None, cs[45].time, "BREAK")
     assert old.taken_at == cs[45].time and old.taken_kind == "UNKNOWN"   # born before the history: first take unseen
-    _, gated, _ = T.run(cs, TU_MODULES, provider=lambda e: (lambda kind, key, old: (109.0, 91.0) if kind == "D" else (130.0, 70.0)))
+    _, gated, _ = T.run(cs, TU_MODULES, provider=rolling())
     g = [x for x in by_type(gated, "PDH") if x.period_role == "CURRENT"][0]
     assert (g.state, g.taken_kind) == ("UNVERIFIED", "BREAK")          # facts kept; never TAKEN / AVAILABLE before G-V
+
+
+def test_the_same_source_period_published_again_is_the_same_target():
+    cs = bars(ms(2026, 10, 27, 17, 30), {}, 60)
+    _, tu, _ = T.run(cs, TU_MODULES, targets=ALL, provider=rolling(same=True))
+    pdh = by_type(tu, "PDH")
+    assert [x.id for x in pdh] == ["PDH:D2026-10-26:432"] and pdh[0].period_role == "CURRENT"
+    assert pdh[0].meta["published_in"] == "D2026-10-27" and pdh[0].meta["republished_in"] == ["D2026-10-28"]
+
+
+def test_an_observed_roll_names_the_source_when_the_provider_cannot():
+    cs = bars(ms(2026, 10, 27, 17, 30), {}, 60)
+    _, tu, _ = T.run(cs, TU_MODULES, targets=ALL, provider=lambda e: (lambda kind, key, old: (109.0, 91.0)))
+    assert [x.id for x in by_type(tu, "PDH")] == ["PDH:D2026-10-27:436"]   # the period observed before the 18:00 roll
+    assert ("PDH", "SOURCE_PERIOD_UNKNOWN") in [b[1:] for b in tu.blocked]  # the 17:30 seed: no observed roll
 
 
 # ── exact-tick composite pools: no tolerance ──
@@ -146,10 +201,10 @@ def test_exact_tick_pool_keeps_its_members_and_one_tick_apart_is_no_pool():
     pool = [p for p in same.pools() if p["price_ticks"] == 380][0]
     ssl = [x.id for x in by_type(same, "SSL") if x.price_ticks == 380]       # the 04:00 low is also a Phase 2 swing
     assert pool["side"] == -1 and len(ssl) == 1
-    assert pool["members"] == sorted(["PDL:D2026-10-27:380", by_type(same, "SESSION_LOW")[0].id, *ssl])
+    assert pool["members"] == sorted(["PDL:D2026-10-26:380", by_type(same, "SESSION_LOW")[0].id, *ssl])
     _, apart, _ = T.run(cs, TU_MODULES, provider=fixed(105.0, 95.25))
     assert [p["members"] for p in apart.pools() if p["price_ticks"] == 380] == [sorted([by_type(apart, "SESSION_LOW")[0].id, *ssl])]
-    assert not any("PDL:D2026-10-27:381" in p["members"] for p in apart.pools())   # one tick apart: no pool, no radius
+    assert not any("PDL:D2026-10-26:381" in p["members"] for p in apart.pools())   # one tick apart: no pool, no radius
 
 
 # ── the Phase 2 adapter: zero semantic conflict ──
@@ -161,8 +216,8 @@ def p2_conflicts(m, tu) -> list[str]:
             t = tu.targets.get(f"{side.name}:{x.id}:{round(x.price / 0.25)}")
             ids.add(t and t.id)
             want = ("AVAILABLE" if x.taken_bar is None else "TAKEN", x.taken_time, CLS_NAME[x.cls], x.touches)
-            if t is None or (t.state, t.taken_at, t.taken_kind, t.touches) != want:
-                bad.append(f"{side.name} {x.id}: {t and (t.state, t.taken_at, t.taken_kind, t.touches)} vs {want}")
+            if t is None or (t.state, t.taken_at, t.taken_kind, t.exact_touches) != want:
+                bad.append(f"{side.name} {x.id}: {t and (t.state, t.taken_at, t.taken_kind, t.exact_touches)} vs {want}")
         for cl in side.eqs:
             if cl.qual_bar is None:
                 continue

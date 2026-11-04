@@ -1,6 +1,10 @@
 # IST · CONTEXT-01 · Draw on liquidity (DOL): research and specification proposal
 
-**Status: RESEARCH + SPECIFICATION PROPOSAL (CONTEXT-01, 2026-11-03), awaiting the user's review. Nothing here is approved, implemented in Pine or frozen.**
+**Status: RESEARCH + SPECIFICATION PROPOSAL (CONTEXT-01, 2026-11-03). Approved as a research milestone only (`6576bae`). Nothing here is a policy, implemented in Pine or frozen.**
+* **Corrected by the user (2026-11-03), and applied in CONTEXT-02 / 03:**
+  * DEF-DOL2's single "reached = DEF-L4 taken" is replaced by three facts: EXACT_TOUCH (`high == price`) ≠ TARGET_REACHED (`high ≥ price`, the DOL question) ≠ TARGET_TAKEN (`high > price`, DEF-L4, SWEEP / BREAK). See `EVALUATION.md` §1.
+  * §10's `CONTEXT_INVALIDATED` is reserved and never emitted until CONTEXT-04 defines a directional context.
+  * W > D > S, "Daily governs" and Model B remain hypotheses.
 * No indicator change: `src/IST.pine` is byte-identical to `IFVG_BASELINE_v0.9.1-dev` (SHA-256 `553248e7…9b91`).
 * No frozen module changes: `PHASE1_BASELINE_v0.3.2`, `PHASE2_BASELINE_v0.4.4-dev`, `CISD_BASELINE_v0.7.1-dev`, `DISPLACEMENT_BASELINE_v0.8.0-dev` and `IFVG_BASELINE_v0.9.1-dev`, with their release folders, are untouched. LRL and HTF FVG (experimental) are untouched too.
 * Harness: `validation/studies/context.py`. `python -m validation.studies.context` prints every measured table quoted in `docs/context/`.

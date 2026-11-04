@@ -1,9 +1,11 @@
 # IST · Context roadmap (CONTEXT-01 → …)
 
-**Status (2026-11-03).**
-* CONTEXT-01 is approved as a research milestone (commit `6576bae`). It freezes no policy, hierarchy, model or claim.
-* CONTEXT-02 is done as research, oracle only: `TARGET_UNIVERSE_ORACLE.md`, awaiting review.
-* CONTEXT-03 is proposed in §4, not started.
+**Status (2026-11-04).**
+* CONTEXT-01 is approved as a research milestone (`6576bae`).
+* CONTEXT-02 is approved as the deterministic TARGET UNIVERSE milestone (`e1ee951`); D-TU1…D-TU9 are applied.
+* CONTEXT-03 is done as research: `EVALUATION.md`, `DATASET_CONTRACT.md`, `MANUAL_GATES.md`; awaiting review.
+* CONTEXT-04 is proposed in §6, not started.
+* Nothing here freezes a policy, hierarchy, model or claim.
 
 ## 1 · Layers and where each one stands
 
@@ -11,8 +13,8 @@
 |---|---|---|
 | detection facts | Phase 1, Phase 2, CISD, displacement and IFVG **frozen**; LRL and HTF FVG **experimental** | — |
 | liquidity / target universe | **oracle implemented** (TARGET_UNIVERSE_ORACLE.md, DEF-TU1…TU10); research, not frozen | CONTEXT-02 ✓ |
-| evaluation harness and dataset | outcome labels, baselines on the universe, NQ / ES data | **CONTEXT-03** (proposed, §4) |
-| directional context | candidate models A / B / C (DIRECTIONAL_CONTEXT_RESEARCH.md); no HTF data | CONTEXT-04 (research + oracle) |
+| evaluation harness and dataset | **implemented**: outcome oracle (EXACT_TOUCH ≠ REACHED ≠ TAKEN), policy interface, baselines B0…B4, metrics, REF-A, dataset contract, DEV / OOS locks (EVALUATION.md) | CONTEXT-03 ✓ |
+| directional context | candidate models A / B / C (DIRECTIONAL_CONTEXT_RESEARCH.md); no HTF data | **CONTEXT-04** (proposed, §6) |
 | PRIMARY DOL | the DOL-P1 candidate (DOL_RESEARCH §7), a hypothesis only | CONTEXT-05 (evaluation + oracle) |
 | Pine for the approved layers | — | after the oracle layers (Pine + parity + freeze) |
 | narrative, quality / confluence, renderer, alerts | not started (by instruction) | later |
@@ -151,3 +153,40 @@ Today there are 83 h, 13 decision points and ≤ 12 distinct outcomes per fact. 
   * Report the results against the driftless reference, with distinct-outcome counts.
 * **CONTEXT-05 · Pine.** Implement only the approved, oracle-validated layers, with the capture fields needed for real parity (0 DIFFERENCE), human goldens and a reload check, then freeze.
 * **Later:** narrative (DIRECTIONAL_CONTEXT_RESEARCH §11), quality (§12), renderer priorities.
+
+## 6 · CONTEXT-04, the exact proposal (not started)
+
+**Title.** CONTEXT-04 · HTF delivery state and directional-context research (oracle only).
+* There is **no Primary-DOL policy, no Pine and no renderer**.
+* Models A / B / C stay research candidates. None is approved by this phase.
+
+**Prerequisites (the user):**
+* G-V1…G-V5 and T19–T22 recorded (MANUAL_GATES.md), or knowingly run PROVISIONAL;
+* D-DS1…D-DS4: the dataset source, NQ / MNQ pooling, `dev_until`, holidays;
+* D-CX11: the regime and leg timeframes, fixed before any run.
+
+**Data.**
+* HTF bars captured on their own TradingView charts (15m, 1H, 4H, 1D) for the chosen period, with the existing CAPTURE mechanism. HTF data is cheap: 1,000 4H bars ≈ 33 weeks.
+* 1m days under DATASET_CONTRACT.md.
+
+**Deliverables:**
+
+| file | content |
+|---|---|
+| `validation/models/htf_state.py` | per timeframe, the delivery state from **the frozen CISD-R definition run on completed HTF candles**: UNKNOWN / UP / DOWN, the last CISD (side + origin time), the protected extreme (`leg_ext`). A read-only oracle with no new CISD semantics; each HTF candle is used only once closed and known (the D-TU9 conditions) |
+| `docs/context/DIRECTIONAL_CONTEXT.md` | DEF-DC: the state vector, Models A / B / C written as deterministic rules, and **the invalidation semantics** that make `CONTEXT_INVALIDATED` (DEF-EV2) operational for a hypothesis carrying a context |
+| `validation/studies/context_eval.py` | hypotheses may carry `invalidation` (a level + a close rule, fixed at t); the evaluator gains `CONTEXT_INVALIDATED` (a close beyond the invalidation before the primary is reached; a same-bar wick reach beats a close-based invalidation) |
+| tests | HTF state = CISD-R on the HTF candles (the frozen oracle as reference); no lookahead (an HTF candle is used only after its close is known); mirror; Models A / B / C deterministic; CONTEXT_INVALIDATED semantics; DEV / OOS lock enforced |
+
+**Evaluation (pre-registered, DEVELOPMENT only).**
+* Models A / B / C each give a side (or MIXED / UNKNOWN = abstain) per decision point.
+* They are paired with the B0 target rule on the context side, and compared with B0…B4 and REF-A by the CONTEXT-03 metrics, NQ and ES apart.
+* No OOS run happens before the user locks a candidate.
+
+**Gates:**
+* the user approves DEF-DC and the pre-registration;
+* FULL PASS;
+* frozen hashes intact;
+* `src/IST.pine` byte-identical.
+
+**Out of scope:** a Primary-DOL policy, a narrative engine, scores, renderer, alerts, Pine, any frozen-module change.
